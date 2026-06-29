@@ -1,0 +1,149 @@
+# graft config
+#
+# Empty means no-op. This template intentionally does not define containers,
+# presets, mounts, runtimes, or security policy.
+
+version = 1
+name = "example"
+
+[parents]
+add = []
+remove = []
+set = []
+
+[children]
+add = []
+remove = []
+set = []
+
+[deploy]
+# enable = true
+# target = "system" # system | user | transient, only system is used by the NixOS module for now.
+
+[config]
+# Empty means no-op.
+
+# [config.service]
+# type = "notify"   # "oneshot" (default; task runs once) or "notify" (long-running service). Quadlet rejects other values.
+# restart = "on-failure"
+# restartSec = "10s"
+# timeoutStartSec = "2m"
+# timeoutStopSec = "30s"
+# remainAfterExit = false
+
+# Rootfs/Podman/Quadlet option inventory for later schema design.
+# These are intentionally comments only. They do not activate anything.
+#
+# [Container] options that are relevant for rootfs containers:
+#
+# Identity / metadata:
+#   ContainerName=
+#   HostName=
+#   Label=
+#   Annotation=
+#
+# Runtime / command:
+#   Rootfs=
+#   Exec=
+#   Entrypoint=
+#   WorkingDir=
+#   User=
+#   Group=
+#   Environment=
+#   EnvironmentFile=
+#   EnvironmentHost=
+#   HttpProxy=
+#   Timezone=
+#
+# Filesystems / mounts:
+#   Volume=
+#   Mount=
+#   Tmpfs=
+#   ReadOnly=
+#   ReadOnlyTmpfs=
+#   Mask=
+#   Unmask=
+#   ShmSize=
+#
+# Network:
+#   Network=
+#   NetworkAlias=
+#   IP=
+#   IP6=
+#   DNS=
+#   DNSOption=
+#   DNSSearch=
+#   AddHost=
+#   PublishPort=
+#   ExposeHostPort=
+#
+# Security / isolation:
+#   AddCapability=
+#   DropCapability=
+#   NoNewPrivileges=
+#   SecurityLabelDisable=
+#   SecurityLabelFileType=
+#   SecurityLabelLevel=
+#   SecurityLabelNested=
+#   SecurityLabelType=
+#   SeccompProfile=
+#   AppArmor=
+#   UserNS=
+#   UIDMap=
+#   GIDMap=
+#   SubUIDMap=
+#   SubGIDMap=
+#   RunInit=
+#   CgroupsMode=
+#   ContainersConfModule=
+#
+# Resources:
+#   Memory=
+#   PidsLimit=
+#   Ulimit=
+#   Sysctl=
+#
+# Devices / secrets:
+#   AddDevice=
+#   Secret=
+#
+# Health checks:
+#   HealthCmd=
+#   HealthInterval=
+#   HealthLogDestination=
+#   HealthMaxLogCount=
+#   HealthMaxLogSize=
+#   HealthOnFailure=
+#   HealthRetries=
+#   HealthStartPeriod=
+#   HealthStartupCmd=
+#   HealthStartupInterval=
+#   HealthStartupRetries=
+#   HealthStartupSuccess=
+#   HealthStartupTimeout=
+#   HealthTimeout=
+#
+# Lifecycle / systemd integration:
+#   AutoUpdate=
+#   Notify=
+#   ReloadCmd=
+#   ReloadSignal=
+#   StopSignal=
+#   StopTimeout=
+#   StartWithPod=
+#   Pod=
+#
+# Logging:
+#   LogDriver=
+#   LogOpt=
+#
+# Pull/image-related options, mostly not useful for Rootfs= but relevant for
+# future Image= mode:
+#   Image=
+#   Pull=
+#   Retry=
+#   RetryDelay=
+#
+# Escape hatches:
+#   GlobalArgs=
+#   PodmanArgs=

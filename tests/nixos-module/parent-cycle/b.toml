@@ -1,0 +1,8 @@
+version = 1
+name = "graft-test-cycle-b"
+
+[parents]
+add = ["a"]
+
+[config.runtime]
+packages = ["coreutils"]

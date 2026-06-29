@@ -1,0 +1,9 @@
+version = 1
+name = "addon"
+
+[config.runtime]
+packages = ["coreutils"]
+command = ["bash", "-lc", "echo from child addon"]
+
+[config.container.environment]
+FROM_CHILD_ADDON = "1"

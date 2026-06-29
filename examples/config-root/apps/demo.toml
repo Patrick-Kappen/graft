@@ -1,0 +1,23 @@
+version = 1
+name = "graft-demo"
+
+[parents]
+add = [
+  "base/runtime",
+  "base/locked",
+]
+
+[children]
+add = ["addons/hostname"]
+
+[deploy]
+enable = true
+target = "system"
+
+[config.container.environment]
+GRAFT_DEMO = "1"
+
+[config.service]
+type = "oneshot"
+timeoutStartSec = "2m"
+timeoutStopSec = "30s"

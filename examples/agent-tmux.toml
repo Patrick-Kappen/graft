@@ -1,0 +1,106 @@
+version = 1
+name    = "my-agent"
+
+# ──────────────────────────────────────────────────────────────────────────────
+# agent-tmux.toml — detached AI agent with persistent tmux session
+#
+# Usage:
+#   graft start examples/agent-tmux.toml   # start detached, returns immediately
+#   graft attach my-agent                  # jump into the running tmux session
+#   graft list                             # show all running graft containers
+#   graft stop my-agent                    # stop + remove the unit
+#
+# graft attach does:
+#   podman exec -it my-agent tmux attach-session -t main
+# If no session exists yet it opens a new one automatically.
+#
+# Sessions survive container restarts as long as [config.home] points to a
+# persistent path (e.g. a NAS mount or /persist on NixOS + impermanence).
+# ──────────────────────────────────────────────────────────────────────────────
+
+# ── runtime ───────────────────────────────────────────────────────────────────
+[config.runtime]
+mode    = "rootfs-store"
+
+# The entrypoint starts (or re-attaches to) a tmux session named "main" and
+# then launches the agent binary inside it.  -A means: attach if "main" already
+# exists, create it otherwise — so restarts are safe.
+command = ["tmux", "new-session", "-A", "-s", "main", "my-agent-cli"]
+
+# Packages that need to be in PATH inside the container.
+# "tmux" is required for graft attach to work.
+# Add your agent binary package and any tools it needs.
+packages = ["tmux"]  # add "ripgrep", "jq", "git", etc. as needed
+
+# ── service ───────────────────────────────────────────────────────────────────
+[config.service]
+# "notify" is required for Quadlet-managed (detached) containers.
+# Podman itself sends READY=1 to systemd once the container is running;
+# the agent process does not need to do anything special.
+type       = "notify"
+restart    = "on-failure"
+restartSec = "5s"
+
+# ── home (persistent agent state) ─────────────────────────────────────────────
+[config.home]
+# Agent credentials, chat history, tool caches and dotfiles all live here.
+# The directory is created automatically if it does not exist.
+#
+# NixOS + impermanence tip:
+#   Use a path under /persist so it survives reboots, e.g.:
+#     source = "/persist/graft/sessions/my-agent"
+mode   = "persistent"
+source = "~/.local/share/graft/sessions/my-agent"   # ~ is expanded at runtime
+target = "/home/agent"                               # mount point inside the container
+
+# ── workspace (project directory) ─────────────────────────────────────────────
+# For detached (tmux) agents, mount the project directly as a volume.
+# The agent reads and writes the real source tree immediately.
+#
+# For an isolated copy-and-review workflow, use `graft run` instead:
+#   [config.workspace]
+#   mode            = "copy"
+#   source          = "~/projects/my-project"
+#   promote         = "prompt"   # "auto" | "prompt" | "off"
+#   excludePatterns = [".git", "node_modules", ".direnv", "result"]
+
+# ── extra files & directories ─────────────────────────────────────────────────
+# Use [[config.filesystem.volumes]] to pass files and directories into the
+# container.  Each entry is a separate bind-mount.
+
+# /nix/store must be mounted so nix-store binaries in `command` are reachable.
+[[config.filesystem.volumes]]
+source = "/nix/store"
+target = "/nix/store"
+mode   = "ro"
+
+# Example: read-only system prompt / instructions file.
+# [[config.filesystem.volumes]]
+# source = "~/agent-configs/my-agent/system-prompt.md"
+# target = "/etc/agent/system-prompt.md"
+# mode   = "ro"
+
+# Example: shared read-only reference directory (docs, specs, …).
+# [[config.filesystem.volumes]]
+# source = "~/reference-docs"
+# target = "/docs"
+# mode   = "ro"
+
+# Example: writable scratch directory outside the workspace.
+# [[config.filesystem.volumes]]
+# source = "~/agent-scratch/my-agent"
+# target = "/scratch"
+# mode   = "rw"
+
+# Example: pass a single API-key file (prefer secrets for sensitive data).
+# [[config.filesystem.volumes]]
+# source = "~/.config/my-agent/api-key"
+# target = "/run/secrets/api-key"
+# mode   = "ro"
+
+# ── environment ───────────────────────────────────────────────────────────────
+[config.container.environment]
+# TERM is needed for tmux to render correctly.
+TERM        = "xterm-256color"
+# AGENT_MODEL = "claude-opus-4-5"
+# AGENT_LOG   = "debug"

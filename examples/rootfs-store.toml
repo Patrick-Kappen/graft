@@ -1,0 +1,38 @@
+version = 1
+name = "graft"
+
+[config.runtime]
+mode = "rootfs-store"
+packages = [
+  "bashInteractive",
+  "coreutils",
+]
+command = ["bash", "-lc", "echo hello from graft"]
+
+[config.container]
+workingDir = "/workspace"
+
+[config.container.environment]
+GRAFT_EXAMPLE = "1"
+
+[config.filesystem]
+readOnly = true
+readOnlyTmpfs = true
+tmpfs = ["/tmp", "/run", "/workspace"]
+
+[[config.filesystem.volumes]]
+source = "/nix/store"
+target = "/nix/store"
+mode = "ro"
+
+[config.network]
+mode = "none"
+
+[config.security]
+dropCapabilities = ["all"]
+noNewPrivileges = true
+userns = "keep-id"
+
+[config.resources]
+memory = "1g"
+pidsLimit = 512

@@ -1,0 +1,234 @@
+version = 1
+name    = "base"
+
+# ──────────────────────────────────────────────────────────────────────────────
+# base.toml — universal graft container base
+#
+# This file contains EVERY setting graft understands, all commented out.
+# Use it as a parent in your own TOML:
+#
+#   [parents]
+#   add = ["base"]
+#
+# Then uncomment only what you need.  The loader is strict: unknown fields
+# are rejected.  "Empty means no-op" — graft never enables anything you did
+# not explicitly set.
+# ──────────────────────────────────────────────────────────────────────────────
+
+# ── graph ─────────────────────────────────────────────────────────────────────
+# Inherit settings from other TOMLs by name (relative to GRAFT_CONFIG_ROOT,
+# without the .toml suffix).  Merge order: parents left-to-right, then self.
+#
+# [parents]
+# add    = ["another-base"]   # add parent(s) to this node
+# remove = []                 # remove parent(s) after set/add
+# set    = []                 # replace the full parent list
+#
+# [children]
+# add    = []                 # add child(ren) — they override this node
+# remove = []
+# set    = []
+
+# ── deploy ────────────────────────────────────────────────────────────────────
+# Controls whether the NixOS / Home Manager module picks up this file.
+# The fast `graft start` / `graft up` path ignores this section entirely.
+#
+# [deploy]
+# enable = true               # false = skip during module rendering
+# target = "user"             # "user" (Home Manager) | "system" (NixOS)
+
+# ── validation ────────────────────────────────────────────────────────────────
+# [validation]
+# level = "warn"              # "off" | "warn" | "strict"
+
+# ══════════════════════════════════════════════════════════════════════════════
+# [config] — everything below describes the actual container
+# ══════════════════════════════════════════════════════════════════════════════
+
+# ── runtime ───────────────────────────────────────────────────────────────────
+# What runs inside the container and which Nix packages are on PATH.
+#
+# [config.runtime]
+# mode     = "rootfs-store"   # only supported mode; always set this
+#
+# packages = [                # Nix attribute names (pkgs.<name>)
+#   "bashInteractive",
+#   "coreutils",
+#   "tmux",
+# ]
+#
+# command  = [                # the process to run (PID 1 inside the container)
+#   "bash", "-l",             # login shell example
+# ]
+#                             # interactive agent example:
+# command  = ["tmux", "new-session", "-A", "-s", "main", "my-agent"]
+#
+# Adjust the package list during graph merge (applied after all parents merge):
+# [config.runtime.packageOps]
+# add     = ["ripgrep", "jq"]         # add packages not in parents
+# remove  = ["hello"]                  # drop packages from parents
+# [[config.runtime.packageOps.replace]]
+# name = "hello"                       # replace a package by name
+# with = "hostname"
+
+# ── container identity ────────────────────────────────────────────────────────
+# [config.container]
+# name        = ""            # defaults to the top-level `name` field
+# hostname    = ""            # hostname inside the container
+# entrypoint  = []            # optional; prepended before command
+# stopSignal  = "SIGTERM"     # signal used to stop the container
+# workingDir  = "/workspace"  # initial working directory
+# user        = "1000"        # UID or username
+# group       = "1000"        # GID or group name
+# podmanArgs  = []            # raw extra args passed directly to podman
+#
+# Environment variables (KEY = "VALUE"):
+# [config.container.environment]
+# TERM             = "xterm-256color"  # required if using tmux
+# HOME             = "/home/agent"     # set automatically when [config.home] is used
+# XDG_CONFIG_HOME  = "/home/agent/.config"
+# MY_API_KEY       = "..."             # prefer [config.secrets] for sensitive data
+
+# ── filesystem ────────────────────────────────────────────────────────────────
+# [config.filesystem]
+# readOnly      = false       # mount rootfs read-only
+# readOnlyTmpfs = false       # make rootfs tmpfs also read-only
+# tmpfs         = ["/tmp", "/run"]           # directories to mount as tmpfs
+# mounts        = ["type=bind,src=…,dst=…"]  # raw --mount strings
+#
+# Bind mounts (each [[…]] is one mount; targets must be unique across all):
+#
+# [[config.filesystem.volumes]]      # /nix/store — needed for nix-resolved commands
+# source = "/nix/store"
+# target = "/nix/store"
+# mode   = "ro"
+#
+# [[config.filesystem.volumes]]      # project / workspace
+# source = "~/projects/my-project"   # ~ is expanded at start time
+# target = "/workspace"
+# mode   = "rw"
+#
+# [[config.filesystem.volumes]]      # read-only reference file
+# source = "~/system-prompt.md"
+# target = "/etc/agent/system-prompt.md"
+# mode   = "ro"
+#
+# [[config.filesystem.volumes]]      # writable scratch space
+# source = "~/agent-scratch/my-agent"
+# target = "/scratch"
+# mode   = "rw"
+#
+# Devices:
+# [[config.filesystem.devices]]
+# source      = "/dev/fuse"
+# target      = "/dev/fuse"
+# permissions = "rwm"
+
+# ── network ───────────────────────────────────────────────────────────────────
+# [config.network]
+# mode    = ""                # "" (default bridge) | "none" | "host" | "<name>.network"
+# publish = []                # e.g. ["127.0.0.1:8080:8080"]
+# dns     = []                # custom DNS servers
+# addHost = []                # e.g. ["host.containers.internal:host-gateway"]
+#
+# Extra Quadlet .network units rendered alongside the container:
+# [[config.networks]]
+# name     = "my-net"
+# driver   = "bridge"
+# internal = true
+# ipv6     = false
+# subnet   = "10.89.0.0/24"
+# gateway  = "10.89.0.1"
+# ipRange  = "10.89.0.128/25"
+# dns      = ["10.89.0.1"]
+# options  = ["mtu=1500"]
+# [config.networks.labels]
+# managed-by = "graft"
+#
+# Extra Quadlet .volume units:
+# [[config.volumes]]
+# name    = "my-cache"
+# driver  = "local"
+# copy    = false
+# options = ["o=noatime"]
+# [config.volumes.labels]
+# managed-by = "graft"
+
+# ── security ──────────────────────────────────────────────────────────────────
+# [config.security]
+# dropCapabilities     = ["all"]   # drop Linux capabilities
+# addCapabilities      = []        # add back specific ones
+# noNewPrivileges      = true      # prevent privilege escalation
+# privileged           = false     # full host access (dangerous)
+# seccompProfile       = ""        # path to seccomp.json
+# securityLabelDisable = false     # disable SELinux/AppArmor labels
+# securityOpt          = []        # e.g. ["apparmor=unconfined"]
+# userns               = "keep-id" # user namespace mapping
+
+# ── resources ─────────────────────────────────────────────────────────────────
+# [config.resources]
+# memory     = "2g"           # memory limit
+# memorySwap = "4g"           # memory + swap limit
+# cpus       = "2"            # CPU count
+# cpuQuota   = "50%"          # CPU time quota
+# pidsLimit  = 512            # max number of processes
+# ulimits    = ["nofile=1024:2048"]
+
+# ── secrets ───────────────────────────────────────────────────────────────────
+# Prefer secrets over environment variables for sensitive values.
+# [[config.secrets]]
+# name    = "api-key"                  # name of the podman secret
+# target  = "/run/secrets/api-key"     # mount path inside the container
+# type    = "mount"
+# uid     = "1000"
+# gid     = "1000"
+# mode    = "0400"
+# options = ""
+
+# ── workspace ─────────────────────────────────────────────────────────────────
+# Workspace controls project directory handling for `graft run` / `graft up`.
+#
+# [config.workspace]
+# mode            = "copy"       # "copy" — isolated scratch copy of source
+# source          = "."          # host path to copy (default: current dir)
+# target          = "/workspace" # mount point inside container
+# review          = "diff"       # show diff on exit: "diff" | ""
+# promote         = "prompt"     # apply changes back: "auto" | "prompt" | "off"
+# excludePatterns = [            # skip these when copying
+#   ".git", ".jj", "node_modules", ".direnv", "result",
+# ]
+
+# ── home (persistent agent state) ─────────────────────────────────────────────
+# When set, graft mounts a host directory as HOME inside the container and
+# sets HOME, XDG_CONFIG_HOME, XDG_CACHE_HOME, XDG_DATA_HOME, XDG_STATE_HOME.
+#
+# [config.home]
+# mode   = "persistent"                              # "persistent" | "ephemeral"
+# source = "~/.local/share/graft/sessions/my-agent"  # host path; created if absent
+# target = "/home/agent"                             # mount point inside container
+
+# ── systemd service ───────────────────────────────────────────────────────────
+# Controls the generated systemd unit.
+#
+# [config.service]
+# type             = "notify"       # "notify" (for detached start) | "oneshot" | "simple"
+# restart          = "on-failure"   # "no" | "on-failure" | "always"
+# restartSec       = "5s"
+# timeoutStartSec  = "2m"
+# timeoutStopSec   = "30s"
+# remainAfterExit  = false          # keep unit active after process exits (oneshot)
+
+# ── raw Quadlet passthrough ───────────────────────────────────────────────────
+# Escape hatch for Quadlet keys that graft does not yet type-check.
+# Keys render verbatim into the generated unit file.
+# Do NOT set keys that the typed renderer owns (Rootfs, ContainerName, Exec,
+# Network, Volume) — that is rejected at render time.
+#
+# [config.quadlet.container]
+# Annotation = ["com.example/note=1"]
+#
+# [config.quadlet.service]
+# Environment = ["EXTRA=1"]
+#
+# [config.quadlet.install]
+# WantedBy = ["default.target"]

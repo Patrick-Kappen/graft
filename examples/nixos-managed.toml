@@ -1,0 +1,14 @@
+version = 1
+name = "graft-nixos-managed-example"
+
+[deploy]
+enable = true
+target = "system"
+
+[config.runtime]
+mode = "rootfs-store"
+packages = [
+  "bashInteractive",
+  "coreutils",
+]
+command = ["bash", "-lc", "echo hello from NixOS-managed graft container"]

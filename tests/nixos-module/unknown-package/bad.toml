@@ -1,0 +1,11 @@
+version = 1
+name = "graft-test-unknown-package"
+
+[deploy]
+enable = true
+target = "system"
+
+[config.runtime]
+mode = "rootfs-store"
+packages = ["definitely-not-a-real-nixpkgs-package-for-graft"]
+command = ["bash", "-lc", "echo bad"]

@@ -1,0 +1,16 @@
+version = 1
+name = "graft-test-child"
+
+[parents]
+add = ["base"]
+
+[deploy]
+enable = true
+target = "system"
+
+[config.runtime]
+packages = ["coreutils"]
+command = ["bash", "-lc", "echo from child"]
+
+[config.container.environment]
+FROM_CHILD = "1"

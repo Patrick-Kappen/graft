@@ -1,0 +1,15 @@
+version = 1
+name = "graft-test-children-remove"
+
+[children]
+add = ["addon-a", "addon-b"]
+remove = ["addon-a"]
+
+[deploy]
+enable = true
+target = "system"
+
+[config.runtime]
+mode = "rootfs-store"
+packages = ["bashInteractive"]
+command = ["bash", "-lc", "echo from entry"]

@@ -1,0 +1,13 @@
+version = 1
+name = "addons/hostname"
+
+[config.runtime.packageOps]
+remove = ["hello"]
+add = ["gnugrep"]
+
+[[config.runtime.packageOps.replace]]
+name = "hello"
+with = "hostname"
+
+[config.runtime]
+command = ["hostname"]

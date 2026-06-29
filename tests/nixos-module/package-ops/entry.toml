@@ -1,0 +1,20 @@
+version = 1
+name = "graft-test-package-ops"
+
+[parents]
+add = ["base"]
+
+[deploy]
+enable = true
+target = "system"
+
+[config.runtime]
+command = ["hostname"]
+
+[config.runtime.packageOps]
+remove = ["coreutils"]
+add = ["gnugrep"]
+
+[[config.runtime.packageOps.replace]]
+name = "hello"
+with = "hostname"
