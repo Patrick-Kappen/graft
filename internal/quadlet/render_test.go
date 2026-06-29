@@ -37,6 +37,14 @@ func TestRenderRootfsContainer(t *testing.T) {
 				UserNS:           "keep-id",
 			},
 			Resources: config.ResourcesConfig{Memory: "1g", PidsLimit: 128},
+			Service: config.ServiceConfig{
+				Type:            "simple",
+				Restart:         "on-failure",
+				RestartSec:      "10s",
+				TimeoutStartSec: "2m",
+				TimeoutStopSec:  "30s",
+				RemainAfterExit: boolPtr(false),
+			},
 		},
 	})
 	if err != nil {
@@ -61,6 +69,12 @@ func TestRenderRootfsContainer(t *testing.T) {
 		"UserNS=keep-id",
 		"Memory=1g",
 		"PidsLimit=128",
+		"Type=simple",
+		"RemainAfterExit=false",
+		"Restart=on-failure",
+		"RestartSec=10s",
+		"TimeoutStartSec=2m",
+		"TimeoutStopSec=30s",
 		"WantedBy=default.target",
 	} {
 		if !strings.Contains(text, want) {

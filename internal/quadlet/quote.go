@@ -33,3 +33,12 @@ func sortedKeys(values map[string]string) []string {
 	sort.Strings(keys)
 	return keys
 }
+
+func sortedOptionKeys(values map[string][]string) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}

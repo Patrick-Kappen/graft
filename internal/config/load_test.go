@@ -52,6 +52,14 @@ command = ["bash", "-lc", "echo hello"]
 
 [config.container.environment]
 FOO = "bar"
+
+[config.service]
+type = "simple"
+restart = "on-failure"
+restartSec = "10s"
+timeoutStartSec = "2m"
+timeoutStopSec = "30s"
+remainAfterExit = false
 `)
 
 	file, err := Load(path)
@@ -72,6 +80,12 @@ FOO = "bar"
 	}
 	if file.Config.Container.Environment["FOO"] != "bar" {
 		t.Fatalf("Environment[FOO] = %q", file.Config.Container.Environment["FOO"])
+	}
+	if file.Config.Service.Type != "simple" {
+		t.Fatalf("Service.Type = %q, want simple", file.Config.Service.Type)
+	}
+	if file.Config.Service.RemainAfterExit == nil || *file.Config.Service.RemainAfterExit {
+		t.Fatal("expected service.remainAfterExit=false")
 	}
 }
 
@@ -198,6 +212,107 @@ unknownRuntimeField = true
 		t.Fatal("expected error")
 	}
 	if !strings.Contains(err.Error(), "unknown TOML field config.runtime.unknownRuntimeField") {
+		t.Fatalf("error = %q", err)
+	}
+}
+
+func TestLoadRejectsDuplicateVolumeTargets(t *testing.T) {
+	path := writeTempConfig(t, `
+version = 1
+name = "bad"
+
+[[config.filesystem.volumes]]
+source = "/a"
+target = "/data"
+mode = "ro"
+
+[[config.filesystem.volumes]]
+source = "/b"
+target = "/data"
+mode = "ro"
+`)
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), `duplicate filesystem volume target "/data"`) {
+		t.Fatalf("error = %q", err)
+	}
+}
+
+func TestLoadRejectsIncompleteVolume(t *testing.T) {
+	path := writeTempConfig(t, `
+version = 1
+name = "bad"
+
+[[config.filesystem.volumes]]
+target = "/data"
+`)
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "filesystem volume must set both source and target") {
+		t.Fatalf("error = %q", err)
+	}
+}
+
+func TestLoadRejectsInvalidDevice(t *testing.T) {
+	path := writeTempConfig(t, `
+version = 1
+name = "bad"
+
+[[config.filesystem.devices]]
+target = "/dev/fuse"
+permissions = "rwm"
+`)
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "filesystem device must set source") {
+		t.Fatalf("error = %q", err)
+	}
+}
+
+func TestLoadRejectsDuplicateSecretNames(t *testing.T) {
+	path := writeTempConfig(t, `
+version = 1
+name = "bad"
+
+[[config.secrets]]
+name = "token"
+
+[[config.secrets]]
+name = "token"
+`)
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), `duplicate secret name "token"`) {
+		t.Fatalf("error = %q", err)
+	}
+}
+
+func TestLoadRejectsUnnamedSecret(t *testing.T) {
+	path := writeTempConfig(t, `
+version = 1
+name = "bad"
+
+[[config.secrets]]
+target = "/run/secrets/token"
+`)
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "secret must set name") {
 		t.Fatalf("error = %q", err)
 	}
 }

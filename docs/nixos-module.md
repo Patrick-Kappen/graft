@@ -207,6 +207,22 @@ De effective TOML bevat daarna alleen `config.runtime.packages`; `packageOps` wo
 - De renderer ondersteunt nu `config.runtime.mode = "rootfs-store"` met `runtime.command`.
 - Package refs buiten simpele `pkgs.<name>` strings moeten nog volgen.
 
+## Service section
+
+TOML can set selected systemd service options:
+
+```toml
+[config.service]
+type = "simple"
+restart = "on-failure"
+restartSec = "10s"
+timeoutStartSec = "2m"
+timeoutStopSec = "30s"
+remainAfterExit = false
+```
+
+These are rendered into `[Service]`. Enabling/starting/autostart policy is still separate and will be added later.
+
 ## Eindrichting
 
 De TOML-map bepaalt via discovery/metadata welke containers managed zijn. Snelle projectcontainers hoeven geen NixOS rebuild te doen; die lopen via `pac up` en transient/user Quadlet.
