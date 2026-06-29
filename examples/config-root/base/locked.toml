@@ -1,0 +1,15 @@
+version = 1
+name = "base/locked"
+
+[config.filesystem]
+readOnly = true
+readOnlyTmpfs = true
+tmpfs = ["/tmp", "/run"]
+
+[config.network]
+mode = "none"
+
+[config.security]
+dropCapabilities = ["all"]
+noNewPrivileges = true
+userns = "keep-id"

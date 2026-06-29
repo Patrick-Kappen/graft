@@ -7,17 +7,17 @@
 }:
 
 let
-  cfg = config.services.podman-agent-container;
+  cfg = config.programs.podman-agent-container;
   evaluated = import ../lib/eval-entries.nix {
     inherit lib pkgs;
     inherit (cfg) package configRoot configFiles;
-    deployTarget = "system";
-    optionPrefix = "services.podman-agent-container";
+    deployTarget = "user";
+    optionPrefix = "programs.podman-agent-container";
   };
 in
 {
-  options.services.podman-agent-container = {
-    enable = lib.mkEnableOption "TOML-driven Podman Quadlet containers";
+  options.programs.podman-agent-container = {
+    enable = lib.mkEnableOption "TOML-driven rootless Podman Quadlet containers";
 
     package = lib.mkOption {
       type = lib.types.package;
@@ -41,9 +41,8 @@ in
       default = null;
       description = ''
         Directory containing user-authored TOML config files. Files are discovered
-        recursively. A discovered TOML file becomes a NixOS-managed container only
-        when it is not no-op and sets `[deploy] enable = true` with `target = "system"`
-        or no target.
+        recursively. A discovered TOML file becomes a Home Manager user Quadlet only
+        when it is not no-op and sets `[deploy] enable = true` with `target = "user"`.
       '';
     };
   };
@@ -52,17 +51,17 @@ in
     assertions = [
       {
         assertion = evaluated.activeNames == evaluated.uniqueActiveNames;
-        message = "services.podman-agent-container: active TOML config names must be unique.";
+        message = "programs.podman-agent-container: active TOML config names must be unique.";
       }
     ]
     ++ map (entry: {
       assertion = entry.unknownPackageNames == [ ];
-      message = "services.podman-agent-container: unknown package in ${toString entry.configFile} config.runtime.packages: ${builtins.concatStringsSep ", " entry.unknownPackageNames}";
+      message = "programs.podman-agent-container: unknown package in ${toString entry.configFile} config.runtime.packages: ${builtins.concatStringsSep ", " entry.unknownPackageNames}";
     }) evaluated.activeEntries;
 
-    virtualisation.podman.enable = true;
+    home.packages = [ cfg.package ];
 
-    environment.etc = lib.listToAttrs (
+    xdg.configFile = lib.listToAttrs (
       map (entry: {
         name = "containers/systemd/${entry.name}.container";
         value.source = entry.renderedQuadlet;

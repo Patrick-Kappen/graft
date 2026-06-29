@@ -17,6 +17,15 @@ containers/
 
 Een node kan tegelijk template, parent, child, addon of concrete container zijn.
 
+## Voorbeeldboom
+
+Zie [`../examples/config-root`](../examples/config-root) voor een werkend configRoot voorbeeld met:
+
+- parent nodes;
+- child addon;
+- package operations;
+- één deploy-enabled app.
+
 ## Node model
 
 ```toml
@@ -60,7 +69,7 @@ services.podman-agent-container = {
 };
 ```
 
-Home Manager later:
+Home Manager/rootless user Quadlet:
 
 ```nix
 programs.podman-agent-container = {

@@ -86,6 +86,45 @@
               builtins.attrNames (mkNixos configRoot).config.environment.etc
             );
 
+          mkHome =
+            configRoot:
+            lib.evalModules {
+              modules = [
+                self.homeManagerModules.default
+                ({ lib, ... }: {
+                  options = {
+                    assertions = lib.mkOption {
+                      type = lib.types.listOf lib.types.attrs;
+                      default = [ ];
+                    };
+                    home.packages = lib.mkOption {
+                      type = lib.types.listOf lib.types.package;
+                      default = [ ];
+                    };
+                    xdg.configFile = lib.mkOption {
+                      type = lib.types.attrsOf (
+                        lib.types.submodule (_: {
+                          options.source = lib.mkOption { type = lib.types.path; };
+                        })
+                      );
+                      default = { };
+                    };
+                  };
+                  config.programs.podman-agent-container = {
+                    enable = true;
+                    inherit configRoot;
+                  };
+                })
+              ];
+              specialArgs = { inherit pkgs; };
+            };
+
+          homeConfigNames =
+            configRoot:
+            builtins.filter (name: builtins.match "containers/systemd/.*" name != null) (
+              builtins.attrNames (mkHome configRoot).config.xdg.configFile
+            );
+
           checkList =
             name: actual: expected:
             pkgs.runCommand name { } ''
@@ -127,6 +166,12 @@
           packageOpsNixos = mkNixos ./tests/nixos-module/package-ops;
           renderedPackageOpsQuadlet =
             packageOpsNixos.config.environment.etc."containers/systemd/pac-test-package-ops.container".source;
+          configRootExampleNixos = mkNixos ./examples/config-root;
+          renderedConfigRootExampleQuadlet =
+            configRootExampleNixos.config.environment.etc."containers/systemd/pac-demo.container".source;
+          homeExample = mkHome ./tests/home-manager/config-root;
+          renderedHomeExampleQuadlet =
+            homeExample.config.xdg.configFile."containers/systemd/pac-user-demo.container".source;
           unknownPackageNixos = mkNixos ./tests/nixos-module/unknown-package;
           unknownPackageAssertionMessages = map (assertion: assertion.message) (
             builtins.filter (assertion: !assertion.assertion) unknownPackageNixos.config.assertions
@@ -239,6 +284,29 @@
                 "/bin/hostname"
               ];
 
+          nixos-module-config-root-example =
+            checkFileContains "nixos-module-config-root-example" renderedConfigRootExampleQuadlet
+              [
+                "ContainerName=pac-demo"
+                "Environment=PAC_DEMO=1"
+                "ReadOnly=true"
+                "Network=none"
+                "/bin/hostname"
+              ];
+
+          home-manager-module-config-root-discovery =
+            checkList "home-manager-module-config-root-discovery"
+              (homeConfigNames ./tests/home-manager/config-root)
+              [ "containers/systemd/pac-user-demo.container" ];
+
+          home-manager-module-render =
+            checkFileContains "home-manager-module-render" renderedHomeExampleQuadlet
+              [
+                "ContainerName=pac-user-demo"
+                "Environment=PAC_USER_DEMO=1"
+                "echo from user quadlet"
+              ];
+
           nixos-module-duplicate-name-assertion =
             if
               builtins.elem "services.podman-agent-container: active TOML config names must be unique." duplicateAssertionMessages
@@ -256,6 +324,8 @@
       );
 
       nixosModules.default = import ./nix/modules/nixos.nix { inherit self; };
+
+      homeManagerModules.default = import ./nix/modules/home-manager.nix { inherit self; };
 
       devShells = forAllSystems (pkgs: {
         default = pkgs.mkShell {

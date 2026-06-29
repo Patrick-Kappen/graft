@@ -1,0 +1,15 @@
+version = 1
+name = "pac-user-demo"
+
+[parents]
+add = ["base"]
+
+[deploy]
+enable = true
+target = "user"
+
+[config.runtime]
+command = ["bash", "-lc", "echo from user quadlet"]
+
+[config.container.environment]
+PAC_USER_DEMO = "1"

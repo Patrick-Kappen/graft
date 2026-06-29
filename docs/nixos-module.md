@@ -25,6 +25,16 @@ user-authored TOML files
 }
 ```
 
+Een complete voorbeeldboom staat in [`../examples/config-root`](../examples/config-root):
+
+```text
+examples/config-root/
+  base/runtime.toml
+  base/locked.toml
+  addons/hostname.toml
+  apps/demo.toml
+```
+
 De module ontdekt recursief `*.toml`. Een ontdekt bestand wordt alleen een NixOS-managed container als het expliciet deploy aanzet:
 
 ```toml

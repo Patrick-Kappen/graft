@@ -113,13 +113,21 @@ enable = true
 target = "system"
 ```
 
-Of voor Home Manager later:
+Voor Home Manager/rootless user Quadlet:
 
 ```nix
 programs.podman-agent-container = {
   enable = true;
   configRoot = ./containers;
 };
+```
+
+Home Manager deployt alleen TOML met:
+
+```toml
+[deploy]
+enable = true
+target = "user"
 ```
 
 De inhoud staat in TOML, niet in Nix options.
@@ -387,8 +395,9 @@ Nu aanwezig:
 - transient `systemctl --user` run;
 - Nix package build;
 - NixOS module met `configFiles`, recursive `configRoot` discovery en `parents.*`/`children.*` resolving;
-- effective TOML generatie tijdens NixOS build;
-- TOML `runtime.packages` -> `pkgs.<name>` in NixOS module;
+- Home Manager module met dezelfde resolver voor rootless/user Quadlet;
+- effective TOML generatie tijdens NixOS/HM build;
+- TOML `runtime.packages` -> `pkgs.<name>` in NixOS/HM modules;
 - examples en docs.
 
 Nog te bouwen:
@@ -397,6 +406,5 @@ Nog te bouwen:
 - session state;
 - workspace copy/jj candidate flow;
 - promote branch/PR flow;
-- Home Manager module;
 - persistent user Quadlet mode;
 - idle/leave lifecycle.
