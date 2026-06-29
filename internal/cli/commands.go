@@ -232,6 +232,9 @@ func renderYAML(args []string) error {
 	if file.IsNoop() {
 		return nil
 	}
+	if err := validateRunnable(file.Config.Runtime); err != nil {
+		return err
+	}
 	resolvedArgs, err := resolveRuntimeCommand(file.Config.Runtime.Command, file.Config.Runtime.Packages)
 	if err != nil {
 		return err
@@ -260,6 +263,9 @@ func renderNixOS(args []string) error {
 	if file.IsNoop() {
 		return nil
 	}
+	if err := validateRunnable(file.Config.Runtime); err != nil {
+		return err
+	}
 	resolvedArgs, err := resolveHostStoreCommand(file.Config.Runtime.Command)
 	if err != nil {
 		return err
@@ -287,6 +293,9 @@ func runYAML(args []string) error {
 	}
 	if file.IsNoop() {
 		return nil
+	}
+	if err := validateRunnable(file.Config.Runtime); err != nil {
+		return err
 	}
 	return runRootfsCommand(file.Config.Runtime.Command, file.Config)
 }
@@ -335,6 +344,16 @@ func afterDash(args []string) []string {
 		return args[1:]
 	}
 	return args
+}
+
+func validateRunnable(runtime config.RuntimeConfig) error {
+	if runtime.Mode != "rootfs-store" {
+		return fmt.Errorf("config.runtime.mode must be rootfs-store for runnable configs, got %q", runtime.Mode)
+	}
+	if len(runtime.Command) == 0 {
+		return errors.New("config.runtime.command must not be empty for runnable configs")
+	}
+	return nil
 }
 
 func resolveHostStoreCommand(args []string) ([]string, error) {

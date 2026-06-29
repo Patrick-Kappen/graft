@@ -39,11 +39,13 @@ packages = ["bashInteractive", "coreutils"]
 command = ["bash", "-lc", "echo hello"]
 ```
 
-Resolve-volgorde:
+Beoogde resolve-volgorde:
 
 ```text
 parents -> self -> children
 ```
+
+Huidige NixOS-module ondersteunt de eerste stap hiervan: `parents.add -> self`.
 
 Latere lagen mogen eerdere lagen overschrijven of uitbreiden volgens expliciete merge-regels.
 
@@ -68,6 +70,57 @@ programs.podman-agent-container = {
 ```
 
 De map/TOML bepaalt dan wat actief, transient, persistent of promoteable is.
+
+## Huidige merge-regels
+
+Voor `parents.add` in de NixOS-module gelden nu:
+
+- parent refs zijn relatief aan `configRoot` zonder `.toml`, bijvoorbeeld `"base/server"` -> `configRoot/base/server.toml`;
+- parents worden vóór de child gemerged;
+- attrsets mergen recursief;
+- lijsten concateneren met `lib.unique`;
+- `config.runtime.command` is een override-list: child vervangt parent;
+- scalars worden door latere lagen overschreven;
+- parent cycles geven een fout.
+
+Voorbeeld:
+
+```toml
+# base/server.toml
+version = 1
+name = "base/server"
+
+[config.runtime]
+mode = "rootfs-store"
+packages = ["bashInteractive"]
+command = ["bash", "-lc", "echo parent"]
+```
+
+```toml
+# projects/app.toml
+version = 1
+name = "app"
+
+[parents]
+add = ["base/server"]
+
+[deploy]
+enable = true
+target = "system"
+
+[config.runtime]
+packages = ["coreutils"]
+command = ["bash", "-lc", "echo child"]
+```
+
+Effectieve runtime:
+
+```toml
+[config.runtime]
+mode = "rootfs-store"
+packages = ["bashInteractive", "coreutils"]
+command = ["bash", "-lc", "echo child"]
+```
 
 ## Package overrides
 
@@ -186,9 +239,9 @@ working config
 
 ## Open implementatiepunten
 
-- graph resolver;
-- merge-regels voor scalars/attrs/lists/package operations;
-- duplicate container name detectie;
+- `parents.remove` en `parents.set`;
+- `children.add/remove/set`;
+- package operation tables voor add/remove/replace;
 - package refs naast simpele `pkgs.<name>` strings;
-- direct `pac up` closure build zonder NixOS rebuild;
+- duplicate name checks bestaan, maar kunnen rijkere foutmeldingen krijgen;
 - Home Manager module.

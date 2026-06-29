@@ -169,7 +169,7 @@ Pi runtime config
 
 ## Huidige scope
 
-Voor nu is er een werkende verticale slice: TOML laden, inspect/render/run, `pac up`, rootfs-store Quadlet en een eerste NixOS-module met `configFiles`.
+Voor nu is er een werkende verticale slice: TOML laden, inspect/render/run, `pac up`, rootfs-store Quadlet en een NixOS-module met `configFiles`, `configRoot` discovery en `parents.add` resolving.
 
 Zie ook [`runtime-architecture.md`](runtime-architecture.md) voor de geplande scheiding tussen TOML config engine, Quadlet runtime manager en cleanup/lifecycle beleid.
 
@@ -182,4 +182,4 @@ Nog niet bouwen:
 - geen impliciete Quadlet units
 - geen directe Pi/npm update-flow
 
-Volgende doel: graph resolving, directe `pac up` runtime closure build verder aanscherpen en daarna session lifecycle (`enter`/`leave`/`idle`).
+Volgende doel: `parents.remove`/`parents.set`, `children.*`, package operations en daarna session lifecycle (`enter`/`leave`/`idle`).

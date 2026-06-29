@@ -6,14 +6,8 @@ func (f *File) Validate() error {
 	if f.Version != 1 {
 		return fmt.Errorf("unsupported or missing version %d", f.Version)
 	}
-	if f.IsNoop() {
-		return nil
-	}
-	if f.Config.Runtime.Mode != "rootfs-store" {
+	if f.Config.Runtime.Mode != "" && f.Config.Runtime.Mode != "rootfs-store" {
 		return fmt.Errorf("unsupported runtime mode %q; expected rootfs-store", f.Config.Runtime.Mode)
-	}
-	if len(f.Config.Runtime.Command) == 0 {
-		return fmt.Errorf("config.runtime.command must not be empty")
 	}
 	return nil
 }

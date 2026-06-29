@@ -371,7 +371,7 @@ podman-agent-container.toml
 config.toml
 ```
 
-Later kan parent/child resolving vanuit een config root gebeuren.
+De NixOS-module kan inmiddels `parents.add` vanuit `configRoot` resolven. Volledige parent/child graph-operaties moeten nog volgen.
 
 ## Huidige implementatiestatus
 
@@ -385,15 +385,15 @@ Nu aanwezig:
 - rootfs-store Quadlet renderer;
 - transient `systemctl --user` run;
 - Nix package build;
-- NixOS module met `configFiles` en recursive `configRoot` discovery;
+- NixOS module met `configFiles`, recursive `configRoot` discovery en `parents.add` resolving;
+- effective TOML generatie tijdens NixOS build;
 - TOML `runtime.packages` -> `pkgs.<name>` in NixOS module;
 - examples en docs.
 
 Nog te bouwen:
 
-- parent/child graph resolving;
+- `parents.remove`, `parents.set` en `children.*` graph operations;
 - package add/remove/replace operations;
-- direct `pac up` runtime closure build zonder NixOS rebuild;
 - session state;
 - workspace copy/jj candidate flow;
 - promote branch/PR flow;

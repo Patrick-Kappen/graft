@@ -8,6 +8,7 @@
 
 let
   cfg = config.services.podman-agent-container;
+  tomlFormat = pkgs.formats.toml { };
 
   listTomlFiles =
     dir:
@@ -25,11 +26,82 @@ let
         [ ]
     ) (builtins.attrNames (builtins.readDir dir));
 
+  readToml = configFile: builtins.fromTOML (builtins.readFile configFile);
+
+  isEmptyValue =
+    value:
+    if builtins.isAttrs value then
+      lib.all isEmptyValue (builtins.attrValues value)
+    else if builtins.isList value then
+      value == [ ]
+    else
+      false;
+
+  mergeValues =
+    path: left: right:
+    if builtins.isAttrs left && builtins.isAttrs right then
+      mergeAttrs path left right
+    else if builtins.isList left && builtins.isList right then
+      if
+        path == [
+          "runtime"
+          "command"
+        ]
+      then
+        right
+      else
+        lib.unique (left ++ right)
+    else
+      right;
+
+  mergeAttrs =
+    path: left: right:
+    let
+      keys = lib.unique ((builtins.attrNames left) ++ (builtins.attrNames right));
+    in
+    lib.genAttrs keys (
+      key:
+      if builtins.hasAttr key left && builtins.hasAttr key right then
+        mergeValues (path ++ [ key ]) left.${key} right.${key}
+      else if builtins.hasAttr key right then
+        right.${key}
+      else
+        left.${key}
+    );
+
+  mergeConfigList = builtins.foldl' (acc: value: mergeAttrs [ ] acc value) { };
+
+  requireConfigRoot =
+    ref:
+    if cfg.configRoot == null then
+      throw "services.podman-agent-container: parent ${ref} requires configRoot to be set"
+    else
+      cfg.configRoot;
+
+  nodePath = ref: (requireConfigRoot ref) + "/${ref}.toml";
+
+  resolveConfigData =
+    stack: configData:
+    let
+      parentRefs = configData.parents.add or [ ];
+      parentConfigs = map (ref: resolveNode (stack ++ [ ref ]) ref) parentRefs;
+      selfConfig = configData.config or { };
+    in
+    mergeConfigList (parentConfigs ++ [ selfConfig ]);
+
+  resolveNode =
+    stack: ref:
+    if builtins.elem ref (lib.init stack) then
+      throw "services.podman-agent-container: parent cycle detected: ${builtins.concatStringsSep " -> " stack}"
+    else
+      resolveConfigData stack (readToml (nodePath ref));
+
   loadEntry =
     isExplicit: configFile:
     let
-      configData = builtins.fromTOML (builtins.readFile configFile);
-      isNoop = !(configData.config ? runtime);
+      configData = readToml configFile;
+      effectiveConfig = resolveConfigData [ ] configData;
+      isNoop = isEmptyValue effectiveConfig;
       deploy = configData.deploy or { };
       deployEnable = deploy.enable or false;
       deployTarget = deploy.target or "system";
@@ -37,14 +109,16 @@ let
       name =
         configData.name
           or (throw "services.podman-agent-container: TOML config must set top-level name: ${toString configFile}");
-      runtimePackageNames = configData.config.runtime.packages or [ ];
-      runtimePackages = map (
-        packageName:
-        if builtins.hasAttr packageName pkgs then
-          builtins.getAttr packageName pkgs
-        else
-          throw "services.podman-agent-container: unknown package in ${toString configFile} config.runtime.packages: ${packageName}"
+      effectiveToml = tomlFormat.generate "podman-agent-container-effective-${name}.toml" {
+        version = configData.version or 1;
+        inherit name;
+        config = effectiveConfig;
+      };
+      runtimePackageNames = effectiveConfig.runtime.packages or [ ];
+      unknownPackageNames = builtins.filter (
+        packageName: !(builtins.hasAttr packageName pkgs)
       ) runtimePackageNames;
+      runtimePackages = map (packageName: builtins.getAttr packageName pkgs) runtimePackageNames;
 
       runtimeEnv = pkgs.buildEnv {
         name = "podman-agent-container-runtime-${name}";
@@ -63,7 +137,7 @@ let
 
       renderedQuadlet = pkgs.runCommand "${name}.container" { } ''
         export PATH=${runtimeEnv}/bin:$PATH
-        ${lib.getExe' cfg.package "podman-agent-container"} render-nixos ${configFile} ${minimalRootfs} ${name} > $out
+        ${lib.getExe' cfg.package "podman-agent-container"} render-nixos ${effectiveToml} ${minimalRootfs} ${name} > $out
       '';
     in
     {
@@ -72,11 +146,15 @@ let
         configData
         deployEnable
         deployTarget
+        effectiveConfig
+        effectiveToml
         isExplicit
         isNoop
         isActive
         name
         renderedQuadlet
+        runtimePackageNames
+        unknownPackageNames
         ;
     };
 
@@ -125,7 +203,11 @@ in
         assertion = activeNames == uniqueActiveNames;
         message = "services.podman-agent-container: active TOML config names must be unique.";
       }
-    ];
+    ]
+    ++ map (entry: {
+      assertion = entry.unknownPackageNames == [ ];
+      message = "services.podman-agent-container: unknown package in ${toString entry.configFile} config.runtime.packages: ${builtins.concatStringsSep ", " entry.unknownPackageNames}";
+    }) activeEntries;
 
     virtualisation.podman.enable = true;
 

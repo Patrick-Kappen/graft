@@ -6,7 +6,9 @@ De NixOS-route gebruikt door de gebruiker geschreven TOML-bestanden als build-in
 user-authored TOML files
   -> NixOS module build input
   -> Nix leest TOML met builtins.fromTOML
-  -> config.runtime.packages -> pkgs.<name> runtime closure
+  -> parents.add resolven binnen configRoot
+  -> effective TOML genereren in de store
+  -> effective config.runtime.packages -> pkgs.<name> runtime closure
   -> renderer maakt Quadlet tijdens Nix build
   -> /etc/containers/systemd/<name>.container
   -> Podman Quadlet/systemd start container
@@ -91,15 +93,81 @@ set = []
 
 No-op TOML-bestanden zijn geldig maar installeren geen Quadlet unit.
 
+## Parent resolving
+
+De NixOS-module ondersteunt nu de eerste graph-stap: `parents.add`.
+
+```text
+containers/
+  base.toml
+  projects/app.toml
+```
+
+Parent:
+
+```toml
+# containers/base.toml
+version = 1
+name = "base"
+
+[config.runtime]
+mode = "rootfs-store"
+packages = ["bashInteractive"]
+command = ["bash", "-lc", "echo from parent"]
+
+[config.container.environment]
+FROM_PARENT = "1"
+```
+
+Child:
+
+```toml
+# containers/projects/app.toml
+version = 1
+name = "app"
+
+[parents]
+add = ["base"]
+
+[deploy]
+enable = true
+target = "system"
+
+[config.runtime]
+packages = ["coreutils"]
+command = ["bash", "-lc", "echo from child"]
+
+[config.container.environment]
+FROM_CHILD = "1"
+```
+
+Effectief:
+
+- attrsets mergen recursief;
+- lijsten concateneren met `lib.unique`;
+- `config.runtime.command` wordt door de child overschreven;
+- scalar values worden door de child overschreven;
+- alleen de child wordt actief omdat alleen die `[deploy] enable = true` heeft.
+
+De module genereert hiervoor een effective TOML in de Nix store en rendert daaruit Quadlet.
+
+Nog niet ondersteund:
+
+- `parents.remove`;
+- `parents.set`;
+- `children.*`;
+- package operation tables zoals add/remove/replace.
+
 ## Huidige eerste implementatie
 
 - TOML wordt niet uit Nix options gegenereerd.
 - `configRoot` ontdekt recursief `*.toml` en activeert alleen TOML met `[deploy] enable = true` en system target.
 - `configFiles` blijven beschikbaar als expliciete build inputs.
 - Elk actief TOML-bestand moet een unieke top-level `name` hebben.
-- De NixOS module leest `config.runtime.packages` uit TOML en vertaalt die naar `pkgs.<name>`.
+- De NixOS module resolved `parents.add` en leest daarna `config.runtime.packages` uit de effective TOML.
+- Runtime package strings worden vertaald naar `pkgs.<name>`.
 - De renderer ondersteunt nu `config.runtime.mode = "rootfs-store"` met `runtime.command`.
-- Graph resolving voor `parents`/`children` moet nog volgen.
+- `parents.remove`, `parents.set` en `children` moeten nog volgen.
 
 ## Eindrichting
 
