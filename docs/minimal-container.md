@@ -61,7 +61,7 @@ config.toml
 ## Nog niet
 
 - graph resolving;
-- package add/remove/replace;
+- package refs/pins buiten simpele `pkgs.<name>` strings;
 - directe closure build in `pac up` zonder NixOS module;
 - workspace copy/jj candidate flow;
 - shell hook zoals direnv;

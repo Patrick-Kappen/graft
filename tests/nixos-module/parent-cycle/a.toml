@@ -1,0 +1,14 @@
+version = 1
+name = "pac-test-cycle-a"
+
+[parents]
+add = ["b"]
+
+[deploy]
+enable = true
+target = "system"
+
+[config.runtime]
+mode = "rootfs-store"
+packages = ["bashInteractive"]
+command = ["bash", "-lc", "echo a"]

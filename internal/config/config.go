@@ -31,9 +31,21 @@ type Config struct {
 }
 
 type RuntimeConfig struct {
-	Mode     string   `toml:"mode"`
-	Packages []string `toml:"packages"`
-	Command  []string `toml:"command"`
+	Mode       string           `toml:"mode"`
+	Packages   []string         `toml:"packages"`
+	PackageOps PackageOpsConfig `toml:"packageOps"`
+	Command    []string         `toml:"command"`
+}
+
+type PackageOpsConfig struct {
+	Add     []string               `toml:"add"`
+	Remove  []string               `toml:"remove"`
+	Replace []PackageReplaceConfig `toml:"replace"`
+}
+
+type PackageReplaceConfig struct {
+	Name string `toml:"name"`
+	With string `toml:"with"`
 }
 
 type ContainerConfig struct {

@@ -106,6 +106,27 @@
           discoveryNixos = mkNixos ./tests/nixos-module/discovery;
           renderedChildQuadlet =
             discoveryNixos.config.environment.etc."containers/systemd/pac-test-child.container".source;
+          parentSetNixos = mkNixos ./tests/nixos-module/parents-set;
+          renderedParentSetQuadlet =
+            parentSetNixos.config.environment.etc."containers/systemd/pac-test-parent-set.container".source;
+          parentRemoveNixos = mkNixos ./tests/nixos-module/parents-remove;
+          renderedParentRemoveQuadlet =
+            parentRemoveNixos.config.environment.etc."containers/systemd/pac-test-parent-remove.container".source;
+          parentCycleEval = builtins.tryEval (
+            builtins.deepSeq (containerEtcNames ./tests/nixos-module/parent-cycle) true
+          );
+          childrenAddNixos = mkNixos ./tests/nixos-module/children-add;
+          renderedChildrenAddQuadlet =
+            childrenAddNixos.config.environment.etc."containers/systemd/pac-test-children-add.container".source;
+          childrenSetNixos = mkNixos ./tests/nixos-module/children-set;
+          renderedChildrenSetQuadlet =
+            childrenSetNixos.config.environment.etc."containers/systemd/pac-test-children-set.container".source;
+          childrenRemoveNixos = mkNixos ./tests/nixos-module/children-remove;
+          renderedChildrenRemoveQuadlet =
+            childrenRemoveNixos.config.environment.etc."containers/systemd/pac-test-children-remove.container".source;
+          packageOpsNixos = mkNixos ./tests/nixos-module/package-ops;
+          renderedPackageOpsQuadlet =
+            packageOpsNixos.config.environment.etc."containers/systemd/pac-test-package-ops.container".source;
           unknownPackageNixos = mkNixos ./tests/nixos-module/unknown-package;
           unknownPackageAssertionMessages = map (assertion: assertion.message) (
             builtins.filter (assertion: !assertion.assertion) unknownPackageNixos.config.assertions
@@ -117,6 +138,20 @@
               for needle in ${lib.escapeShellArgs needles}; do
                 if ! grep -F -- "$needle" ${file} >/dev/null; then
                   echo "missing expected text in ${file}: $needle" >&2
+                  echo "--- file ---" >&2
+                  cat ${file} >&2
+                  exit 1
+                fi
+              done
+              touch $out
+            '';
+
+          checkFileNotContains =
+            name: file: needles:
+            pkgs.runCommand name { } ''
+              for needle in ${lib.escapeShellArgs needles}; do
+                if grep -F -- "$needle" ${file} >/dev/null; then
+                  echo "unexpected text in ${file}: $needle" >&2
                   echo "--- file ---" >&2
                   cat ${file} >&2
                   exit 1
@@ -143,6 +178,65 @@
                 "Environment=FROM_PARENT=1"
                 "Environment=FROM_CHILD=1"
                 "echo from child"
+              ];
+
+          nixos-module-parents-set-contains =
+            checkFileContains "nixos-module-parents-set-contains" renderedParentSetQuadlet
+              [
+                "Environment=FROM_B=1"
+                "echo from set child"
+              ];
+
+          nixos-module-parents-set-excludes =
+            checkFileNotContains "nixos-module-parents-set-excludes" renderedParentSetQuadlet
+              [ "Environment=FROM_A=1" ];
+
+          nixos-module-parents-remove-contains =
+            checkFileContains "nixos-module-parents-remove-contains" renderedParentRemoveQuadlet
+              [
+                "Environment=FROM_B=1"
+                "echo from remove child"
+              ];
+
+          nixos-module-parents-remove-excludes =
+            checkFileNotContains "nixos-module-parents-remove-excludes" renderedParentRemoveQuadlet
+              [ "Environment=FROM_A=1" ];
+
+          nixos-module-parent-cycle-fails =
+            if parentCycleEval.success then
+              throw "expected parent cycle to fail NixOS evaluation"
+            else
+              pkgs.runCommand "nixos-module-parent-cycle-fails" { } "touch $out";
+
+          nixos-module-children-add-render =
+            checkFileContains "nixos-module-children-add-render" renderedChildrenAddQuadlet
+              [
+                "Environment=FROM_ENTRY=1"
+                "Environment=FROM_CHILD_ADDON=1"
+                "echo from child addon"
+              ];
+
+          nixos-module-children-set-contains =
+            checkFileContains "nixos-module-children-set-contains" renderedChildrenSetQuadlet
+              [ "Environment=FROM_ADDON_B=1" ];
+
+          nixos-module-children-set-excludes =
+            checkFileNotContains "nixos-module-children-set-excludes" renderedChildrenSetQuadlet
+              [ "Environment=FROM_ADDON_A=1" ];
+
+          nixos-module-children-remove-contains =
+            checkFileContains "nixos-module-children-remove-contains" renderedChildrenRemoveQuadlet
+              [ "Environment=FROM_ADDON_B=1" ];
+
+          nixos-module-children-remove-excludes =
+            checkFileNotContains "nixos-module-children-remove-excludes" renderedChildrenRemoveQuadlet
+              [ "Environment=FROM_ADDON_A=1" ];
+
+          nixos-module-package-ops-render =
+            checkFileContains "nixos-module-package-ops-render" renderedPackageOpsQuadlet
+              [
+                "Exec=/nix/store/"
+                "/bin/hostname"
               ];
 
           nixos-module-duplicate-name-assertion =

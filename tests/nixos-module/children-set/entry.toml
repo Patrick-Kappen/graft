@@ -1,0 +1,15 @@
+version = 1
+name = "pac-test-children-set"
+
+[children]
+add = ["addon-a"]
+set = ["addon-b"]
+
+[deploy]
+enable = true
+target = "system"
+
+[config.runtime]
+mode = "rootfs-store"
+packages = ["bashInteractive"]
+command = ["bash", "-lc", "echo from entry"]

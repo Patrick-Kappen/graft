@@ -45,7 +45,7 @@ Beoogde resolve-volgorde:
 parents -> self -> children
 ```
 
-Huidige NixOS-module ondersteunt de eerste stap hiervan: `parents.add -> self`.
+Huidige NixOS-module ondersteunt deze basisvolgorde, inclusief `parents.add`/`set`/`remove` en `children.add`/`set`/`remove`.
 
 Latere lagen mogen eerdere lagen overschrijven of uitbreiden volgens expliciete merge-regels.
 
@@ -73,10 +73,14 @@ De map/TOML bepaalt dan wat actief, transient, persistent of promoteable is.
 
 ## Huidige merge-regels
 
-Voor `parents.add` in de NixOS-module gelden nu:
+Voor `parents` en `children` in de NixOS-module gelden nu:
 
-- parent refs zijn relatief aan `configRoot` zonder `.toml`, bijvoorbeeld `"base/server"` -> `configRoot/base/server.toml`;
-- parents worden vóór de child gemerged;
+- refs zijn relatief aan `configRoot` zonder `.toml`, bijvoorbeeld `"base/server"` -> `configRoot/base/server.toml`;
+- `set` vervangt de lokale ref-lijst van de node;
+- als `set` leeg is, gebruikt de node `add`;
+- `remove` verwijdert refs uit die lokale lijst;
+- parents worden vóór self gemerged;
+- children worden na self gemerged;
 - attrsets mergen recursief;
 - lijsten concateneren met `lib.unique`;
 - `config.runtime.command` is een override-list: child vervangt parent;
@@ -135,7 +139,7 @@ mode = "rootfs-store"
 packages = ["bashInteractive", "coreutils", "appA", "appB", "appC"]
 ```
 
-Project override, toekomstig model:
+Project override:
 
 ```toml
 version = 1
@@ -144,15 +148,13 @@ name = "projects/my-app"
 [parents]
 add = ["base/server"]
 
-[config.runtime.packages]
+[config.runtime.packageOps]
 remove = ["appB"]
 add = ["appZ"]
 
-[[config.runtime.packages.replace]]
+[[config.runtime.packageOps.replace]]
 name = "appC"
-source = "flake"
-ref = "github:example/appC/specific-rev"
-attr = "packages.${system}.default"
+with = "appC_pinned"
 ```
 
 Effectief:
@@ -239,9 +241,6 @@ working config
 
 ## Open implementatiepunten
 
-- `parents.remove` en `parents.set`;
-- `children.add/remove/set`;
-- package operation tables voor add/remove/replace;
 - package refs naast simpele `pkgs.<name>` strings;
 - duplicate name checks bestaan, maar kunnen rijkere foutmeldingen krijgen;
 - Home Manager module.

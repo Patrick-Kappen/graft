@@ -1,0 +1,8 @@
+version = 1
+name = "pac-test-cycle-b"
+
+[parents]
+add = ["a"]
+
+[config.runtime]
+packages = ["coreutils"]

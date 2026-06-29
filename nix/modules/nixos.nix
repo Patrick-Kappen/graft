@@ -71,6 +71,28 @@ let
 
   mergeConfigList = builtins.foldl' (acc: value: mergeAttrs [ ] acc value) { };
 
+  applyPackageOps =
+    configValue:
+    let
+      runtime = configValue.runtime or { };
+      packageOps = runtime.packageOps or { };
+      packages = runtime.packages or [ ];
+      remove = packageOps.remove or [ ];
+      add = packageOps.add or [ ];
+      replace = packageOps.replace or [ ];
+      replaceNames = map (item: item.name) replace;
+      replaceWith = map (item: item."with") replace;
+      filteredPackages = builtins.filter (
+        packageName: !(builtins.elem packageName remove) && !(builtins.elem packageName replaceNames)
+      ) packages;
+      finalPackages = lib.unique (filteredPackages ++ replaceWith ++ add);
+      runtimeWithoutOps = removeAttrs runtime [ "packageOps" ];
+      runtimeWithPackages = runtimeWithoutOps // {
+        packages = finalPackages;
+      };
+    in
+    if configValue ? runtime then configValue // { runtime = runtimeWithPackages; } else configValue;
+
   requireConfigRoot =
     ref:
     if cfg.configRoot == null then
@@ -80,14 +102,26 @@ let
 
   nodePath = ref: (requireConfigRoot ref) + "/${ref}.toml";
 
+  relationRefs =
+    relation:
+    let
+      setRefs = relation.set or [ ];
+      addRefs = relation.add or [ ];
+      removeRefs = relation.remove or [ ];
+      refs = if setRefs != [ ] then setRefs else addRefs;
+    in
+    builtins.filter (ref: !(builtins.elem ref removeRefs)) refs;
+
   resolveConfigData =
     stack: configData:
     let
-      parentRefs = configData.parents.add or [ ];
+      parentRefs = relationRefs (configData.parents or { });
+      childRefs = relationRefs (configData.children or { });
       parentConfigs = map (ref: resolveNode (stack ++ [ ref ]) ref) parentRefs;
+      childConfigs = map (ref: resolveNode (stack ++ [ ref ]) ref) childRefs;
       selfConfig = configData.config or { };
     in
-    mergeConfigList (parentConfigs ++ [ selfConfig ]);
+    mergeConfigList (parentConfigs ++ [ selfConfig ] ++ childConfigs);
 
   resolveNode =
     stack: ref:
@@ -100,7 +134,7 @@ let
     isExplicit: configFile:
     let
       configData = readToml configFile;
-      effectiveConfig = resolveConfigData [ ] configData;
+      effectiveConfig = applyPackageOps (resolveConfigData [ ] configData);
       isNoop = isEmptyValue effectiveConfig;
       deploy = configData.deploy or { };
       deployEnable = deploy.enable or false;

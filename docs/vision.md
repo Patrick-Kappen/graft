@@ -229,28 +229,29 @@ name = "my-app"
 [parents]
 add = ["base/server"]
 
-# toekomstige package operations
-# remove appX
-# replace appY with pinned Y
-# add appZ
+[config.runtime.packageOps]
+remove = ["appX"]
+add = ["appZ"]
+
+[[config.runtime.packageOps.replace]]
+name = "appY"
+with = "appY_pinned"
 ```
 
 Het project hoeft niet de hele base container te kopiëren. Het kan parent aanroepen en alleen verschillen declareren.
 
 ## Package operations en pins
 
-Gewenst later model:
+Huidig package operation model:
 
 ```toml
-[config.runtime.packages]
+[config.runtime.packageOps]
 remove = ["appX"]
 add = ["appZ"]
 
-[[config.runtime.packages.replace]]
+[[config.runtime.packageOps.replace]]
 name = "appY"
-source = "flake"
-ref = "pin-y"
-attr = "packages.${system}.appY"
+with = "appY_pinned"
 ```
 
 Doel:
@@ -371,7 +372,7 @@ podman-agent-container.toml
 config.toml
 ```
 
-De NixOS-module kan inmiddels `parents.add` vanuit `configRoot` resolven. Volledige parent/child graph-operaties moeten nog volgen.
+De NixOS-module kan inmiddels `parents.*` en `children.*` vanuit `configRoot` resolven.
 
 ## Huidige implementatiestatus
 
@@ -385,15 +386,14 @@ Nu aanwezig:
 - rootfs-store Quadlet renderer;
 - transient `systemctl --user` run;
 - Nix package build;
-- NixOS module met `configFiles`, recursive `configRoot` discovery en `parents.add` resolving;
+- NixOS module met `configFiles`, recursive `configRoot` discovery en `parents.*`/`children.*` resolving;
 - effective TOML generatie tijdens NixOS build;
 - TOML `runtime.packages` -> `pkgs.<name>` in NixOS module;
 - examples en docs.
 
 Nog te bouwen:
 
-- `parents.remove`, `parents.set` en `children.*` graph operations;
-- package add/remove/replace operations;
+- package refs beyond simple `pkgs.<name>` strings;
 - session state;
 - workspace copy/jj candidate flow;
 - promote branch/PR flow;

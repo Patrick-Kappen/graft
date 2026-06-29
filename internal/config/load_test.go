@@ -112,6 +112,36 @@ command = ["bash"]
 	}
 }
 
+func TestLoadPackageOps(t *testing.T) {
+	path := writeTempConfig(t, `
+version = 1
+name = "package-ops"
+
+[config.runtime.packageOps]
+remove = ["old"]
+add = ["new"]
+
+[[config.runtime.packageOps.replace]]
+name = "tool"
+with = "toolPinned"
+`)
+
+	file, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	ops := file.Config.Runtime.PackageOps
+	if len(ops.Remove) != 1 || ops.Remove[0] != "old" {
+		t.Fatalf("Remove = %#v", ops.Remove)
+	}
+	if len(ops.Add) != 1 || ops.Add[0] != "new" {
+		t.Fatalf("Add = %#v", ops.Add)
+	}
+	if len(ops.Replace) != 1 || ops.Replace[0].Name != "tool" || ops.Replace[0].With != "toolPinned" {
+		t.Fatalf("Replace = %#v", ops.Replace)
+	}
+}
+
 func TestLoadAllowsRuntimePackageFragment(t *testing.T) {
 	path := writeTempConfig(t, `
 version = 1

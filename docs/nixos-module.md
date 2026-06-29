@@ -95,7 +95,7 @@ No-op TOML-bestanden zijn geldig maar installeren geen Quadlet unit.
 
 ## Parent resolving
 
-De NixOS-module ondersteunt nu de eerste graph-stap: `parents.add`.
+De NixOS-module ondersteunt nu de basis graph-stap: `parents.add`/`set`/`remove` en `children.add`/`set`/`remove`.
 
 ```text
 containers/
@@ -143,20 +143,48 @@ FROM_CHILD = "1"
 
 Effectief:
 
+- resolve-volgorde is `parents -> self -> children`;
 - attrsets mergen recursief;
 - lijsten concateneren met `lib.unique`;
-- `config.runtime.command` wordt door de child overschreven;
-- scalar values worden door de child overschreven;
+- `config.runtime.command` wordt door latere lagen overschreven;
+- scalar values worden door latere lagen overschreven;
 - alleen de child wordt actief omdat alleen die `[deploy] enable = true` heeft.
 
 De module genereert hiervoor een effective TOML in de Nix store en rendert daaruit Quadlet.
 
-Nog niet ondersteund:
+`parents.set`/`children.set` vervangen de lokale refs van die node. `parents.remove`/`children.remove` verwijderen refs uit de lokale lijst na `set`/`add` normalisatie.
 
-- `parents.remove`;
-- `parents.set`;
-- `children.*`;
-- package operation tables zoals add/remove/replace.
+## Package operations
+
+Na graph merge past de NixOS-module package operations toe op `config.runtime.packages`.
+
+```toml
+[config.runtime]
+packages = ["bashInteractive", "coreutils", "hello"]
+
+[config.runtime.packageOps]
+remove = ["coreutils"]
+add = ["gnugrep"]
+
+[[config.runtime.packageOps.replace]]
+name = "hello"
+with = "hostname"
+```
+
+Effectieve packages:
+
+```toml
+packages = ["bashInteractive", "hostname", "gnugrep"]
+```
+
+Volgorde:
+
+1. verwijder `remove` en replacement-namen uit de bestaande package-lijst;
+2. voeg replacement `with` packages toe;
+3. voeg `add` packages toe;
+4. deduplicate met `lib.unique`.
+
+De effective TOML bevat daarna alleen `config.runtime.packages`; `packageOps` wordt niet aan de renderer doorgegeven.
 
 ## Huidige eerste implementatie
 
@@ -164,10 +192,10 @@ Nog niet ondersteund:
 - `configRoot` ontdekt recursief `*.toml` en activeert alleen TOML met `[deploy] enable = true` en system target.
 - `configFiles` blijven beschikbaar als expliciete build inputs.
 - Elk actief TOML-bestand moet een unieke top-level `name` hebben.
-- De NixOS module resolved `parents.add` en leest daarna `config.runtime.packages` uit de effective TOML.
+- De NixOS module resolved `parents.*` en `children.*`, past `config.runtime.packageOps` toe, en leest daarna `config.runtime.packages` uit de effective TOML.
 - Runtime package strings worden vertaald naar `pkgs.<name>`.
 - De renderer ondersteunt nu `config.runtime.mode = "rootfs-store"` met `runtime.command`.
-- `parents.remove`, `parents.set` en `children` moeten nog volgen.
+- Package refs buiten simpele `pkgs.<name>` strings moeten nog volgen.
 
 ## Eindrichting
 

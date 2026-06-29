@@ -1,0 +1,10 @@
+version = 1
+name = "base-b"
+
+[config.runtime]
+mode = "rootfs-store"
+packages = ["bashInteractive"]
+command = ["bash", "-lc", "echo from base b"]
+
+[config.container.environment]
+FROM_B = "1"

@@ -16,6 +16,9 @@ func (f *File) IsNoop() bool {
 	cfg := f.Config
 	return cfg.Runtime.Mode == "" &&
 		len(cfg.Runtime.Packages) == 0 &&
+		len(cfg.Runtime.PackageOps.Add) == 0 &&
+		len(cfg.Runtime.PackageOps.Remove) == 0 &&
+		len(cfg.Runtime.PackageOps.Replace) == 0 &&
 		len(cfg.Runtime.Command) == 0 &&
 		cfg.Container.Name == "" &&
 		cfg.Container.WorkingDir == "" &&
