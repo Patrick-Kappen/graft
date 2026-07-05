@@ -31,6 +31,7 @@ let
       # Mount points required by crun/Podman at container start
       ln -s /proc/mounts $out/etc/mtab
       touch $out/etc/hostname $out/etc/hosts $out/etc/resolv.conf
+      touch $out/run/.containerenv
 
       # Symlink everything from the inner env except directories we own
       for entry in ${inner}/*; do
