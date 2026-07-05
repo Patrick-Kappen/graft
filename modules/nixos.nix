@@ -14,17 +14,35 @@ let
     (name: _: builtins.fromTOML (builtins.readFile (cfg.configRoot + "/${name}")))
     tomlFiles;
 
-  # Base directories required by Podman (e.g. /etc for hosts/resolv.conf)
-  baseDirs = pkgs.runCommand "graft-base-dirs" {} ''
-    mkdir -p $out/{etc,tmp,var,home,root,run,proc,sys,dev}
-  '';
-
-  # Build a buildEnv per container from its package list
+  # Build a rootfs per container:
+  # - real directories for /etc, /tmp, /var, /home, /root, /run, /proc, /sys, /dev
+  # - symlinks for bin, lib, etc from the inner buildEnv (skipping /etc to avoid symlink)
   containerEnvs = lib.mapAttrs (name: ctr:
-    pkgs.buildEnv {
-      name  = "graft-${lib.removeSuffix ".toml" name}-env";
-      paths = [ baseDirs ] ++ map (p: pkgs.${p}) (ctr.config.runtime.packages or []);
-    }
+    let
+      containerName = lib.removeSuffix ".toml" name;
+      inner = pkgs.buildEnv {
+        name  = "graft-${containerName}-inner";
+        paths = map (p: pkgs.${p}) (ctr.config.runtime.packages or []);
+        ignoreCollisions = true;
+      };
+    in pkgs.runCommand "graft-${containerName}-env" {} ''
+      # Real system directories (so overlay can write to them)
+      mkdir -p $out/{etc,tmp,var,home,root,run,proc,sys,dev}
+
+      # Symlink everything from the inner env except directories we own
+      for entry in ${inner}/*; do
+        name=$(basename "$entry")
+        case "$name" in
+          etc|tmp|var|home|root|run|proc|sys|dev) continue ;;
+        esac
+        ln -s "$entry" "$out/$name"
+      done
+
+      # Copy /etc contents from packages (if any) into our real /etc
+      if [ -e ${inner}/etc ]; then
+        cp -rL ${inner}/etc/. $out/etc/ 2>/dev/null || true
+      fi
+    ''
   ) containers;
 
   # Render a Quadlet .container file per container
