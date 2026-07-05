@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/zerodawn1990/podman-agent-container/internal/config"
+	"github.com/zerodawn1990/graft/internal/config"
 )
 
 type RenderInput struct {
@@ -12,6 +12,86 @@ type RenderInput struct {
 	FallbackContainerName string
 	Command               []string
 	Config                config.Config
+	// RootfsPrepare, when set, is rendered as the first ExecStartPre command
+	// that materialises a writable rootfs before the container starts.
+	RootfsPrepare []string
+	// ExtraStartPre holds additional ExecStartPre commands written after
+	// RootfsPrepare (e.g. writing a proxy config into the rootfs).
+	ExtraStartPre [][]string
+}
+
+type RenderedUnit struct {
+	Name string
+	Text string
+}
+
+func RenderRootfsUnits(input RenderInput) ([]RenderedUnit, error) {
+	containerText, err := RenderRootfsContainer(input)
+	if err != nil {
+		return nil, err
+	}
+	units := make([]RenderedUnit, 0, len(input.Config.Networks)+len(input.Config.Volumes)+1)
+	for _, network := range input.Config.Networks {
+		text, err := RenderNetwork(network)
+		if err != nil {
+			return nil, err
+		}
+		units = append(units, RenderedUnit{Name: network.Name + ".network", Text: text})
+	}
+	for _, volume := range input.Config.Volumes {
+		text, err := RenderVolume(volume)
+		if err != nil {
+			return nil, err
+		}
+		units = append(units, RenderedUnit{Name: volume.Name + ".volume", Text: text})
+	}
+	units = append(units, RenderedUnit{Name: input.FallbackContainerName + ".container", Text: containerText})
+	return units, nil
+}
+
+func RenderNetwork(network config.NetworkUnitConfig) (string, error) {
+	if network.Name == "" {
+		return "", fmt.Errorf("network name is required")
+	}
+	var b strings.Builder
+	b.WriteString("[Network]\n")
+	b.WriteString("NetworkName=" + network.Name + "\n")
+	writeStringOption(&b, "Driver", network.Driver)
+	writeBoolOption(&b, "Internal", network.Internal)
+	writeBoolOption(&b, "IPv6", network.IPv6)
+	writeStringOption(&b, "Subnet", network.Subnet)
+	writeStringOption(&b, "Gateway", network.Gateway)
+	writeStringOption(&b, "IPRange", network.IPRange)
+	for _, dns := range network.DNS {
+		b.WriteString("DNS=" + dns + "\n")
+	}
+	for _, option := range network.Options {
+		b.WriteString("Options=" + option + "\n")
+	}
+	for _, key := range sortedKeys(network.Labels) {
+		b.WriteString("Label=" + key + "=" + network.Labels[key] + "\n")
+	}
+	writePassthroughOptions(&b, network.Quadlet)
+	return b.String(), nil
+}
+
+func RenderVolume(volume config.VolumeUnitConfig) (string, error) {
+	if volume.Name == "" {
+		return "", fmt.Errorf("volume name is required")
+	}
+	var b strings.Builder
+	b.WriteString("[Volume]\n")
+	b.WriteString("VolumeName=" + volume.Name + "\n")
+	writeStringOption(&b, "Driver", volume.Driver)
+	writeBoolOption(&b, "Copy", volume.Copy)
+	for _, option := range volume.Options {
+		b.WriteString("Options=" + option + "\n")
+	}
+	for _, key := range sortedKeys(volume.Labels) {
+		b.WriteString("Label=" + key + "=" + volume.Labels[key] + "\n")
+	}
+	writePassthroughOptions(&b, volume.Quadlet)
+	return b.String(), nil
 }
 
 func RenderRootfsContainer(input RenderInput) (string, error) {
@@ -24,6 +104,13 @@ func RenderRootfsContainer(input RenderInput) (string, error) {
 	if len(input.Command) == 0 {
 		return "", fmt.Errorf("command is required")
 	}
+	// Quadlet only accepts oneshot or notify for .container units; anything else
+	// (e.g. the systemd-native "simple") makes the generator silently skip the
+	// unit, so reject it early with an actionable message. Empty defaults to
+	// oneshot below.
+	if serviceType := input.Config.Service.Type; serviceType != "" && serviceType != "oneshot" && serviceType != "notify" {
+		return "", fmt.Errorf("service.type %q is not supported by Quadlet; use \"oneshot\" (default, for task containers that run once) or \"notify\" (for long-running services)", serviceType)
+	}
 
 	containerName := input.FallbackContainerName
 	if input.Config.Container.Name != "" {
@@ -32,11 +119,26 @@ func RenderRootfsContainer(input RenderInput) (string, error) {
 
 	var b strings.Builder
 	b.WriteString("[Unit]\n")
-	b.WriteString("Description=podman-agent-container rootfs run\n\n")
+	b.WriteString("Description=graft rootfs run\n")
+	for _, dependency := range generatedDependencies(input.Config) {
+		b.WriteString("Requires=" + dependency + "\n")
+		b.WriteString("After=" + dependency + "\n")
+	}
+	b.WriteString("\n")
 	b.WriteString("[Container]\n")
 	b.WriteString("Rootfs=" + input.Rootfs + "\n")
 	b.WriteString("ContainerName=" + containerName + "\n")
 	b.WriteString("AutoUpdate=none\n")
+	b.WriteString("Label=managed-by=graft\n")
+	if input.Config.Attach.TmuxSession != "" {
+		b.WriteString("Label=graft.attach.tmux-session=" + input.Config.Attach.TmuxSession + "\n")
+	}
+	if input.Config.Attach.Shell != "" {
+		b.WriteString("Label=graft.attach.shell=" + input.Config.Attach.Shell + "\n")
+	}
+	if input.Config.Attach.StartDelay != "" {
+		b.WriteString("Label=graft.attach.start-delay=" + input.Config.Attach.StartDelay + "\n")
+	}
 	if !hasVolumeTarget(input.Config.Filesystem.Volumes, "/nix/store") {
 		b.WriteString("Volume=/nix/store:/nix/store:ro\n")
 	}
@@ -56,6 +158,50 @@ func RenderRootfsContainer(input RenderInput) (string, error) {
 	for _, arg := range input.Config.Container.PodmanArgs {
 		b.WriteString("PodmanArgs=" + SystemdQuote(arg) + "\n")
 	}
+	for _, arg := range input.Config.Container.GlobalArgs {
+		b.WriteString("GlobalArgs=" + SystemdQuote(arg) + "\n")
+	}
+	writeStringOption(&b, "Pod", input.Config.Container.Pod)
+	writeStringOption(&b, "Timezone", input.Config.Container.Timezone)
+	writeStringOption(&b, "Notify", input.Config.Container.Notify)
+	writeBoolOption(&b, "RunInit", input.Config.Container.RunInit)
+	if input.Config.Container.StopTimeout != 0 {
+		_, _ = fmt.Fprintf(&b, "StopTimeout=%d\n", input.Config.Container.StopTimeout)
+	}
+	for _, key := range sortedKeys(input.Config.Container.Annotations) {
+		b.WriteString("Annotation=" + key + "=" + input.Config.Container.Annotations[key] + "\n")
+	}
+	for _, f := range input.Config.Container.EnvironmentFile {
+		b.WriteString("EnvironmentFile=" + f + "\n")
+	}
+	writeBoolOption(&b, "EnvironmentHost", input.Config.Container.EnvironmentHost)
+	writeStringOption(&b, "IP", input.Config.Container.IP)
+	writeStringOption(&b, "IP6", input.Config.Container.IP6)
+	for _, a := range input.Config.Container.NetworkAlias {
+		b.WriteString("NetworkAlias=" + a + "\n")
+	}
+	for _, p := range input.Config.Container.ExposeHostPort {
+		b.WriteString("ExposeHostPort=" + p + "\n")
+	}
+	for _, m := range input.Config.Container.UIDMap {
+		b.WriteString("UIDMap=" + m + "\n")
+	}
+	for _, m := range input.Config.Container.GIDMap {
+		b.WriteString("GIDMap=" + m + "\n")
+	}
+	writeStringOption(&b, "SubUIDMap", input.Config.Container.SubUIDMap)
+	writeStringOption(&b, "SubGIDMap", input.Config.Container.SubGIDMap)
+	writeStringOption(&b, "ShmSize", input.Config.Container.ShmSize)
+	for _, p := range input.Config.Container.Mask {
+		b.WriteString("Mask=" + p + "\n")
+	}
+	for _, p := range input.Config.Container.UnmaskPaths {
+		b.WriteString("UnmaskPaths=" + p + "\n")
+	}
+	for _, s := range input.Config.Container.Sysctl {
+		b.WriteString("Sysctl=" + s + "\n")
+	}
+	writeStringOption(&b, "LogDriver", input.Config.Container.LogDriver)
 
 	writeBoolOption(&b, "ReadOnly", input.Config.Filesystem.ReadOnly)
 	writeBoolOption(&b, "ReadOnlyTmpfs", input.Config.Filesystem.ReadOnlyTmpfs)
@@ -91,7 +237,13 @@ func RenderRootfsContainer(input RenderInput) (string, error) {
 		b.WriteString("AddDevice=" + value + "\n")
 	}
 
-	writeStringOption(&b, "Network", input.Config.Network.Mode)
+	networks := input.Config.Network.Modes
+	if len(networks) == 0 && input.Config.Network.Mode != "" {
+		networks = []string{input.Config.Network.Mode}
+	}
+	for _, n := range networks {
+		b.WriteString("Network=" + n + "\n")
+	}
 	for _, publish := range input.Config.Network.Publish {
 		b.WriteString("PublishPort=" + publish + "\n")
 	}
@@ -100,6 +252,12 @@ func RenderRootfsContainer(input RenderInput) (string, error) {
 	}
 	for _, host := range input.Config.Network.AddHost {
 		b.WriteString("AddHost=" + host + "\n")
+	}
+	for _, opt := range input.Config.Network.DNSOption {
+		b.WriteString("DNSOption=" + opt + "\n")
+	}
+	for _, s := range input.Config.Network.DNSSearch {
+		b.WriteString("DNSSearch=" + s + "\n")
 	}
 
 	for _, cap := range input.Config.Security.DropCapabilities {
@@ -116,6 +274,10 @@ func RenderRootfsContainer(input RenderInput) (string, error) {
 		b.WriteString("SecurityOpt=" + opt + "\n")
 	}
 	writeStringOption(&b, "UserNS", input.Config.Security.UserNS)
+	writeStringOption(&b, "SecurityLabelFileType", input.Config.Security.SecurityLabelFileType)
+	writeStringOption(&b, "SecurityLabelLevel", input.Config.Security.SecurityLabelLevel)
+	writeBoolOption(&b, "SecurityLabelNested", input.Config.Security.SecurityLabelNested)
+	writeStringOption(&b, "SecurityLabelType", input.Config.Security.SecurityLabelType)
 
 	writeStringOption(&b, "Memory", input.Config.Resources.Memory)
 	writeStringOption(&b, "MemorySwap", input.Config.Resources.MemorySwap)
@@ -127,6 +289,27 @@ func RenderRootfsContainer(input RenderInput) (string, error) {
 	for _, ulimit := range input.Config.Resources.Ulimits {
 		b.WriteString("Ulimit=" + ulimit + "\n")
 	}
+	if h := input.Config.Container.Health; h.Cmd != "" {
+		b.WriteString("HealthCmd=" + h.Cmd + "\n")
+		writeStringOption(&b, "HealthInterval", h.Interval)
+		writeStringOption(&b, "HealthTimeout", h.Timeout)
+		if h.Retries != 0 {
+			_, _ = fmt.Fprintf(&b, "HealthRetries=%d\n", h.Retries)
+		}
+		writeStringOption(&b, "HealthStartPeriod", h.StartPeriod)
+		writeStringOption(&b, "HealthOnFailure", h.OnFailure)
+		if h.StartupCmd != "" {
+			b.WriteString("HealthStartupCmd=" + h.StartupCmd + "\n")
+			writeStringOption(&b, "HealthStartupInterval", h.StartupInterval)
+			if h.StartupRetries != 0 {
+				_, _ = fmt.Fprintf(&b, "HealthStartupRetries=%d\n", h.StartupRetries)
+			}
+			if h.StartupSuccess != 0 {
+				_, _ = fmt.Fprintf(&b, "HealthStartupSuccess=%d\n", h.StartupSuccess)
+			}
+			writeStringOption(&b, "HealthStartupTimeout", h.StartupTimeout)
+		}
+	}
 	for _, secret := range input.Config.Secrets {
 		if secret.Name == "" {
 			continue
@@ -136,6 +319,12 @@ func RenderRootfsContainer(input RenderInput) (string, error) {
 	writePassthroughOptions(&b, input.Config.Quadlet.Container)
 
 	b.WriteString("\n[Service]\n")
+	if len(input.RootfsPrepare) > 0 {
+		b.WriteString("ExecStartPre=" + quoteExec(input.RootfsPrepare) + "\n")
+	}
+	for _, cmd := range input.ExtraStartPre {
+		b.WriteString("ExecStartPre=" + quoteExec(cmd) + "\n")
+	}
 	serviceType := input.Config.Service.Type
 	if serviceType == "" {
 		serviceType = "oneshot"
@@ -159,6 +348,17 @@ func RenderRootfsContainer(input RenderInput) (string, error) {
 	return b.String(), nil
 }
 
+func generatedDependencies(cfg config.Config) []string {
+	dependencies := make([]string, 0, len(cfg.Networks)+len(cfg.Volumes))
+	for _, network := range cfg.Networks {
+		dependencies = append(dependencies, network.Name+"-network.service")
+	}
+	for _, volume := range cfg.Volumes {
+		dependencies = append(dependencies, volume.Name+"-volume.service")
+	}
+	return dependencies
+}
+
 func renderSecret(secret config.SecretConfig) string {
 	value := secret.Name
 	appendPart := func(key, part string) {
@@ -178,7 +378,7 @@ func renderSecret(secret config.SecretConfig) string {
 }
 
 func writePassthroughOptions(b *strings.Builder, values map[string][]string) {
-	for _, key := range sortedOptionKeys(values) {
+	for _, key := range sortedKeys(values) {
 		for _, value := range values[key] {
 			b.WriteString(key + "=" + value + "\n")
 		}

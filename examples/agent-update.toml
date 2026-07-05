@@ -1,0 +1,60 @@
+version = 1
+name = "graft-agent-update"
+
+# Update flow:
+#   1. graft up examples/agent-update.toml
+#   2. npm install / run agent inside the isolated workspace
+#   3. Review the diff shown after the container exits
+#   4. workspace.promote = "prompt" asks: apply changes back to the real workspace?
+#   5. Promoted package-lock.json → graft nix-bake <dir> → buildNpmPackage Nix snippet
+#   6. Add the snippet to your flake, nixos rebuild → npm packages land in /nix/store
+#   7. Update runtime.packages = ["my-agent"] — no more npm install needed
+
+[config.runtime]
+mode = "rootfs-store"
+packages = [
+  "bashInteractive",
+  "coreutils",
+  "nodejs_22",
+]
+# Once npm packages are in the Nix store, replace the command with the real entrypoint:
+# command = ["my-agent", "--session", "/sessions"]
+command = ["bash", "-lc", "echo workspace: $PWD; echo HOME=$HOME; node --version; echo 'Run: npm install <your-agent>'; exec bash"]
+
+[config.workspace]
+mode = "copy"
+source = "."
+target = "/workspace"
+review = "diff"
+# After the container exits, show the diff and ask whether to apply changes back:
+promote = "prompt"
+# Uncomment to always apply without asking (e.g. in CI):
+# promote = "auto"
+# To include node_modules in the copy (large but avoids re-installing):
+# excludePatterns = [".git", ".jj", ".go", ".direnv", "result"]
+
+[config.home]
+# Ephemeral: a fresh HOME per run (good for isolation).
+# Switch to persistent for sessions that survive across runs:
+#   mode = "persistent"
+#   source = "~/.local/share/graft/sessions/my-agent"
+#   target = "/home/agent"
+ephemeral = true
+target = "/home/agent"
+
+[config.filesystem]
+readOnly = true
+readOnlyTmpfs = true
+tmpfs = ["/tmp", "/run"]
+
+# Enable network if the agent needs to call APIs or install packages:
+# [config.network]
+# mode = "bridge"
+
+[config.network]
+mode = "none"
+
+[config.security]
+dropCapabilities = ["all"]
+noNewPrivileges = true
+userns = "keep-id"

@@ -1,6 +1,8 @@
 # Security and isolation notes
 
-`podman-agent-container` does not enable hidden security policy. Security is explicit TOML.
+For the broader hardening checklist, see [`security-roadmap.md`](security-roadmap.md).
+
+`graft` does not enable hidden security policy. Security is explicit TOML.
 
 ## Locked-down parent example
 
@@ -111,6 +113,26 @@ WantedBy = ["default.target"]
 ```
 
 Passthrough is intentionally explicit and should be reviewed carefully.
+
+## Ephemeral agent/update isolation
+
+For agents and update tools that mutate random files, use explicit transient isolation:
+
+```toml
+[config.workspace]
+mode = "copy"
+source = "."
+target = "/workspace"
+review = "diff"
+
+[config.home]
+ephemeral = true
+target = "/home/user"
+```
+
+This makes `graft up` mount a writable copy of the workspace and a temporary
+HOME/XDG tree. The real workspace and real home are not mounted writable by
+this flow. See [`config.md`](config.md) for home and workspace isolation options.
 
 ## Store access
 

@@ -1,0 +1,54 @@
+# graft — generic agent container
+#
+# A starting point for running an AI agent or other interactive tool.
+# Fill in `packages` and `command` for your specific agent.
+# The container persists its home directory across restarts and rebuilds.
+#
+# Activate (NixOS):
+#   Copy to your configRoot, set [deploy] enable = true, then nixos-rebuild switch.
+#
+# Activate (Home Manager):
+#   Same, but set target = "user" and use programs.graft in your HM config.
+#
+# Start:
+#   graft up my-agent        # first time
+#   graft my-agent           # start-or-attach shortcut afterwards
+
+version = 1
+name = "my-agent"
+
+[deploy]
+enable = true
+target = "system"   # "user" for Home Manager / rootless Podman
+
+[config.runtime]
+mode = "rootfs-store"
+packages = [
+  "tmux",           # required for graft attach
+  # "your-agent",   # add your agent's Nix package here
+]
+command = [
+  # "your-agent",   # replace with your agent's command
+]
+
+[config.home]
+mode = "session"                             # copy on start, review/promote on stop
+source = "~/.local/share/graft/my-agent"    # seeded from here; changes promoted back
+review = "diff"                              # print diff before promote
+promote = "prompt"                           # ask before applying changes
+
+# Shadow mount: the agent's output / working directory.
+# Use `graft diff <name>` to see what changed, `graft promote <name>` to push
+# changes back to ~/projects/my-app. `graft reset <name>` clears everything.
+[[config.home.shadow]]
+container = "/workspace"
+host      = "~/projects/my-app"
+
+[config.attach]
+startDelay = "1s"   # wait a moment after start before attaching
+
+[config.service]
+type = "notify"
+restart = "on-failure"
+restartSec = "10s"
+restartIfChanged = false   # keep a running session alive during nixos-rebuild switch

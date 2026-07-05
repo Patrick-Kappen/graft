@@ -5,10 +5,10 @@ The Home Manager route writes rootless/user Quadlet files from TOML.
 ```nix
 {
   imports = [
-    inputs.podman-agent-container.homeManagerModules.default
+    inputs.graft.homeManagerModules.default
   ];
 
-  programs.podman-agent-container = {
+  programs.graft = {
     enable = true;
     configRoot = ./containers;
   };
@@ -44,7 +44,7 @@ Use the NixOS module for system-target containers.
 Like the NixOS module, explicit files are still supported:
 
 ```nix
-programs.podman-agent-container = {
+programs.graft = {
   enable = true;
   configFiles = [
     ./containers/dev-shell.toml
@@ -53,6 +53,31 @@ programs.podman-agent-container = {
 ```
 
 Explicit `configFiles` are active when they are not no-op.
+
+## Nix-native authoring
+
+Containers can also be authored directly in Nix instead of TOML files, via
+`programs.graft.containers.<name>`:
+
+```nix
+programs.graft = {
+  enable = true;
+  containers.dev-shell.config.runtime = {
+    mode = "rootfs-store";
+    packages = [ "bashInteractive" "coreutils" ];
+    command = [ "bash" "-l" ];
+  };
+};
+```
+
+The attribute name is the container name (unless the value sets its own `name`),
+and the value mirrors the TOML schema (`version`, `name`, `parents`, `children`,
+`deploy`, `validation`, `config`). It is serialized to TOML with
+`pkgs.formats.toml` and flows through the same resolver and renderer as
+file-based configs — no second engine. Nix-authored containers are always active
+(like `configFiles`), so `[deploy] enable` is not required; `parents`/`children`
+refs resolve against `configRoot`. See
+[reference.md](reference.md#nix-native-authoring-containers).
 
 ## Graph and packages
 
@@ -66,13 +91,21 @@ The Home Manager module uses the same resolver as the NixOS module:
 - `config.runtime.packageOps` add/remove/replace;
 - `config.runtime.packages` -> `pkgs.<name>` runtime closure.
 
+## Requirements
+
+The Home Manager module does **not** enable Podman itself — that is a system-level concern. Make sure rootless Podman is available before using this module:
+
+- **NixOS**: add `virtualisation.podman.enable = true;` to your NixOS configuration.
+- **Other distros**: install Podman through your system package manager.
+
 ## Activation
 
-Home Manager writes the Quadlet files. Starting/enabling is still handled by user systemd/Podman Quadlet outside this first module slice, for example:
+The module automatically runs `systemctl --user daemon-reload` after every `home-manager switch` via a built-in activation script. You do not need to run it manually.
+
+To start a container after the first switch:
 
 ```bash
-systemctl --user daemon-reload
-systemctl --user start <name>.service
+graft up <name>
 ```
 
-Autostart policy will be added later around `[deploy].autostart` / session lifecycle.
+Autostart/session lifecycle policy will be added later.

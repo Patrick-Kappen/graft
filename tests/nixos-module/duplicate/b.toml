@@ -1,5 +1,5 @@
 version = 1
-name = "pac-test-duplicate"
+name = "graft-test-duplicate"
 
 [deploy]
 enable = true

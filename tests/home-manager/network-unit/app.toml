@@ -1,0 +1,40 @@
+version = 1
+name = "graft-network-demo"
+
+[deploy]
+enable = true
+target = "user"
+
+[config.runtime]
+mode = "rootfs-store"
+packages = ["bashInteractive"]
+command = ["bash", "-lc", "echo network demo"]
+
+[config.network]
+mode = "graft-internal.network"
+
+[[config.networks]]
+name = "graft-internal"
+driver = "bridge"
+internal = true
+ipv6 = false
+subnet = "10.89.0.0/24"
+gateway = "10.89.0.1"
+options = ["mtu=1500"]
+
+[config.networks.labels]
+managed-by = "graft"
+
+[[config.volumes]]
+name = "graft-cache"
+driver = "local"
+copy = false
+options = ["o=nodev"]
+
+[config.volumes.labels]
+managed-by = "graft"
+
+[[config.filesystem.volumes]]
+source = "graft-cache.volume"
+target = "/cache"
+mode = "rw"

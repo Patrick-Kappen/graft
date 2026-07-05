@@ -54,7 +54,7 @@ command = ["bash", "-lc", "echo hello"]
 FOO = "bar"
 
 [config.service]
-type = "simple"
+type = "notify"
 restart = "on-failure"
 restartSec = "10s"
 timeoutStartSec = "2m"
@@ -81,8 +81,8 @@ remainAfterExit = false
 	if file.Config.Container.Environment["FOO"] != "bar" {
 		t.Fatalf("Environment[FOO] = %q", file.Config.Container.Environment["FOO"])
 	}
-	if file.Config.Service.Type != "simple" {
-		t.Fatalf("Service.Type = %q, want simple", file.Config.Service.Type)
+	if file.Config.Service.Type != "notify" {
+		t.Fatalf("Service.Type = %q, want notify", file.Config.Service.Type)
 	}
 	if file.Config.Service.RemainAfterExit == nil || *file.Config.Service.RemainAfterExit {
 		t.Fatal("expected service.remainAfterExit=false")
@@ -314,6 +314,33 @@ target = "/run/secrets/token"
 	}
 	if !strings.Contains(err.Error(), "secret must set name") {
 		t.Fatalf("error = %q", err)
+	}
+}
+
+func TestLoadRejectsControlChars(t *testing.T) {
+	path := writeTempConfig(t, ""+
+		"version = 1\n"+
+		"name = \"bad\"\n\n"+
+		"[config.container]\n"+
+		"hostname = \"safe\\nPrivileged=true\"\n")
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "control character") {
+		t.Fatalf("error = %q", err)
+	}
+}
+
+func TestNoopHandlesNewFields(t *testing.T) {
+	file := &File{Config: Config{}}
+	if !file.IsNoop() {
+		t.Fatal("zero config should be no-op")
+	}
+	file.Config.Volumes = []VolumeUnitConfig{{Name: "cache"}}
+	if file.IsNoop() {
+		t.Fatal("volume-only config should not be no-op")
 	}
 }
 

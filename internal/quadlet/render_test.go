@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zerodawn1990/podman-agent-container/internal/config"
+	"github.com/zerodawn1990/graft/internal/config"
 )
 
 func boolPtr(value bool) *bool { return &value }
@@ -38,7 +38,7 @@ func TestRenderRootfsContainer(t *testing.T) {
 			},
 			Resources: config.ResourcesConfig{Memory: "1g", PidsLimit: 128},
 			Service: config.ServiceConfig{
-				Type:            "simple",
+				Type:            "notify",
 				Restart:         "on-failure",
 				RestartSec:      "10s",
 				TimeoutStartSec: "2m",
@@ -69,7 +69,7 @@ func TestRenderRootfsContainer(t *testing.T) {
 		"UserNS=keep-id",
 		"Memory=1g",
 		"PidsLimit=128",
-		"Type=simple",
+		"Type=notify",
 		"RemainAfterExit=false",
 		"Restart=on-failure",
 		"RestartSec=10s",
@@ -94,6 +94,72 @@ func TestRenderRootfsContainerUsesFallbackName(t *testing.T) {
 	}
 	if !strings.Contains(text, "ContainerName=fallback-name") {
 		t.Fatalf("missing fallback container name\n%s", text)
+	}
+}
+
+func TestRenderRootfsContainerRejectsInvalidServiceType(t *testing.T) {
+	_, err := RenderRootfsContainer(RenderInput{
+		Rootfs:                "/tmp/rootfs",
+		FallbackContainerName: "demo",
+		Command:               []string{"/nix/store/runtime/bin/bash"},
+		Config: config.Config{
+			Service: config.ServiceConfig{Type: "simple"},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for unsupported service.type \"simple\", got nil")
+	}
+	if !strings.Contains(err.Error(), "not supported by Quadlet") {
+		t.Fatalf("unexpected error message: %v", err)
+	}
+}
+
+func TestRenderRootfsContainerAllowsNotifyAndOneshot(t *testing.T) {
+	for _, serviceType := range []string{"", "oneshot", "notify"} {
+		if _, err := RenderRootfsContainer(RenderInput{
+			Rootfs:                "/tmp/rootfs",
+			FallbackContainerName: "demo",
+			Command:               []string{"/nix/store/runtime/bin/bash"},
+			Config: config.Config{
+				Service: config.ServiceConfig{Type: serviceType},
+			},
+		}); err != nil {
+			t.Fatalf("service.type %q should be accepted, got error: %v", serviceType, err)
+		}
+	}
+}
+
+func TestRenderRootfsContainerRootfsPrepare(t *testing.T) {
+	text, err := RenderRootfsContainer(RenderInput{
+		Rootfs:                "%t/graft/demo/rootfs",
+		FallbackContainerName: "demo",
+		Command:               []string{"/nix/store/runtime/bin/bash"},
+		RootfsPrepare:         []string{"/nix/store/graft/bin/graft", "prepare-rootfs", "%t/graft/demo/rootfs"},
+	})
+	if err != nil {
+		t.Fatalf("RenderRootfsContainer() error = %v", err)
+	}
+	for _, want := range []string{
+		"Rootfs=%t/graft/demo/rootfs",
+		"ExecStartPre=/nix/store/graft/bin/graft prepare-rootfs %t/graft/demo/rootfs",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("rendered Quadlet missing %q\n--- text ---\n%s", want, text)
+		}
+	}
+}
+
+func TestRenderRootfsContainerNoRootfsPrepareByDefault(t *testing.T) {
+	text, err := RenderRootfsContainer(RenderInput{
+		Rootfs:                "/tmp/rootfs",
+		FallbackContainerName: "demo",
+		Command:               []string{"/nix/store/runtime/bin/bash"},
+	})
+	if err != nil {
+		t.Fatalf("RenderRootfsContainer() error = %v", err)
+	}
+	if strings.Contains(text, "ExecStartPre=") {
+		t.Fatalf("unexpected ExecStartPre when RootfsPrepare is empty\n%s", text)
 	}
 }
 

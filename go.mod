@@ -1,4 +1,4 @@
-module github.com/zerodawn1990/podman-agent-container
+module github.com/zerodawn1990/graft
 
 go 1.24
 

@@ -1,73 +1,74 @@
-# Visie: pac als direnv voor containers
+# Vision: graft as direnv for containers
 
-`pac` (`podman-agent-container`) moet uiteindelijk voelen als **direnv voor containers**.
+`graft` should ultimately feel like **direnv for containers**.
 
-Niet:
+Not:
 
 ```text
-cd project -> host shell krijgt extra PATH/env
+cd project -> host shell gets extra PATH/env
 ```
 
-maar:
+but:
 
 ```text
-cd project -> project container wordt gestart/gebruikt
-leave/idle -> container wordt gestopt/blijft idle volgens policy
-changes -> uit candidate workspace gehaald en ter review klaargezet
+cd project -> the project container is started/used
+leave/idle -> the container is stopped/stays idle per policy
+changes -> pulled from a candidate workspace and staged for review
 ```
 
-De tool levert de schil en orchestration. Gebruikers bepalen zelf beleid, presets, mounts, netwerk, security en packages via TOML.
+The tool provides the shell and orchestration. Users decide their own policy,
+presets, mounts, network, security, and packages through TOML.
 
-## Kernwaarde
+## Core value
 
-Het gat dat dit project vult:
+The gap this project fills:
 
 ```text
-Nix store backed runtime closures
+Nix store-backed runtime closures
 + Podman/Quadlet lifecycle
 + container-only tools
-+ TOML graph/compositie
-+ snelle dynamische projectcontainers
-+ optionele promotie naar permanente config
++ a TOML graph for composition
++ fast, dynamic project containers
++ optional promotion to permanent config
 ```
 
-Zonder verplicht:
+Without requiring:
 
-- Dockerfile;
-- OCI image build;
-- image pull;
-- host PATH vervuiling;
-- handgeschreven Quadlet units;
-- NixOS rebuild voor snelle/projectmatige runs.
+- a Dockerfile;
+- an OCI image build;
+- an image pull;
+- host PATH pollution;
+- hand-written Quadlet units;
+- a NixOS rebuild for the fast/project path.
 
-## Productdefinitie
+## Product definition
 
 ```text
-pac = direnv voor Podman/Quadlet containers, backed by Nix store closures
+graft = direnv for Podman/Quadlet containers, backed by Nix store closures
 ```
 
-Bij een project:
+For a project:
 
 ```text
 project repo
-  pac.toml / podman-agent-container.toml / override.toml
-  flake.nix / flake.lock optioneel
+  graft.toml / .graft.toml / config.toml
+  flake.nix / flake.lock optional
 ```
 
-`pac` kan dan:
+`graft` can then:
 
-1. TOML autodetecteren;
-2. parent/child graph resolven;
-3. runtime packages realiseren in `/nix/store`;
-4. een minimale rootfs-store container renderen;
-5. Quadlet transient of persistent starten;
-6. workspace isoleren via copy/jj candidate;
-7. bij leave/idle wijzigingen verzamelen voor review;
-8. later een werkende configuratie promoten naar een repo/branch/PR.
+1. autodetect TOML;
+2. resolve the parent/child graph;
+3. realise runtime packages in `/nix/store`;
+4. render a minimal rootfs-store container;
+5. start Quadlet transient or persistent;
+6. isolate a workspace via copy/jj candidate;
+7. on leave/idle, collect changes for review;
+8. later promote a working configuration to a repo/branch/PR.
 
-## Belangrijk principe
+## Key principle
 
-Leeg betekent niets.
+Empty means nothing.
 
 ```toml
 version = 1
@@ -77,13 +78,13 @@ name = "example"
 # no-op
 ```
 
-Geen impliciete container, mount, network, security policy, package of agent.
+No implicit container, mount, network, security policy, or package.
 
-## TOML is bron van waarheid
+## TOML is the source of truth
 
-TOML zet uiteindelijk alles:
+TOML ultimately sets everything:
 
-- containernaam;
+- container name;
 - runtime mode;
 - packages;
 - command;
@@ -93,19 +94,20 @@ TOML zet uiteindelijk alles:
 - security;
 - resources;
 - session/idle policy;
-- parent/child relaties;
+- parent/child relations;
 - deploy/promote metadata.
 
-NixOS/Home Manager moeten kort blijven en alleen naar een map wijzen:
+NixOS/Home Manager should stay short and only point at a directory:
 
 ```nix
-services.podman-agent-container = {
+services.graft = {
   enable = true;
   configRoot = ./containers;
 };
 ```
 
-Een TOML uit `configRoot` wordt NixOS-managed als hij expliciet deploy aanzet:
+A TOML from `configRoot` becomes NixOS-managed only if it explicitly enables
+deployment:
 
 ```toml
 [deploy]
@@ -113,16 +115,16 @@ enable = true
 target = "system"
 ```
 
-Voor Home Manager/rootless user Quadlet:
+For Home Manager / rootless user Quadlet:
 
 ```nix
-programs.podman-agent-container = {
+programs.graft = {
   enable = true;
   configRoot = ./containers;
 };
 ```
 
-Home Manager deployt alleen TOML met:
+Home Manager only deploys TOML with:
 
 ```toml
 [deploy]
@@ -130,19 +132,19 @@ enable = true
 target = "user"
 ```
 
-De inhoud staat in TOML, niet in Nix options.
+The content lives in TOML, not in Nix options.
 
-## Nix store runtime, niet host install
+## Nix store runtime, not host install
 
-Packages hoeven niet geïnstalleerd te zijn op de host PATH.
+Packages do not need to be installed on the host `PATH`.
 
 ```text
-package in /nix/store        ja
-package in host PATH         nee
-package in container PATH    ja
+package in /nix/store        yes
+package on host PATH         no
+package on container PATH    yes
 ```
 
-Voorbeeld:
+Example:
 
 ```toml
 [config.runtime]
@@ -151,13 +153,14 @@ packages = ["bashInteractive", "coreutils", "go", "gopls"]
 command = ["bash", "-lc", "go test ./..."]
 ```
 
-Nix realiseert de package closures in `/nix/store`. De container krijgt een runtime env in PATH, maar de host shell niet.
+Nix realises the package closures in `/nix/store`. The container gets a runtime
+env on `PATH`, but the host shell does not.
 
-## Geen image build nodig voor snelle flow
+## No image build needed for the fast flow
 
-Voor `rootfs-store` wordt geen container image gebouwd.
+For `rootfs-store`, no container image is built.
 
-Wat wel ontstaat:
+What is produced:
 
 ```text
 /nix/store/...-runtime
@@ -165,26 +168,27 @@ Wat wel ontstaat:
 /generated Quadlet .container
 ```
 
-Als store paths al bestaan of uit binary cache komen, is dit snel. Als niet, bouwt/downloadt Nix alleen ontbrekende closures.
+If store paths already exist or come from a binary cache, this is fast. If not,
+Nix builds/downloads only the missing closures.
 
-Later kan OCI/image mode alsnog bestaan voor distributie of niet-Nix hosts.
+Later, OCI/image mode can still exist for distribution or non-Nix hosts.
 
-## Snel versus permanent
+## Fast versus permanent
 
-Er zijn twee hoofdroutes.
+There are two main routes.
 
-### Snelle projectflow
+### Fast project flow
 
-Geen NixOS rebuild.
+No NixOS rebuild.
 
 ```bash
-pac up ./pac.toml
+graft up ./graft.toml
 ```
 
-Of autodetect:
+Or autodetect:
 
 ```bash
-pac up
+graft up
 ```
 
 Flow:
@@ -194,26 +198,27 @@ TOML in project
   -> resolve/build runtime closure
   -> temporary Quadlet in $XDG_RUNTIME_DIR/containers/systemd
   -> systemctl --user start
-  -> container draait
+  -> container runs
 ```
 
-### Permanente/promoted flow
+### Permanent / promoted flow
 
-Voor containers die je vaker gebruikt:
+For containers you use more often:
 
 ```text
 effective/project config
-  -> pac promote
-  -> nieuwe TOML in infra/NixOS/Home Manager repo
+  -> graft promote
+  -> new TOML in infra/NixOS/Home Manager repo
   -> jj branch / PR / review / merge
   -> NixOS/HM managed Quadlet
 ```
 
-Dus snel experimenteren blijft transient. Permanent maken gebeurt via reviewbare repo-wijzigingen.
+So fast experimentation stays transient. Making something permanent happens
+through reviewable repo changes.
 
-## Parent/child en overrides
+## Parent/child and overrides
 
-Doel is composable containers.
+The goal is composable containers.
 
 Base container:
 
@@ -246,11 +251,12 @@ name = "appY"
 with = "appY_pinned"
 ```
 
-Het project hoeft niet de hele base container te kopiëren. Het kan parent aanroepen en alleen verschillen declareren.
+The project does not have to copy the whole base container. It can reference the
+parent and declare only the differences.
 
-## Package operations en pins
+## Package operations and pins
 
-Huidig package operation model:
+Current package operation model:
 
 ```toml
 [config.runtime.packageOps]
@@ -262,7 +268,7 @@ name = "appY"
 with = "appY_pinned"
 ```
 
-Doel:
+Goal:
 
 ```text
 base packages
@@ -271,87 +277,88 @@ base packages
   + appZ
 ```
 
-Version pinning kan via flake locks/refs. Store paths hoeven alleen gerealiseerd te worden; ze hoeven niet in host profiles te staan.
+Version pinning can use flake locks/refs. Store paths only need to be realised;
+they do not need to live in host profiles.
 
-## Candidate workspace voor agents
+## Candidate workspace
 
-Voor agents of veilige projectmutaties:
+For safe project mutations or isolated workloads:
 
 ```text
-echte workspace
+real workspace
   -> candidate copy / jj workspace
-  -> container krijgt candidate writable
-  -> agent werkt daar
-  -> leave/idle exporteert diff/change
+  -> container gets the candidate writable
+  -> container works there
+  -> leave/idle exports the diff/change
   -> review/apply/discard
 ```
 
-Regel:
+Rule:
 
 ```text
-echte workspace nooit automatisch writable in agent-container
+the real workspace is never automatically writable in the container
 ```
 
-Mogelijke workspace modes:
+Possible workspace modes:
 
 ```toml
 [workspace]
 mode = "jj"       # jj | copy | none
 target = "/workspace"
-review = "patch" # patch | jj-change
+review = "patch"  # patch | jj-change
 ```
 
 ## Session lifecycle
 
-Later moet `pac` sessies beheren.
+Later `graft` should manage sessions.
 
-Handmatig eerst:
-
-```bash
-pac enter
-pac leave
-pac status
-pac review
-pac apply
-pac discard
-```
-
-Daarna shell hook:
+Manual first:
 
 ```bash
-eval "$(pac hook zsh)"
+graft enter
+graft leave
+graft status
+graft review
+graft apply
+graft discard
 ```
 
-Gedrag:
+Then a shell hook:
+
+```bash
+eval "$(graft hook zsh)"
+```
+
+Behaviour:
 
 ```text
-enter directory with pac.toml -> start/reuse container
-leave directory              -> stop/keep/review according to policy
-idle timeout                 -> stop/keep/review according to policy
+enter directory with graft.toml -> start/reuse container
+leave directory                 -> stop/keep/review according to policy
+idle timeout                    -> stop/keep/review according to policy
 ```
 
-TOML richting:
+TOML direction:
 
 ```toml
 [session]
-mode = "ephemeral"      # ephemeral | persistent | hybrid
+mode = "ephemeral"     # ephemeral | persistent | hybrid
 idleTimeout = "30m"
 leaveAction = "review" # review | keep | discard | stop
 ```
 
-Persistent mode kan containers langer idle laten draaien.
+Persistent mode can keep containers running idle for longer.
 
 ## Security model
 
-Het project levert geen verborgen policy. Wel kunnen docs suggesties geven.
+The project ships no hidden policy. Docs may offer suggestions.
 
-Gebruiker kan zelf een locked parent maken:
+A user can build their own locked parent:
 
 ```toml
 [config.filesystem]
 readOnly = true
 readOnlyTmpfs = true
-tmpfs = ["/tmp", "/run", "/home/agent"]
+tmpfs = ["/tmp", "/run", "/home/user"]
 
 [config.network]
 mode = "none"
@@ -362,45 +369,47 @@ noNewPrivileges = true
 userns = "keep-id"
 ```
 
-Voor snelheid mount de eerste versie vaak heel `/nix/store` read-only. Later kan `closure-only` store access worden onderzocht.
+For speed, the first version often mounts all of `/nix/store` read-only. A
+`closure-only` store access mode can be investigated later.
 
 ```toml
 [config.runtime]
 storeAccess = "full-readonly" # later: closure-only
 ```
 
-## Directories en autodetect
+## Directories and autodetect
 
-`pac up` zonder argument probeert in huidige directory:
+`graft up` without an argument tries, in the current directory:
 
 ```text
-pac.toml
-podman-agent-container.toml
-.pac.toml
+graft.toml
+.graft.toml
 config.toml
 ```
 
-De NixOS-module kan inmiddels `parents.*` en `children.*` vanuit `configRoot` resolven.
+The NixOS module can already resolve `parents.*` and `children.*` from
+`configRoot`.
 
-## Huidige implementatiestatus
+## Current implementation status
 
-Nu aanwezig:
+Present now:
 
 - Go CLI;
-- korte binary `pac`;
-- TOML loader met strict unknown-field checks;
+- the `graft` binary;
+- TOML loader with strict unknown-field checks;
 - `inspect`, `render`, `render-nixos`, `run`, `up`;
-- no-op detectie;
+- no-op detection;
 - rootfs-store Quadlet renderer;
 - transient `systemctl --user` run;
 - Nix package build;
-- NixOS module met `configFiles`, recursive `configRoot` discovery en `parents.*`/`children.*` resolving;
-- Home Manager module met dezelfde resolver voor rootless/user Quadlet;
-- effective TOML generatie tijdens NixOS/HM build;
-- TOML `runtime.packages` -> `pkgs.<name>` in NixOS/HM modules;
-- examples en docs.
+- NixOS module with `configFiles`, recursive `configRoot` discovery, and
+  `parents.*`/`children.*` resolving;
+- Home Manager module with the same resolver for rootless/user Quadlet;
+- effective TOML generation during the NixOS/HM build;
+- TOML `runtime.packages` -> `pkgs.<name>` in the NixOS/HM modules;
+- examples and docs.
 
-Nog te bouwen:
+Still to build:
 
 - package refs beyond simple `pkgs.<name>` strings;
 - session state;

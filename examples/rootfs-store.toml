@@ -1,5 +1,5 @@
 version = 1
-name = "podman-agent-container"
+name = "graft"
 
 [config.runtime]
 mode = "rootfs-store"
@@ -7,13 +7,13 @@ packages = [
   "bashInteractive",
   "coreutils",
 ]
-command = ["bash", "-lc", "echo hello from podman-agent-container"]
+command = ["bash", "-lc", "echo hello from graft"]
 
 [config.container]
 workingDir = "/workspace"
 
 [config.container.environment]
-PAC_EXAMPLE = "1"
+GRAFT_EXAMPLE = "1"
 
 [config.filesystem]
 readOnly = true

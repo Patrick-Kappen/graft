@@ -1,5 +1,5 @@
 version = 1
-name = "pac-nixos-managed-example"
+name = "graft-nixos-managed-example"
 
 [deploy]
 enable = true
@@ -11,4 +11,4 @@ packages = [
   "bashInteractive",
   "coreutils",
 ]
-command = ["bash", "-lc", "echo hello from NixOS-managed pac container"]
+command = ["bash", "-lc", "echo hello from NixOS-managed graft container"]

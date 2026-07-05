@@ -1,0 +1,46 @@
+# graft — maximum isolation container
+#
+# A hardened template for containers that must not reach the host, the network,
+# or accumulate state. Suitable for untrusted workloads, sandboxed tasks, or
+# anything that must be fully contained.
+#
+# Defaults here are conservative: no network, read-only filesystem, all
+# capabilities dropped, strict resource limits. Add back only what you need.
+#
+# To allow controlled outbound traffic, replace [config.network] mode = "none"
+# with a proxy dependency — see docs/security.md.
+
+version = 1
+name = "secure"
+
+[deploy]
+enable = true
+target = "system"   # "user" for Home Manager / rootless Podman
+
+[config.runtime]
+mode = "rootfs-store"
+packages = []   # add only what is strictly required
+command = []    # the task command
+
+[config.network]
+mode = "none"   # no inbound or outbound network
+
+[config.filesystem]
+readOnly = true
+readOnlyTmpfs = true
+tmpfs = ["/tmp", "/run"]
+
+[config.security]
+dropCapabilities = ["all"]
+noNewPrivileges = true
+privileged = false
+
+[config.resources]
+memory = "1g"
+pidsLimit = 256
+ulimits = ["nofile=512:512"]
+
+[config.service]
+type = "oneshot"
+timeoutStartSec = "2m"
+timeoutStopSec = "30s"

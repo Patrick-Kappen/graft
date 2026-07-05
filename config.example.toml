@@ -1,4 +1,4 @@
-# podman-agent-container config
+# graft config
 #
 # Empty means no-op. This template intentionally does not define containers,
 # presets, mounts, runtimes, or security policy.
@@ -19,13 +19,12 @@ set = []
 [deploy]
 # enable = true
 # target = "system" # system | user | transient, only system is used by the NixOS module for now.
-# autostart = true
 
 [config]
 # Empty means no-op.
 
 # [config.service]
-# type = "simple"
+# type = "notify"   # "oneshot" (default; task runs once) or "notify" (long-running service). Quadlet rejects other values.
 # restart = "on-failure"
 # restartSec = "10s"
 # timeoutStartSec = "2m"

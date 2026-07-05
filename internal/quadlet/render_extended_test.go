@@ -4,8 +4,85 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zerodawn1990/podman-agent-container/internal/config"
+	"github.com/zerodawn1990/graft/internal/config"
 )
+
+func TestRenderNetworkUnit(t *testing.T) {
+	text, err := RenderNetwork(config.NetworkUnitConfig{
+		Name:     "graft-internal",
+		Driver:   "bridge",
+		Internal: boolPtr(true),
+		IPv6:     boolPtr(false),
+		Subnet:   "10.89.0.0/24",
+		Gateway:  "10.89.0.1",
+		Options:  []string{"mtu=1500"},
+		Labels:   map[string]string{"managed-by": "graft"},
+	})
+	if err != nil {
+		t.Fatalf("RenderNetwork() error = %v", err)
+	}
+	for _, want := range []string{
+		"[Network]",
+		"NetworkName=graft-internal",
+		"Driver=bridge",
+		"Internal=true",
+		"IPv6=false",
+		"Subnet=10.89.0.0/24",
+		"Gateway=10.89.0.1",
+		"Options=mtu=1500",
+		"Label=managed-by=graft",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("rendered network missing %q\n--- text ---\n%s", want, text)
+		}
+	}
+}
+
+func TestRenderVolumeUnit(t *testing.T) {
+	text, err := RenderVolume(config.VolumeUnitConfig{
+		Name:    "graft-cache",
+		Driver:  "local",
+		Copy:    boolPtr(false),
+		Options: []string{"o=nodev"},
+		Labels:  map[string]string{"managed-by": "graft"},
+	})
+	if err != nil {
+		t.Fatalf("RenderVolume() error = %v", err)
+	}
+	for _, want := range []string{
+		"[Volume]",
+		"VolumeName=graft-cache",
+		"Driver=local",
+		"Copy=false",
+		"Options=o=nodev",
+		"Label=managed-by=graft",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("rendered volume missing %q\n--- text ---\n%s", want, text)
+		}
+	}
+}
+
+func TestRenderRootfsUnitsIncludesNetworkVolumeAndContainer(t *testing.T) {
+	units, err := RenderRootfsUnits(RenderInput{
+		Rootfs:                "/tmp/rootfs",
+		FallbackContainerName: "app",
+		Command:               []string{"/nix/store/runtime/bin/bash"},
+		Config: config.Config{
+			Networks: []config.NetworkUnitConfig{{Name: "graft-internal"}},
+			Volumes:  []config.VolumeUnitConfig{{Name: "graft-cache"}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("RenderRootfsUnits() error = %v", err)
+	}
+	if len(units) != 3 {
+		t.Fatalf("RenderRootfsUnits() returned %d units, want 3", len(units))
+	}
+	if units[0].Name != "graft-internal.network" || units[1].Name != "graft-cache.volume" || units[2].Name != "app.container" {
+		t.Fatalf("unexpected unit names: %#v", units)
+	}
+}
 
 func TestRenderRootfsContainerExtendedOptions(t *testing.T) {
 	text, err := RenderRootfsContainer(RenderInput{
@@ -14,7 +91,7 @@ func TestRenderRootfsContainerExtendedOptions(t *testing.T) {
 		Command:               []string{"/nix/store/runtime/bin/hostname"},
 		Config: config.Config{
 			Container: config.ContainerConfig{
-				Hostname:   "pac-host",
+				Hostname:   "graft-host",
 				Entrypoint: []string{"/nix/store/runtime/bin/bash", "-lc"},
 				StopSignal: "SIGTERM",
 				PodmanArgs: []string{"--log-level=debug"},
@@ -52,7 +129,7 @@ func TestRenderRootfsContainerExtendedOptions(t *testing.T) {
 	}
 
 	for _, want := range []string{
-		"HostName=pac-host",
+		"HostName=graft-host",
 		"Entrypoint=/nix/store/runtime/bin/bash -lc",
 		"StopSignal=SIGTERM",
 		"PodmanArgs=--log-level=debug",

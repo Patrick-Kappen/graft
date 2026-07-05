@@ -1,5 +1,5 @@
 version = 1
-name = "pac-test-active"
+name = "graft-test-active"
 
 [deploy]
 enable = true

@@ -1,5 +1,5 @@
 version = 1
-name = "pac-test-parent-remove"
+name = "graft-test-parent-remove"
 
 [parents]
 add = ["base-a", "base-b"]

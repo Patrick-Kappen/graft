@@ -4,6 +4,7 @@
   package,
   configRoot,
   configFiles,
+  nixContainers ? { },
   deployTarget,
   optionPrefix,
 }:
@@ -140,39 +141,41 @@ let
       deploy = configData.deploy or { };
       deployEnable = deploy.enable or false;
       configDeployTarget = deploy.target or deployTarget;
+      invalidDeployTarget = configDeployTarget != "system" && configDeployTarget != "user";
+      invalidRuntimeMode =
+        (effectiveConfig.runtime.mode or "") != ""
+        && (effectiveConfig.runtime.mode or "") != "rootfs-store";
       isActive = !isNoop && (isExplicit || (deployEnable && configDeployTarget == deployTarget));
       name =
         configData.name
           or (throw "${optionPrefix}: TOML config must set top-level name: ${toString configFile}");
-      effectiveToml = tomlFormat.generate "podman-agent-container-effective-${name}.toml" {
+      effectiveToml = tomlFormat.generate "graft-effective-${name}.toml" {
         version = configData.version or 1;
         inherit name;
         config = effectiveConfig;
       };
       runtimePackageNames = effectiveConfig.runtime.packages or [ ];
+      invalidPackageNames = builtins.filter (
+        packageName: builtins.match "[A-Za-z0-9._+-]+" packageName == null
+      ) runtimePackageNames;
       unknownPackageNames = builtins.filter (
         packageName: !(builtins.hasAttr packageName pkgs)
       ) runtimePackageNames;
       runtimePackages = map (packageName: builtins.getAttr packageName pkgs) runtimePackageNames;
 
       runtimeEnv = pkgs.buildEnv {
-        name = "podman-agent-container-runtime-${name}";
+        name = "graft-runtime-${name}";
         paths = runtimePackages;
       };
 
-      minimalRootfs = pkgs.runCommand "podman-agent-container-rootfs-${name}" { } ''
-                mkdir -p $out/{etc,tmp,run}
-                cat > $out/etc/passwd <<'EOF'
-        root:x:0:0:root:/root:/bin/sh
-        EOF
-                cat > $out/etc/group <<'EOF'
-        root:x:0:
-        EOF
-      '';
+      renderedUnitNames =
+        (map (network: "${network.name}.network") (effectiveConfig.networks or [ ]))
+        ++ (map (volume: "${volume.name}.volume") (effectiveConfig.volumes or [ ]))
+        ++ [ "${name}.container" ];
 
-      renderedQuadlet = pkgs.runCommand "${name}.container" { } ''
+      renderedQuadletDir = pkgs.runCommand "graft-units-${name}" { } ''
         export PATH=${runtimeEnv}/bin:$PATH
-        ${lib.getExe' package "podman-agent-container"} render-nixos ${effectiveToml} ${minimalRootfs} ${name} > $out
+        ${lib.getExe' package "graft"} render-nixos-units ${effectiveToml} ${name} $out
       '';
     in
     {
@@ -184,17 +187,35 @@ let
         effectiveConfig
         effectiveToml
         isExplicit
-        isNoop
+        invalidDeployTarget
+        invalidPackageNames
+        invalidRuntimeMode
         isActive
+        isNoop
         name
-        renderedQuadlet
+        renderedQuadletDir
+        renderedUnitNames
         runtimePackageNames
         unknownPackageNames
         ;
     };
 
   discoveredConfigFiles = if configRoot == null then [ ] else listTomlFiles configRoot;
-  entries = (map (loadEntry true) configFiles) ++ (map (loadEntry false) discoveredConfigFiles);
+
+  # Nix-authored containers are serialized to TOML with the same formatter that
+  # produces the effective config, then flow through the exact same loadEntry
+  # pipeline as file-based configs (anchor #1: one resolver, one renderer).
+  nixConfigFiles = lib.mapAttrsToList (
+    containerName: settings:
+    tomlFormat.generate "graft-nix-${containerName}.toml" (
+      settings // { name = settings.name or containerName; }
+    )
+  ) nixContainers;
+
+  entries =
+    (map (loadEntry true) configFiles)
+    ++ (map (loadEntry true) nixConfigFiles)
+    ++ (map (loadEntry false) discoveredConfigFiles);
   activeEntries = builtins.filter (entry: entry.isActive) entries;
   activeNames = map (entry: entry.name) activeEntries;
   uniqueActiveNames = lib.unique activeNames;

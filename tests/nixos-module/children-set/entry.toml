@@ -1,5 +1,5 @@
 version = 1
-name = "pac-test-children-set"
+name = "graft-test-children-set"
 
 [children]
 add = ["addon-a"]

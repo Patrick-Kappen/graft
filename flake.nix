@@ -1,5 +1,5 @@
 {
-  description = "podman-agent-container";
+  description = "graft";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
 
@@ -14,48 +14,49 @@
     in
     {
       packages = forAllSystems (pkgs: rec {
-        podman-agent-container = pkgs.buildGoModule {
-          pname = "podman-agent-container";
+        graft = pkgs.buildGoModule {
+          pname = "graft";
           version = "0.1.0";
           src = ./.;
 
-          vendorHash = "sha256-QCFEllD/+ak4LBRimQ5QcVeoZfOiZmgvee8YWEPc+qY=";
-          subPackages = [ "cmd/podman-agent-container" ];
+          vendorHash = "sha256-pbA/AlBz3cQYRTMnQ/qBPcinYOKokrBLNhkbRTq54gE=";
+          subPackages = [ "cmd/graft" ];
+
+          # Bake the pinned nixpkgs store path into the binary so that
+          # runtime package resolution always uses the same nixpkgs as the
+          # build — no --impure, no host channel dependency.
+          ldflags = [
+            "-X github.com/zerodawn1990/graft/internal/cli.nixpkgsStorePath=${pkgs.path}"
+          ];
 
           nativeBuildInputs = [ pkgs.makeWrapper ];
 
           postInstall = ''
-            mkdir -p $out/share/podman-agent-container
-            cp config.example.toml $out/share/podman-agent-container/config.example.toml
+            mkdir -p $out/share/graft
+            cp config.example.toml $out/share/graft/config.example.toml
 
-            wrapProgram $out/bin/podman-agent-container \
+            wrapProgram $out/bin/graft \
               --prefix PATH : ${
                 pkgs.lib.makeBinPath [
+                  pkgs.diffutils
                   pkgs.nix
                   pkgs.podman
                   pkgs.systemd
                 ]
               }
-
-            ln -s $out/bin/podman-agent-container $out/bin/pac
           '';
         };
 
-        default = podman-agent-container;
+        default = graft;
       });
 
       apps = forAllSystems (pkgs: {
-        pac = {
+        graft = {
           type = "app";
-          program = "${self.packages.${pkgs.system}.podman-agent-container}/bin/pac";
+          program = "${self.packages.${pkgs.system}.graft}/bin/graft";
         };
 
-        podman-agent-container = {
-          type = "app";
-          program = "${self.packages.${pkgs.system}.podman-agent-container}/bin/podman-agent-container";
-        };
-
-        default = self.apps.${pkgs.system}.pac;
+        default = self.apps.${pkgs.system}.graft;
       });
 
       checks = forAllSystems (
@@ -64,21 +65,22 @@
           inherit (pkgs) lib;
           system = pkgs.stdenv.hostPlatform.system;
 
-          mkNixos =
-            configRoot:
+          mkNixosWith =
+            graftCfg:
             nixpkgs.lib.nixosSystem {
               inherit system;
               modules = [
                 self.nixosModules.default
                 (_: {
                   system.stateVersion = "26.05";
-                  services.podman-agent-container = {
+                  services.graft = {
                     enable = true;
-                    inherit configRoot;
-                  };
+                  }
+                  // graftCfg;
                 })
               ];
             };
+          mkNixos = configRoot: mkNixosWith { inherit configRoot; };
 
           containerEtcNames =
             configRoot:
@@ -86,8 +88,8 @@
               builtins.attrNames (mkNixos configRoot).config.environment.etc
             );
 
-          mkHome =
-            configRoot:
+          mkHomeWith =
+            graftCfg:
             lib.evalModules {
               modules = [
                 self.homeManagerModules.default
@@ -110,14 +112,15 @@
                       default = { };
                     };
                   };
-                  config.programs.podman-agent-container = {
+                  config.programs.graft = {
                     enable = true;
-                    inherit configRoot;
-                  };
+                  }
+                  // graftCfg;
                 })
               ];
               specialArgs = { inherit pkgs; };
             };
+          mkHome = configRoot: mkHomeWith { inherit configRoot; };
 
           homeConfigNames =
             configRoot:
@@ -144,38 +147,88 @@
           );
           discoveryNixos = mkNixos ./tests/nixos-module/discovery;
           renderedChildQuadlet =
-            discoveryNixos.config.environment.etc."containers/systemd/pac-test-child.container".source;
+            discoveryNixos.config.environment.etc."containers/systemd/graft-test-child.container".source;
           parentSetNixos = mkNixos ./tests/nixos-module/parents-set;
           renderedParentSetQuadlet =
-            parentSetNixos.config.environment.etc."containers/systemd/pac-test-parent-set.container".source;
+            parentSetNixos.config.environment.etc."containers/systemd/graft-test-parent-set.container".source;
           parentRemoveNixos = mkNixos ./tests/nixos-module/parents-remove;
           renderedParentRemoveQuadlet =
-            parentRemoveNixos.config.environment.etc."containers/systemd/pac-test-parent-remove.container".source;
+            parentRemoveNixos.config.environment.etc."containers/systemd/graft-test-parent-remove.container".source;
           parentCycleEval = builtins.tryEval (
             builtins.deepSeq (containerEtcNames ./tests/nixos-module/parent-cycle) true
           );
           childrenAddNixos = mkNixos ./tests/nixos-module/children-add;
           renderedChildrenAddQuadlet =
-            childrenAddNixos.config.environment.etc."containers/systemd/pac-test-children-add.container".source;
+            childrenAddNixos.config.environment.etc."containers/systemd/graft-test-children-add.container".source;
           childrenSetNixos = mkNixos ./tests/nixos-module/children-set;
           renderedChildrenSetQuadlet =
-            childrenSetNixos.config.environment.etc."containers/systemd/pac-test-children-set.container".source;
+            childrenSetNixos.config.environment.etc."containers/systemd/graft-test-children-set.container".source;
           childrenRemoveNixos = mkNixos ./tests/nixos-module/children-remove;
           renderedChildrenRemoveQuadlet =
-            childrenRemoveNixos.config.environment.etc."containers/systemd/pac-test-children-remove.container".source;
+            childrenRemoveNixos.config.environment.etc."containers/systemd/graft-test-children-remove.container".source;
           packageOpsNixos = mkNixos ./tests/nixos-module/package-ops;
           renderedPackageOpsQuadlet =
-            packageOpsNixos.config.environment.etc."containers/systemd/pac-test-package-ops.container".source;
+            packageOpsNixos.config.environment.etc."containers/systemd/graft-test-package-ops.container".source;
           configRootExampleNixos = mkNixos ./examples/config-root;
           renderedConfigRootExampleQuadlet =
-            configRootExampleNixos.config.environment.etc."containers/systemd/pac-demo.container".source;
+            configRootExampleNixos.config.environment.etc."containers/systemd/graft-demo.container".source;
           homeExample = mkHome ./tests/home-manager/config-root;
           renderedHomeExampleQuadlet =
-            homeExample.config.xdg.configFile."containers/systemd/pac-user-demo.container".source;
+            homeExample.config.xdg.configFile."containers/systemd/graft-user-demo.container".source;
+          homeNetworkExample = mkHome ./tests/home-manager/network-unit;
+          renderedHomeNetworkContainer =
+            homeNetworkExample.config.xdg.configFile."containers/systemd/graft-network-demo.container".source;
+          renderedHomeNetworkUnit =
+            homeNetworkExample.config.xdg.configFile."containers/systemd/graft-internal.network".source;
+          renderedHomeVolumeUnit =
+            homeNetworkExample.config.xdg.configFile."containers/systemd/graft-cache.volume".source;
           unknownPackageNixos = mkNixos ./tests/nixos-module/unknown-package;
           unknownPackageAssertionMessages = map (assertion: assertion.message) (
             builtins.filter (assertion: !assertion.assertion) unknownPackageNixos.config.assertions
           );
+
+          # Nix-native authoring: containers defined as Nix attrsets are serialized
+          # to TOML and flow through the same resolver + renderer as file configs.
+          nixContainersNixos = mkNixosWith {
+            containers.graft-nix-demo = {
+              config = {
+                runtime = {
+                  mode = "rootfs-store";
+                  packages = [ "bashInteractive" ];
+                  command = [
+                    "bash"
+                    "-lc"
+                    "echo from nix"
+                  ];
+                };
+                container.environment.FROM_NIX = "1";
+              };
+            };
+          };
+          nixContainerEtcNames = builtins.filter (name: builtins.match "containers/systemd/.*" name != null) (
+            builtins.attrNames nixContainersNixos.config.environment.etc
+          );
+          renderedNixContainerQuadlet =
+            nixContainersNixos.config.environment.etc."containers/systemd/graft-nix-demo.container".source;
+
+          nixContainersHome = mkHomeWith {
+            containers.graft-nix-user = {
+              config = {
+                runtime = {
+                  mode = "rootfs-store";
+                  packages = [ "bashInteractive" ];
+                  command = [
+                    "bash"
+                    "-lc"
+                    "echo from nix user"
+                  ];
+                };
+                container.environment.FROM_NIX_USER = "1";
+              };
+            };
+          };
+          renderedNixContainerHomeQuadlet =
+            nixContainersHome.config.xdg.configFile."containers/systemd/graft-nix-user.container".source;
 
           checkFileContains =
             name: file: needles:
@@ -213,8 +266,8 @@
           nixos-module-config-root-discovery =
             checkList "nixos-module-config-root-discovery" (containerEtcNames ./tests/nixos-module/discovery)
               [
-                "containers/systemd/pac-test-active.container"
-                "containers/systemd/pac-test-child.container"
+                "containers/systemd/graft-test-active.container"
+                "containers/systemd/graft-test-child.container"
               ];
 
           nixos-module-parent-merge-render =
@@ -287,29 +340,71 @@
           nixos-module-config-root-example =
             checkFileContains "nixos-module-config-root-example" renderedConfigRootExampleQuadlet
               [
-                "ContainerName=pac-demo"
-                "Environment=PAC_DEMO=1"
+                "ContainerName=graft-demo"
+                "Environment=GRAFT_DEMO=1"
                 "ReadOnly=true"
                 "Network=none"
                 "/bin/hostname"
               ];
 
+          nixos-module-managed-rootfs-prepare =
+            checkFileContains "nixos-module-managed-rootfs-prepare" renderedConfigRootExampleQuadlet
+              [
+                "Rootfs=%t/graft/graft-demo/rootfs"
+                "ExecStartPre="
+                "prepare-rootfs %t/graft/graft-demo/rootfs"
+              ];
+
           home-manager-module-config-root-discovery =
             checkList "home-manager-module-config-root-discovery"
               (homeConfigNames ./tests/home-manager/config-root)
-              [ "containers/systemd/pac-user-demo.container" ];
+              [ "containers/systemd/graft-user-demo.container" ];
 
           home-manager-module-render =
             checkFileContains "home-manager-module-render" renderedHomeExampleQuadlet
               [
-                "ContainerName=pac-user-demo"
-                "Environment=PAC_USER_DEMO=1"
+                "ContainerName=graft-user-demo"
+                "Environment=GRAFT_USER_DEMO=1"
                 "echo from user quadlet"
+              ];
+
+          home-manager-network-unit-container =
+            checkFileContains "home-manager-network-unit-container" renderedHomeNetworkContainer
+              [
+                "Requires=graft-internal-network.service"
+                "After=graft-internal-network.service"
+                "Requires=graft-cache-volume.service"
+                "After=graft-cache-volume.service"
+                "Network=graft-internal.network"
+                "Volume=graft-cache.volume:/cache:rw"
+              ];
+
+          home-manager-network-unit-render =
+            checkFileContains "home-manager-network-unit-render" renderedHomeNetworkUnit
+              [
+                "NetworkName=graft-internal"
+                "Driver=bridge"
+                "Internal=true"
+                "IPv6=false"
+                "Subnet=10.89.0.0/24"
+                "Gateway=10.89.0.1"
+                "Options=mtu=1500"
+                "Label=managed-by=graft"
+              ];
+
+          home-manager-volume-unit-render =
+            checkFileContains "home-manager-volume-unit-render" renderedHomeVolumeUnit
+              [
+                "VolumeName=graft-cache"
+                "Driver=local"
+                "Copy=false"
+                "Options=o=nodev"
+                "Label=managed-by=graft"
               ];
 
           nixos-module-duplicate-name-assertion =
             if
-              builtins.elem "services.podman-agent-container: active TOML config names must be unique." duplicateAssertionMessages
+              builtins.elem "services.graft: active TOML config names must be unique." duplicateAssertionMessages
             then
               pkgs.runCommand "nixos-module-duplicate-name-assertion" { } "touch $out"
             else
@@ -320,6 +415,26 @@
               pkgs.runCommand "nixos-module-unknown-package-assertion" { } "touch $out"
             else
               throw "expected unknown TOML runtime package to produce a NixOS assertion";
+
+          nixos-module-nix-containers-active =
+            checkList "nixos-module-nix-containers-active" nixContainerEtcNames
+              [ "containers/systemd/graft-nix-demo.container" ];
+
+          nixos-module-nix-containers-render =
+            checkFileContains "nixos-module-nix-containers-render" renderedNixContainerQuadlet
+              [
+                "ContainerName=graft-nix-demo"
+                "Environment=FROM_NIX=1"
+                "echo from nix"
+              ];
+
+          home-manager-module-nix-containers-render =
+            checkFileContains "home-manager-module-nix-containers-render" renderedNixContainerHomeQuadlet
+              [
+                "ContainerName=graft-nix-user"
+                "Environment=FROM_NIX_USER=1"
+                "echo from nix user"
+              ];
         }
       );
 
@@ -358,7 +473,7 @@
             export GOBIN="$GOPATH/bin"
             export PATH="$GOBIN:$PATH"
 
-            echo "podman-agent-container dev shell"
+            echo "graft dev shell"
             echo "Go: $(go version)"
           '';
         };

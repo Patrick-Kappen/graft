@@ -1,5 +1,5 @@
 version = 1
-name = "pac-demo"
+name = "graft-demo"
 
 [parents]
 add = [
@@ -15,7 +15,7 @@ enable = true
 target = "system"
 
 [config.container.environment]
-PAC_DEMO = "1"
+GRAFT_DEMO = "1"
 
 [config.service]
 type = "oneshot"

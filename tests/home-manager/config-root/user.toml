@@ -1,5 +1,5 @@
 version = 1
-name = "pac-user-demo"
+name = "graft-user-demo"
 
 [parents]
 add = ["base"]
@@ -12,4 +12,4 @@ target = "user"
 command = ["bash", "-lc", "echo from user quadlet"]
 
 [config.container.environment]
-PAC_USER_DEMO = "1"
+GRAFT_USER_DEMO = "1"

@@ -20,7 +20,7 @@ func RunTransient(input TransientInput) error {
 	quadletDir := filepath.Join(runtimeDir, "containers", "systemd")
 	runID := input.UnitStem
 	if runID == "" {
-		runID = fmt.Sprintf("pac-%d-%d", os.Getpid(), time.Now().UnixNano())
+		runID = fmt.Sprintf("graft-%d-%d", os.Getpid(), time.Now().UnixNano())
 	}
 	unitName := runID + ".service"
 	quadletPath := filepath.Join(quadletDir, runID+".container")
@@ -59,6 +59,14 @@ func RuntimeDir() string {
 
 func SystemctlUser(args ...string) error {
 	cmd := exec.Command("systemctl", append([]string{"--user"}, args...)...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+// Systemctl runs systemctl at system scope (no --user).
+func Systemctl(args ...string) error {
+	cmd := exec.Command("systemctl", args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()

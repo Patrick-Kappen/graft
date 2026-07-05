@@ -3,7 +3,7 @@
 This directory demonstrates the intended NixOS `configRoot` flow.
 
 ```nix
-services.podman-agent-container = {
+services.graft = {
   enable = true;
   configRoot = ./examples/config-root;
 };
@@ -68,5 +68,5 @@ command = ["hostname"]
 The NixOS module generates effective TOML in the Nix store and renders a Quadlet unit:
 
 ```text
-/etc/containers/systemd/pac-demo.container
+/etc/containers/systemd/graft-demo.container
 ```

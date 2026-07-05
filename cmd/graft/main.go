@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/zerodawn1990/podman-agent-container/internal/cli"
+	"github.com/zerodawn1990/graft/internal/cli"
 )
 
 func main() {

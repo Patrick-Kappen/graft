@@ -1,31 +1,33 @@
 # NixOS module
 
-De NixOS-route gebruikt door de gebruiker geschreven TOML-bestanden als build-input. TOML zet alles: naam, packages, command, mounts, netwerk, security en resources. De module kan nu naar losse TOML-bestanden wijzen of naar een directory met `configRoot`.
+The NixOS route uses user-authored TOML files as build input. TOML sets
+everything: name, packages, command, mounts, network, security, and resources.
+The module can point at individual TOML files or at a directory via `configRoot`.
 
 ```text
 user-authored TOML files
   -> NixOS module build input
-  -> Nix leest TOML met builtins.fromTOML
-  -> parents.add resolven binnen configRoot
-  -> effective TOML genereren in de store
+  -> Nix reads TOML with builtins.fromTOML
+  -> resolve parents.add within configRoot
+  -> generate effective TOML in the store
   -> effective config.runtime.packages -> pkgs.<name> runtime closure
-  -> renderer maakt Quadlet tijdens Nix build
+  -> renderer produces Quadlet during the Nix build
   -> /etc/containers/systemd/<name>.container
-  -> Podman Quadlet/systemd start container
+  -> Podman Quadlet/systemd starts the container
 ```
 
-## Directory-discovery voorbeeld
+## Directory-discovery example
 
 ```nix
 {
-  services.podman-agent-container = {
+  services.graft = {
     enable = true;
     configRoot = ./containers;
   };
 }
 ```
 
-Een complete voorbeeldboom staat in [`../examples/config-root`](../examples/config-root):
+A complete example tree is in [`../examples/config-root`](../examples/config-root):
 
 ```text
 examples/config-root/
@@ -35,7 +37,8 @@ examples/config-root/
   apps/demo.toml
 ```
 
-De module ontdekt recursief `*.toml`. Een ontdekt bestand wordt alleen een NixOS-managed container als het expliciet deploy aanzet:
+The module discovers `*.toml` recursively. A discovered file becomes a
+NixOS-managed container only when it explicitly opts in to deployment:
 
 ```toml
 [deploy]
@@ -43,13 +46,13 @@ enable = true
 target = "system"
 ```
 
-## Expliciete bestanden
+## Explicit files
 
-Dit blijft voorlopig ondersteund:
+This stays supported for now:
 
 ```nix
 {
-  services.podman-agent-container = {
+  services.graft = {
     enable = true;
     configFiles = [
       ./containers/go-dev.toml
@@ -59,9 +62,42 @@ Dit blijft voorlopig ondersteund:
 }
 ```
 
-Expliciete `configFiles` zijn actief zodra ze niet no-op zijn.
+Explicit `configFiles` are active as soon as they are not no-op.
 
-De entry/unit/containernaam komt uit TOML:
+## Nix-native authoring
+
+Containers can also be authored directly in Nix instead of TOML files, via
+`services.graft.containers.<name>`:
+
+```nix
+{
+  services.graft = {
+    enable = true;
+    configRoot = ./containers; # optional: parents/children refs resolve here
+
+    containers.go-dev = {
+      # name defaults to the attribute name ("go-dev"); version defaults to 1.
+      config.runtime = {
+        mode = "rootfs-store";
+        packages = [ "bashInteractive" "coreutils" "go" "gopls" ];
+        command = [ "bash" "-lc" "go test ./..." ];
+      };
+    };
+  };
+}
+```
+
+The attrset mirrors the TOML schema one-to-one (`version`, `name`, `parents`,
+`children`, `deploy`, `validation`, `config`). It is serialized to TOML with the
+same `pkgs.formats.toml` formatter that produces the effective config, then runs
+through the **same** resolver and renderer as file-based configs — there is no
+second engine. Nix-authored containers are always active (like `configFiles`),
+so `[deploy] enable` is not required; `parents`/`children` refs resolve against
+`configRoot`. See [reference.md](reference.md#nix-native-authoring-containers).
+
+## File-based naming
+
+The entry/unit/container name comes from TOML:
 
 ```toml
 version = 1
@@ -73,15 +109,15 @@ packages = ["bashInteractive", "coreutils", "go", "gopls"]
 command = ["bash", "-lc", "go test ./..."]
 ```
 
-Dit wordt:
+This becomes:
 
 ```text
 /etc/containers/systemd/go-dev.container
 ```
 
-## Kale TOML-template
+## Bare TOML template
 
-De meegeleverde template doet niets. Leeg betekent no-op.
+The shipped template does nothing. Empty means no-op.
 
 ```toml
 version = 1
@@ -101,11 +137,12 @@ set = []
 # Empty means no-op.
 ```
 
-No-op TOML-bestanden zijn geldig maar installeren geen Quadlet unit.
+No-op TOML files are valid but install no Quadlet unit.
 
 ## Parent resolving
 
-De NixOS-module ondersteunt nu de basis graph-stap: `parents.add`/`set`/`remove` en `children.add`/`set`/`remove`.
+The NixOS module supports the base graph step: `parents.add`/`set`/`remove` and
+`children.add`/`set`/`remove`.
 
 ```text
 containers/
@@ -151,22 +188,26 @@ command = ["bash", "-lc", "echo from child"]
 FROM_CHILD = "1"
 ```
 
-Effectief:
+Effective:
 
-- resolve-volgorde is `parents -> self -> children`;
-- attrsets mergen recursief;
-- lijsten concateneren met `lib.unique`;
-- `config.runtime.command` wordt door latere lagen overschreven;
-- scalar values worden door latere lagen overschreven;
-- alleen de child wordt actief omdat alleen die `[deploy] enable = true` heeft.
+- resolution order is `parents -> self -> children`;
+- attrsets merge recursively;
+- lists concatenate with `lib.unique`;
+- `config.runtime.command` is overridden by later layers;
+- scalar values are overridden by later layers;
+- only the child becomes active because only it has `[deploy] enable = true`.
 
-De module genereert hiervoor een effective TOML in de Nix store en rendert daaruit Quadlet.
+The module generates an effective TOML in the Nix store and renders Quadlet from
+it.
 
-`parents.set`/`children.set` vervangen de lokale refs van die node. `parents.remove`/`children.remove` verwijderen refs uit de lokale lijst na `set`/`add` normalisatie.
+`parents.set`/`children.set` replace the local refs of that node.
+`parents.remove`/`children.remove` drop refs from the local list after the
+`set`/`add` normalization.
 
 ## Package operations
 
-Na graph merge past de NixOS-module package operations toe op `config.runtime.packages`.
+After the graph merge, the NixOS module applies package operations to
+`config.runtime.packages`.
 
 ```toml
 [config.runtime]
@@ -181,31 +222,38 @@ name = "hello"
 with = "hostname"
 ```
 
-Effectieve packages:
+Effective packages:
 
 ```toml
 packages = ["bashInteractive", "hostname", "gnugrep"]
 ```
 
-Volgorde:
+Order:
 
-1. verwijder `remove` en replacement-namen uit de bestaande package-lijst;
-2. voeg replacement `with` packages toe;
-3. voeg `add` packages toe;
-4. deduplicate met `lib.unique`.
+1. remove `remove` and replacement names from the existing package list;
+2. add replacement `with` packages;
+3. add `add` packages;
+4. de-duplicate with `lib.unique`.
 
-De effective TOML bevat daarna alleen `config.runtime.packages`; `packageOps` wordt niet aan de renderer doorgegeven.
+The effective TOML then contains only `config.runtime.packages`; `packageOps` is
+not passed to the renderer.
 
-## Huidige eerste implementatie
+## Current first implementation
 
-- TOML wordt niet uit Nix options gegenereerd.
-- `configRoot` ontdekt recursief `*.toml` en activeert alleen TOML met `[deploy] enable = true` en system target.
-- `configFiles` blijven beschikbaar als expliciete build inputs.
-- Elk actief TOML-bestand moet een unieke top-level `name` hebben.
-- De NixOS module resolved `parents.*` en `children.*`, past `config.runtime.packageOps` toe, en leest daarna `config.runtime.packages` uit de effective TOML.
-- Runtime package strings worden vertaald naar `pkgs.<name>`.
-- De renderer ondersteunt nu `config.runtime.mode = "rootfs-store"` met `runtime.command`.
-- Package refs buiten simpele `pkgs.<name>` strings moeten nog volgen.
+- Containers can be authored as TOML files (`configFiles`/`configRoot`) or
+  directly in Nix (`containers.<name>`); Nix attrsets are serialized to TOML and
+  share the same resolver and renderer.
+- `configRoot` discovers `*.toml` recursively and activates only TOML with
+  `[deploy] enable = true` and a system target.
+- `configFiles` remain available as explicit build inputs.
+- Each active TOML file must have a unique top-level `name`.
+- The NixOS module resolves `parents.*` and `children.*`, applies
+  `config.runtime.packageOps`, and then reads `config.runtime.packages` from the
+  effective TOML.
+- Runtime package strings are translated to `pkgs.<name>`.
+- The renderer supports `config.runtime.mode = "rootfs-store"` with
+  `runtime.command`.
+- Package refs beyond simple `pkgs.<name>` strings are still to come.
 
 ## Service section
 
@@ -213,7 +261,7 @@ TOML can set selected systemd service options:
 
 ```toml
 [config.service]
-type = "simple"
+type = "notify" # "oneshot" (default) or "notify"; Quadlet rejects other values
 restart = "on-failure"
 restartSec = "10s"
 timeoutStartSec = "2m"
@@ -221,8 +269,44 @@ timeoutStopSec = "30s"
 remainAfterExit = false
 ```
 
-These are rendered into `[Service]`. Enabling/starting/autostart policy is still separate and will be added later.
+These are rendered into `[Service]`.
 
-## Eindrichting
+### Keeping containers alive during `nixos-rebuild`
 
-De TOML-map bepaalt via discovery/metadata welke containers managed zijn. Snelle projectcontainers hoeven geen NixOS rebuild te doen; die lopen via `pac up` en transient/user Quadlet.
+By default, NixOS restarts a container when its unit file changes during
+`nixos-rebuild switch`. To keep a long-running container alive across rebuilds,
+set `restartIfChanged = false`:
+
+```toml
+[config.service]
+restartIfChanged = false
+```
+
+The NixOS module generates the appropriate `systemd.services.<name>.restartIfChanged`
+Nix option for each container that sets this field.
+
+## CLI on the remote host
+
+The NixOS module adds `graft` to `environment.systemPackages` automatically.
+This means `graft` is available on the PATH on every host that enables the
+module, including remote NixOS hosts.
+
+All managed-path commands work over SSH via `--host`:
+
+```bash
+graft --host myserver up my-app-1
+graft --host myserver diff my-app-1
+graft --host myserver promote my-app-1
+graft --host myserver reset my-app-1
+```
+
+For `diff`, `promote`, and `reset`, graft SSHs to the remote and runs the
+corresponding `graft` subcommand there. Session data (home session dirs, shadow
+mount session dirs, `meta.json`) lives on the remote host alongside the running
+container.
+
+## End direction
+
+The TOML directory determines, via discovery/metadata, which containers are
+managed. Fast project containers need no NixOS rebuild; they run via `graft up`
+and transient/user Quadlet.

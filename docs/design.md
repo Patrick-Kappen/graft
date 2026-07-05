@@ -1,28 +1,29 @@
-# Design: git-driven Podman agent containers
+# Design: git-driven Podman containers
 
-`podman-agent-container` wordt een git-driven, TOML-first wrapper bovenop Podman Quadlet.
+`graft` is a git-driven, TOML-first wrapper on top of Podman Quadlet.
 
-Zie eerst [`vision.md`](vision.md) voor de actuele productvisie: `pac` als direnv voor containers.
+Read [`vision.md`](vision.md) first for the current product vision: `graft` as
+direnv for containers.
 
-## Kernidee
+## Core idea
 
 ```text
-Git repo              = bron van waarheid
-TOML configs          = declaratieve container-definities
-NixOS/Home Manager    = installeert de wrapper en wijst naar configRoot
-Podman Quadlet        = runtime/systemd uitvoerder
+Git repo              = source of truth
+TOML configs          = declarative container definitions
+NixOS/Home Manager    = installs the wrapper and points at configRoot
+Podman Quadlet        = runtime/systemd executor
 ```
 
-Er zijn twee routes:
+There are two routes:
 
 ```text
-snelle route: TOML -> pac up -> transient Quadlet -> container draait
+fast route:    TOML -> graft up -> transient Quadlet -> container runs
 promote route: TOML -> review/branch/merge -> NixOS/HM managed Quadlet
 ```
 
-## Geen impliciete defaults
+## No implicit defaults
 
-Leeg betekent altijd: niets doen.
+Empty always means: do nothing.
 
 ```toml
 version = 1
@@ -31,32 +32,31 @@ version = 1
 # Empty means no-op.
 ```
 
-of:
+or:
 
 ```toml
 [containers]
 # Empty means no-op.
 ```
 
-mag geen container, baseline, mount of security policy impliciet activeren.
-
-Alles moet expliciet uit TOML komen.
+must not implicitly activate a container, baseline, mount, or security policy.
+Everything must come explicitly from TOML.
 
 ## TOML graph
 
-Een config file is een named unit. De naam komt bij voorkeur uit de TOML `name`.
+A config file is a named unit. The name preferably comes from the TOML `name`.
 
-Voorbeeld:
+Example:
 
 ```text
-configs/pi-agent.toml -> pi-agent
+configs/my-app.toml -> my-app
 ```
 
-Een TOML file kan verwijzen naar parents en children:
+A TOML file can reference parents and children:
 
 ```toml
 version = 1
-name = "pi-agent"
+name = "my-app"
 
 [parents]
 add = ["base", "no-network"]
@@ -68,19 +68,19 @@ add = ["nix-store", "workspace"]
 # Empty means no-op.
 ```
 
-Resolve-volgorde:
+Resolution order:
 
 ```text
 parents -> self -> children
 ```
 
-Latere lagen mogen eerdere lagen overschrijven. Hierdoor kunnen gebruikers zelf presets, addons en parent/child-combinaties bouwen.
+Later layers may override earlier ones, so users can build their own presets,
+addons, and parent/child combinations.
 
-## Gebruiker bepaalt presets
+## Users define presets
 
-Er zijn geen ingebouwde presets zoals `bare`, `safe`, `agent` of `pi` die automatisch gedrag activeren.
-
-Gebruikers kunnen zulke presets zelf definiëren:
+There are no built-in presets such as `bare`, `safe`, or `agent` that
+activate behaviour automatically. Users can define such presets themselves:
 
 ```toml
 # configs/no-network.toml
@@ -103,61 +103,65 @@ mode = "ro"
 ```
 
 ```toml
-# configs/pi-agent.toml
+# configs/my-app.toml
 version = 1
-name = "pi-agent"
+name = "my-app"
 
 [parents]
 add = ["no-network", "with-nix-store"]
 ```
 
-Deze voorbeelden zijn richtinggevend; het volledige schema moet nog worden uitgewerkt.
+These examples are indicative; the full schema is still being worked out.
 
-## NixOS blijft kort
+## NixOS stays short
 
-De NixOS/Home Manager configuratie moet alleen de package/module activeren en naar de git-tracked TOML verwijzen.
+The NixOS/Home Manager configuration should only enable the package/module and
+point at the git-tracked TOML.
 
-Richting:
+Direction:
 
 ```nix
-services.podman-agent-container = {
+services.graft = {
   enable = true;
   configRoot = ./containers;
 };
 ```
 
-De inhoud van containers, presets en deploy/session policy staat niet in `flake.nix`, maar in TOML.
+The contents of containers, presets, and deploy/session policy live in TOML, not
+in `flake.nix`.
 
-## Quadlet als uitvoerlaag
+## Quadlet as the execution layer
 
-Uiteindelijk rendert de wrapper effectieve TOML-configs naar native Podman Quadlet units.
+Ultimately the wrapper renders effective TOML configs into native Podman Quadlet
+units.
 
 ```text
 TOML graph
   -> resolve/merge
   -> validate
   -> render .container/.volume/.network units
-  -> systemd/Podman Quadlet draait ze
+  -> systemd/Podman Quadlet runs them
 ```
 
-`podman-agent-container` is dus geen vervanging voor Podman Quadlet, maar een hogere declaratieve laag erboven.
+So `graft` is not a replacement for Podman Quadlet, but a higher declarative
+layer on top of it.
 
 ## Git-driven updates
 
-Updates mogen niet direct de actieve omgeving muteren.
+Updates must not mutate the live environment directly.
 
-Gewenste flow:
+Desired flow:
 
 ```text
 tmp/candidate container
-  -> update/install draait geïsoleerd
-  -> resultaat wordt TOML/profile/snapshot wijziging
+  -> update/install runs in isolation
+  -> the result becomes a TOML/profile/snapshot change
   -> diff/PR
   -> merge
   -> switch/apply
 ```
 
-De waarheid blijft de Git repo, niet runtime state zoals:
+The truth stays the Git repo, not runtime state such as:
 
 ```text
 ~/.config
@@ -167,19 +171,24 @@ npm cache
 Pi runtime config
 ```
 
-## Huidige scope
+## Current scope
 
-Voor nu is er een werkende verticale slice: TOML laden, inspect/render/run, `pac up`, rootfs-store Quadlet en een NixOS-module met `configFiles`, `configRoot` discovery en `parents.*`/`children.*` resolving.
+For now there is a working vertical slice: load TOML, inspect/render/run,
+`graft up`, rootfs-store Quadlet, and a NixOS module with `configFiles`,
+`configRoot` discovery, and `parents.*`/`children.*` resolution.
 
-Zie ook [`runtime-architecture.md`](runtime-architecture.md) voor de geplande scheiding tussen TOML config engine, Quadlet runtime manager en cleanup/lifecycle beleid.
+The planned separation is: TOML config engine, Quadlet runtime manager, and
+cleanup/lifecycle policy.
 
-Zie [`nixos-module.md`](nixos-module.md) voor de eerste NixOS-route die TOML tijdens de Nix build naar `/etc/containers/systemd/*.container` rendert.
+See [`nixos-module.md`](nixos-module.md) for the first NixOS route that renders
+TOML to `/etc/containers/systemd/*.container` during the Nix build.
 
-Nog niet bouwen:
+Not building yet:
 
-- geen automatische containers
-- geen ingebouwde baseline
-- geen impliciete Quadlet units
-- geen directe Pi/npm update-flow
+- no automatic containers;
+- no built-in baseline;
+- no implicit Quadlet units;
+- no direct update flow.
 
-Volgende doel: package refs/pins buiten simpele `pkgs.<name>` strings en daarna session lifecycle (`enter`/`leave`/`idle`).
+Next goal: package refs/pins beyond simple `pkgs.<name>` strings, then session
+lifecycle (`enter`/`leave`/`idle`).

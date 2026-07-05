@@ -1,5 +1,5 @@
 version = 1
-name = "pac-test-cycle-a"
+name = "graft-test-cycle-a"
 
 [parents]
 add = ["b"]

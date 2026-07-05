@@ -1,5 +1,5 @@
 version = 1
-name = "pac-test-child"
+name = "graft-test-child"
 
 [parents]
 add = ["base"]
