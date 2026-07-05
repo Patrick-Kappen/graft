@@ -133,9 +133,10 @@ let
       resolveConfigData stack (readToml (nodePath ref));
 
   loadEntry =
-    isExplicit: configFile:
+    isExplicit: source:
     let
-      configData = readToml configFile;
+      configFile = if builtins.isAttrs source then source.configFile else source;
+      configData = if builtins.isAttrs source then source.configData else readToml configFile;
       effectiveConfig = applyPackageOps (resolveConfigData [ ] configData);
       isNoop = isEmptyValue effectiveConfig;
       deploy = configData.deploy or { };
@@ -202,14 +203,14 @@ let
 
   discoveredConfigFiles = if configRoot == null then [ ] else listTomlFiles configRoot;
 
-  # Nix-authored containers are serialized to TOML with the same formatter that
-  # produces the effective config, then flow through the exact same loadEntry
-  # pipeline as file-based configs (anchor #1: one resolver, one renderer).
+  # Nix-authored containers bypass TOML file I/O during evaluation and feed the
+  # same resolver + renderer pipeline used by file-based configs.
   nixConfigFiles = lib.mapAttrsToList (
     containerName: settings:
-    tomlFormat.generate "graft-nix-${containerName}.toml" (
-      settings // { name = settings.name or containerName; }
-    )
+    {
+      configFile = "nix:${containerName}";
+      configData = settings // { name = settings.name or containerName; };
+    }
   ) nixContainers;
 
   entries =
