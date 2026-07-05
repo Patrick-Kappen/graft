@@ -71,44 +71,209 @@ Safe workspace mutations and a path from experiment to repo truth.
 
 ## Phase 3 — Security hardening
 
-No hidden policy — all security is explicit, composable TOML.
+No hidden policy — all security is explicit, composable TOML. Secure presets are
+opt-in parents, not invisible defaults.
+
+### 3a — Presets & validation
 
 - [ ] **`examples/security/`** — copy/paste locked parent configs:
-  - `locked.toml`, `readonly-rootfs.toml`, `no-network.toml`
-  - `tmpfs-home.toml`, `proxy-egress.toml`, `rootless-keep-id.toml`, `agent-safe.toml`
+  - `locked.toml` — read-only rootfs, no network, drop all caps, no new privs
+  - `readonly-rootfs.toml` — filesystem hardening only
+  - `no-network.toml` — network isolation only
+  - `tmpfs-home.toml` — ephemeral HOME/XDG for agents
+  - `proxy-egress.toml` — egress via proxy sidecar only
+  - `rootless-keep-id.toml` — rootless user namespace mapping
+  - `agent-safe.toml` — combined preset for AI/automation agents:
+    - proxy-only egress, ephemeral HOME/XDG, read-only rootfs,
+      candidate workspace, PID + memory limits, no capabilities
 - [ ] **Validation mode** — `validation.level = "strict"` with checks for:
-  - dangerous mounts (writable `$HOME`, host `/`)
+  - writable `$HOME` or host `/` mounts
   - missing volume modes (`ro`/`rw`)
-  - `privileged = true`, broad ports, disabled SELinux labels
-  - network without egress policy
-  - secrets with store paths
-- [ ] **Quadlet `.network` rendering** — internal Podman networks for proxy sidecar pattern
-- [ ] **Proxy sidecar examples** — `app → internal net → proxy → internet`, not just env vars
-- [ ] **Secret docs + examples** — `podman secret create` + `[[config.secrets]]` TOML
-- [ ] **Closure-only store access** — `storeAccess = "closure-only"` to limit container's view of `/nix/store`
-- [ ] **Seccomp / AppArmor / SELinux examples** — profiles, not hidden defaults
+  - `privileged = true` or broad published ports (`0.0.0.0:*`)
+  - disabled SELinux / AppArmor labels
+  - network enabled without egress policy
+  - secret content pointing into `/nix/store`
+  - `AddCapability` combined with `dropCapabilities = ["all"]`
+  - `Network=host`
+  - duplicate volume targets or container names
+  - graph cycles (with file/path context in error)
+
+### 3b — Secret management
+
+Secrets must never enter TOML, the Nix store, or rendered Quadlet files.
+All injection happens at runtime only.
+
+- [ ] **systemd credentials integration** — use Quadlet `LoadCredential=` /
+  `SetCredential=` so secrets live in-memory at `/run/credentials/<unit>/`
+  and are never on disk:
+
+  ```toml
+  [[config.secrets]]
+  name = "api-token"
+  source = "credential:api-token"   # loaded via systemd credential
+  target = "/run/secrets/api-token"
+  mode = "0400"
+  ```
+
+- [ ] **sops / sops-nix integration** — NixOS module can reference sops-managed
+  secrets; decrypted at activation time, injected via systemd credentials or
+  tmpfs mount
+- [ ] **agenix / age integration** — same pattern for agenix users; age-encrypted
+  secrets decrypted at activation, never in the Nix store
+- [ ] **pass / gopass helper** — fetch secret from pass/gopass at container start,
+  inject via tmpfs:
+
+  ```toml
+  [[config.secrets]]
+  name = "npm-token"
+  source = "pass:services/npm/token"
+  target = "/run/secrets/npm-token"
+  type = "tmpfs-mount"
+  mode = "0400"
+  ```
+
+- [ ] **`podman secret` docs + examples** — complete guide for
+  `podman secret create` + `[[config.secrets]]` TOML
+- [ ] **Secret scoping** — secrets are not inherited through the parent graph
+  by default; children must explicitly opt in
+- [ ] **Secret TTL / rotation hooks** — re-inject or restart container when a
+  secret is rotated
+- [ ] **Anti-leak validation** — detect if a known secret pattern appears in
+  rendered TOML, Quadlet output, or `graft inspect` output
+- [ ] **Secret access audit** — log which secrets were accessed and when
+  (via systemd journal)
+- [ ] **External secret store interface** — generic adapter for HashiCorp Vault,
+  Doppler, Infisical, etc.:
+
+  ```toml
+  [[config.secrets]]
+  name = "db-password"
+  source = "vault:secret/data/db#password"
+  target = "/run/secrets/db-password"
+  ```
+
+### 3c — Namespace & runtime hardening
+
+- [ ] **`noNewPrivileges = true` as a documented recommended default** — validated
+  preset and strict-mode requirement
+- [ ] **PID namespace isolation** — `--pid=private` so the container cannot see
+  host processes
+- [ ] **IPC namespace isolation** — no shared memory with host or other containers
+  by default
+- [ ] **UTS namespace isolation** — prevent hostname spoofing
+- [ ] **dbus isolation** — agent containers must not access the host dbus socket
+- [ ] **Ephemeral XDG_RUNTIME_DIR** — agents get a separate tmpfs runtime dir,
+  not the host's `/run/user/<uid>`
+- [ ] **Masked paths** — mask dangerous kernel interfaces by default in strict mode:
+  `/proc/kcore`, `/proc/sysrq-trigger`, `/sys/firmware`, `/sys/kernel/debug`
+- [ ] **Read-only `/proc` and `/sys` subtrees** — reduce kernel attack surface
+  for agent containers
+- [ ] **Resource limits as security** — CPU, memory, and PID limits to prevent
+  fork bombs and resource exhaustion:
+
+  ```toml
+  [config.resources]
+  memoryLimit = "512m"
+  cpuQuota = "50%"
+  pidsLimit = 64
+  ```
+
+- [ ] **Capability audit** — `graft capabilities <instance>` shows granted,
+  dropped, and actually-used capabilities
+- [ ] **Seccomp profile helpers** — common named profiles (`server`, `network-client`,
+  `file-processor`) and a tool to suggest minimal syscall set from the package
+  closure:
+
+  ```toml
+  [config.security]
+  seccompProfile = "graft:network-client"  # built-in named profile
+  # or
+  seccompProfile = "./seccomp-agent.json"  # custom profile
+  ```
+
+- [ ] **AppArmor / SELinux examples** — profile docs for systems that use them;
+  validation warnings when labels are disabled in strict mode
+- [ ] **Rootless hardening guide** — complete docs for rootless Podman security:
+  `keep-id`, `newuidmap`/`newgidmap`, `subuid`/`subgid`, user namespace mapping
+
+### 3d — Network security
+
+- [ ] **Quadlet `.network` rendering** — generate Podman network units from TOML
+- [ ] **Proxy sidecar pattern** — `app → internal net → proxy → internet`,
+  not just environment variables:
+
+  ```toml
+  [config.network]
+  mode = "internal"           # no direct internet
+  proxy = "http-proxy-1"      # name of a sibling graft container
+  ```
+
+- [ ] **DNS filtering** — restrict which hostnames the container can resolve;
+  split-horizon DNS for internal services
+- [ ] **Port exposure auditing** — warn on `0.0.0.0` binds or broad port ranges
+  in strict mode
+- [ ] **Container-to-container isolation** — graft-managed containers must not
+  reach each other on a shared Podman network unless explicitly configured
+- [ ] **Egress allowlist** — declare permitted outbound hosts/ports in TOML;
+  proxy enforces it:
+
+  ```toml
+  [config.network.egress]
+  allow = ["registry.npmjs.org:443", "api.github.com:443"]
+  ```
+
+- [ ] **Proxy logs / egress audit** — `graft logs --denied <instance>` shows
+  blocked egress attempts (already in CLI surface, needs proxy backend)
+
+### 3e — Supply chain integrity
+
+- [ ] **Nix store hash verification** — verify store path hashes before container
+  start; fail fast on corruption
+- [ ] **Binary cache trust docs** — required signatures, trusted substituters,
+  how to lock down `nix.settings.trusted-substituters`
+- [ ] **Reproducible build verification** — compare store hashes across machines
+  and cache hits; surface mismatches in `graft inspect`
+- [ ] **Closure-only store access** — `storeAccess = "closure-only"` limits the
+  container's `/nix/store` view to only the runtime closure paths:
+
+  ```toml
+  [config.runtime]
+  storeAccess = "full-readonly"  # current default
+  # storeAccess = "closure-only" # future: only runtime closure visible
+  ```
+
+- [ ] **SLSA provenance** — generate provenance metadata for graft-rendered
+  containers (useful for audit and compliance)
+- [ ] **Image signing** — for future OCI mode: verify signatures via
+  sigstore/cosign before use
 
 ---
 
-## Phase 4 — Observability & supply-chain
+## Phase 4 — Observability & supply-chain automation
 
 Audit trails and automated update pipelines.
 
-- [ ] **Effective config export** — `graft explain <instance>` shows resolved mounts/network/security
-- [ ] **Proxy logs / egress audit** — which hostnames the container reached
+- [ ] **Effective config export** — `graft explain <instance>` shows resolved
+  mounts, network, security, and secrets (without secret values)
 - [ ] **SBOM / package list** — list runtime closure packages for an instance
 - [ ] **Diff of effective config** — before/after a TOML change
+- [ ] **Audit log** — systemd journal structured events for container lifecycle:
+  start, stop, secret access, network connections, workspace changes
 - [ ] **Supply-chain update pipeline** — Renovate-like flow:
+
   ```text
-  locked container
-    + proxy-only egress
+  locked container (agent-safe preset)
+    + proxy-only egress with allowlist
     + ephemeral HOME/XDG
-    + candidate workspace
-    + one update action
-    + diff export
-    + user review → promote
+    + candidate workspace (jj or copy)
+    + one update action (npm update, go get, etc.)
+    + diff/patch export
+    + user review → apply or discard
+    → promote to infra repo branch/PR
   ```
-- [ ] **TUI** — interactive list of instances, logs, attach, promote
+
+- [ ] **TUI** — interactive list of instances with logs, attach, promote, and
+  effective config view
 
 ---
 
@@ -118,3 +283,5 @@ Audit trails and automated update pipelines.
 - Host PATH modifications
 - Secrets stored in TOML or the Nix store
 - Any hidden security defaults
+- mitmproxy as a default debugging tool (trust-root implications must be
+  explicitly acknowledged by the user)
