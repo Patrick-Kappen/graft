@@ -2,10 +2,11 @@
 
 [![CI](https://github.com/Patrick-Kappen/graft/actions/workflows/check.yml/badge.svg)](https://github.com/Patrick-Kappen/graft/actions/workflows/check.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Status: early beta](https://img.shields.io/badge/status-early%20beta-orange.svg)](docs/roadmap.md)
 [![NixOS](https://img.shields.io/badge/NixOS-module-5277C3?logo=nixos&logoColor=white)](docs/nixos-module.md)
 [![Home Manager](https://img.shields.io/badge/Home%20Manager-module-6586c8)](docs/home-manager.md)
 
-**📖 Docs:** [Getting started](docs/getting-started.md) · [Reference](docs/reference.md) · [CLI](docs/cli.md) · [Config](docs/config.md) · [NixOS module](docs/nixos-module.md) · [Home Manager](docs/home-manager.md) · [Design](docs/design.md) · [Security](docs/security.md) · [Vision](docs/vision.md)
+**📖 Docs:** [Getting started](docs/getting-started.md) · [Reference](docs/reference.md) · [CLI](docs/cli.md) · [Config](docs/config.md) · [NixOS module](docs/nixos-module.md) · [Home Manager](docs/home-manager.md) · [Design](docs/design.md) · [Security](docs/security.md) · [Vision](docs/vision.md) · [Roadmap](docs/roadmap.md)
 
 ---
 
@@ -19,10 +20,12 @@ unit. There is no image to build or pull: the container's root filesystem is a
 minimal rootfs plus a read-only `/nix/store` mount, and the command runs from
 absolute store paths.
 
-> **Status:** early, single-developer project (v0.1.0). The fast transient flow,
-> the TOML graph, NixOS / Home Manager modules, home session isolation, shadow
-> mounts, and the diff/promote/reset flow all work today. See
-> [vision.md](docs/vision.md) for where things are heading.
+> ⚠️ **Early beta — v0.1.0.** This is a single-developer project. Core features
+> work but the TOML schema and CLI surface **may change before v1.0**. Not
+> recommended for production use without review. The fast transient flow, the
+> TOML graph, NixOS / Home Manager modules, home session isolation, shadow
+> mounts, and the diff/promote/reset skeleton all work today.
+> See [vision.md](docs/vision.md) for direction and [roadmap.md](docs/roadmap.md) for what's next.
 
 ---
 
