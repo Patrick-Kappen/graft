@@ -110,6 +110,42 @@ graft/
 - [ ] Phase 7 — Graph resolution: `parents` / `children` for composable configs
 - [ ] Phase 8 — Security hardening
 
+## Security Model
+
+### Container isolation
+Podman gives each container its own mount namespace. The container only sees:
+- Its rootfs (the Nix store path via overlay)
+- Explicitly mounted volumes (`Volume=`)
+
+Host filesystem, home dir, SSH keys — none of it is visible unless explicitly mounted.
+
+### Overlay approach
+- **System containers** (`target = "system"`): kernel overlayfs via `:O` flag (runs as root, no issue)
+- **User containers** (`target = "user"`): `fuse-overlayfs` for rootless overlay
+
+Overlay layers:
+```
+lowerdir = /nix/store/xxx        (read-only, Nix store)
+upperdir = ~/.local/share/graft/<name>/upper  (all writes go here)
+workdir  = ~/.local/share/graft/<name>/work   (internal overlay use)
+```
+
+The `upperdir` is the promote/diff layer — after a container run, it contains exactly what changed.
+
+### Phase 8: user isolation
+Each container will get its own restricted UID via `--userns=auto`. Combined with
+a single writable workdir, the container user has no rights outside its designated scope:
+
+```toml
+[config.security]
+userns = "auto"
+
+[config.workdir]
+path = "/workspace"
+```
+
+This is especially important for agent environments.
+
 ## Updating Graft (after pushing to graft repo)
 ```bash
 nix flake update graft
