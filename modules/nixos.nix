@@ -26,7 +26,7 @@ let
   quadletFiles = lib.mapAttrs (name: ctr:
     let
       containerName = lib.removeSuffix ".toml" name;
-      cmd     = lib.concatStringsSep " " (ctr.config.runtime.command or []);
+      cmd     = lib.escapeShellArgs (ctr.config.runtime.command or []);
       restart = ctr.config.service.restart or "on-failure";
       env     = containerEnvs.${name};
     in ''
