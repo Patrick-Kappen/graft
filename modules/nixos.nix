@@ -14,11 +14,16 @@ let
     (name: _: builtins.fromTOML (builtins.readFile (cfg.configRoot + "/${name}")))
     tomlFiles;
 
+  # Base directories required by Podman (e.g. /etc for hosts/resolv.conf)
+  baseDirs = pkgs.runCommand "graft-base-dirs" {} ''
+    mkdir -p $out/{etc,tmp,var,home,root,run,proc,sys,dev}
+  '';
+
   # Build a buildEnv per container from its package list
   containerEnvs = lib.mapAttrs (name: ctr:
     pkgs.buildEnv {
       name  = "graft-${lib.removeSuffix ".toml" name}-env";
-      paths = map (p: pkgs.${p}) (ctr.config.runtime.packages or []);
+      paths = [ baseDirs ] ++ map (p: pkgs.${p}) (ctr.config.runtime.packages or []);
     }
   ) containers;
 
