@@ -103,6 +103,8 @@ graft/
 ## Roadmap
 - [x] Phase 1 — Proof of concept: container from Nix store
 - [x] Phase 2 — NixOS module: TOML → buildEnv → Quadlet
+  - Fixed: rootless user containers require pre-created mount points in rootfs:
+    `/etc/mtab → /proc/mounts`, `/etc/hostname`, `/etc/hosts`, `/etc/resolv.conf`, `/run/.containerenv`
 - [ ] Phase 3 — Dev shell: interactive containers via CLI
 - [ ] Phase 4 — Promote workflow: diff on exit, graduate to store
 - [ ] Phase 5 — Agent environments
