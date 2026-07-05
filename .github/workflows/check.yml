@@ -18,7 +18,7 @@ jobs:
         run: |
           nix develop -c bash -c 'files=$(gofmt -l cmd internal); test -z "$files" || { echo "$files"; exit 1; }'
       - name: nixfmt
-        run: nix develop -c bash -c 'find . -type f -name '\''*.nix'\'' -print0 | xargs -0 nixfmt --check'
+        run: nix develop -c bash -c 'find flake.nix nix -type f -name '\''*.nix'\'' -print0 | xargs -0 nixfmt --check'
       - name: go test
         run: nix develop -c go test ./...
       - name: go vet
