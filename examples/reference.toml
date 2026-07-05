@@ -1,0 +1,194 @@
+# version =                      # 1
+# name =                         # string
+
+# [parents]
+# add =                          # ["base/name"]
+# remove =                       # ["base/name"]
+# set =                          # ["base/name"]
+
+# [children]
+# add =                          # ["child/name"]
+# remove =                       # ["child/name"]
+# set =                          # ["child/name"]
+
+# [deploy]
+# enable =                       # true | false
+# target =                       # system | user
+
+# [validation]
+# level =                        # off | warn | strict
+
+# [config.runtime]
+# mode =                         # rootfs-store
+# packages =                     # ["bashInteractive", "coreutils"]
+# command =                      # ["bash", "-c", "sleep infinity"]
+
+# [config.runtime.packageOps]
+# add =                          # ["pkg"]
+# remove =                       # ["pkg"]
+# [[config.runtime.packageOps.replace]]
+# name =                         # string
+# with =                         # string
+
+# [config.container]
+# name =                         # string
+# hostname =                     # string
+# pod =                          # string
+# entrypoint =                   # ["string"]
+# stopSignal =                   # SIGTERM | SIGKILL | ...
+# stopTimeout =                  # int (seconds)
+# workingDir =                   # string
+# user =                         # string | int
+# group =                        # string | int
+# timezone =                     # local | UTC | Europe/Amsterdam | ...
+# notify =                       # container | healthy
+# runInit =                      # true | false
+# podmanArgs =                   # ["--arg"]
+# globalArgs =                   # ["--arg"]
+# ip =                           # string (IPv4)
+# ip6 =                          # string (IPv6)
+# networkAlias =                 # ["alias"]
+# exposeHostPort =               # ["8080"]
+# uidMap =                       # ["0:100000:65536"]
+# gidMap =                       # ["0:100000:65536"]
+# subUidMap =                    # string (e.g. "@user")
+# subGidMap =                    # string
+# shmSize =                      # string (e.g. "64m")
+# mask =                         # ["/path"]
+# unmaskPaths =                  # ["/path"]
+# sysctl =                       # ["net.ipv4.ip_unprivileged_port_start=80"]
+# logDriver =                    # journald | k8s-file | ...
+
+# [config.container.annotations]
+# key =                          # string
+
+# [config.container.environment]
+# KEY =                          # string
+
+# [config.container.environmentFile]
+#                                # ["/path/to/file"]
+
+# [config.container.health]
+# cmd =                          # string
+# interval =                     # string (e.g. "30s")
+# timeout =                      # string (e.g. "10s")
+# retries =                      # int
+# startPeriod =                  # string (e.g. "5s")
+# onFailure =                    # kill | restart | stop | none
+# startupCmd =                   # string
+# startupInterval =              # string
+# startupRetries =               # int
+# startupSuccess =               # int
+# startupTimeout =               # string
+
+# [config.filesystem]
+# readOnly =                     # true | false
+# readOnlyTmpfs =                # true | false
+# tmpfs =                        # ["/tmp"]
+# mounts =                       # ["type=bind,src=/host,dst=/container"]
+
+# [[config.filesystem.volumes]]
+# source =                       # string
+# target =                       # string
+# mode =                         # string (e.g. "ro")
+
+# [[config.filesystem.devices]]
+# source =                       # string
+# target =                       # string
+# permissions =                  # string (e.g. "rwm")
+
+# [config.network]
+# mode =                         # string (e.g. "bridge", "host", "none")
+# publish =                      # ["8080:80"]
+# dns =                          # ["1.1.1.1"]
+# dnsOption =                    # ["string"]
+# dnsSearch =                    # ["example.com"]
+# addHost =                      # ["hostname:ip"]
+
+# [[config.networks]]
+# name =                         # string
+# driver =                       # string
+# internal =                     # true | false
+# ipv6 =                         # true | false
+# subnet =                       # string
+# gateway =                      # string
+# ipRange =                      # string
+# dns =                          # ["1.1.1.1"]
+# options =                      # string
+
+# [[config.volumes]]
+# name =                         # string
+# driver =                       # string
+# copy =                         # true | false
+# options =                      # string
+
+# [config.security]
+# dropCapabilities =             # ["all"] | ["NET_RAW"]
+# addCapabilities =              # ["NET_BIND_SERVICE"]
+# noNewPrivileges =              # true | false
+# privileged =                   # true | false
+# seccompProfile =               # string (path)
+# securityLabelDisable =         # true | false
+# securityLabelFileType =        # string
+# securityLabelLevel =           # string
+# securityLabelNested =          # true | false
+# securityLabelType =            # string
+# securityOpt =                  # ["no-new-privileges"]
+# userns =                       # keep-id | auto | ...
+
+# [config.resources]
+# memory =                       # string (e.g. "512m")
+# memorySwap =                   # string
+# cpus =                         # string (e.g. "0.5")
+# cpuQuota =                     # string
+# pidsLimit =                    # int
+# ulimits =                      # ["nofile=1024:1024"]
+
+# [[config.secrets]]
+# name =                         # string
+# target =                       # string
+# type =                         # mount | env
+# uid =                          # int
+# gid =                          # int
+# mode =                         # string (e.g. "0400")
+# options =                      # string
+
+# [config.session]
+# stopOnExit =                   # true | false
+
+# [config.workspace]
+# mode =                         # none | copy
+# source =                       # string (host path, default: ".")
+# target =                       # string (container path, default: "/workspace")
+# review =                       # diff
+# promote =                      # off | prompt | auto
+# excludePatterns =              # [".git", "node_modules"]
+
+# [config.home]
+# mode =                         # ephemeral | persistent | session
+# source =                       # string (host path, supports "~")
+# target =                       # string (default: "/home/user")
+# review =                       # diff
+# promote =                      # auto | prompt | never
+
+# [[config.home.shadow]]
+# container =                    # string (path inside container)
+# host =                         # string (host path, supports "~")
+
+# [config.attach]
+# tmuxSession =                  # string (default: "main")
+# shell =                        # string (default: "sh")
+# startDelay =                   # string (e.g. "500ms", "2s")
+
+# [config.service]
+# type =                         # oneshot | notify
+# restart =                      # on-failure | always | no
+# restartSec =                   # string (e.g. "10s")
+# timeoutStartSec =              # string (e.g. "2m")
+# timeoutStopSec =               # string (e.g. "30s")
+# remainAfterExit =              # true | false
+# restartIfChanged =             # true | false
+
+# [config.quadlet.container]    # raw passthrough (cannot set Rootfs, ContainerName, Exec, Network, Volume)
+# [config.quadlet.service]      # raw passthrough
+# [config.quadlet.install]      # raw passthrough
