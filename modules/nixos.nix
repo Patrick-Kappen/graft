@@ -52,15 +52,20 @@ let
       cmd     = lib.escapeShellArgs (ctr.config.runtime.command or []);
       restart = ctr.config.service.restart or "on-failure";
       env     = containerEnvs.${name};
+      stateBase = "/var/lib/graft/${containerName}";
     in ''
       [Container]
       ContainerName=${containerName}
-      Rootfs=${env}:O
+      Rootfs=${env}
       Exec=${cmd}
       Volume=/nix/store:/nix/store:ro
+      Volume=${stateBase}/etc:/etc:rw
+      Volume=${stateBase}/tmp:/tmp:rw
+      Volume=${stateBase}/var:/var:rw
 
       [Service]
       Restart=${restart}
+      StateDirectory=graft/${containerName}/etc graft/${containerName}/tmp graft/${containerName}/var
 
       [Install]
       WantedBy=multi-user.target
