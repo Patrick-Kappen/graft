@@ -89,9 +89,9 @@ type ContainerConfig struct {
 	GlobalArgs []string `toml:"globalArgs"`
 
 	// Network identity
-	IP           string   `toml:"ip"`
-	IP6          string   `toml:"ip6"`
-	NetworkAlias []string `toml:"networkAlias"`
+	IP             string   `toml:"ip"`
+	IP6            string   `toml:"ip6"`
+	NetworkAlias   []string `toml:"networkAlias"`
 	ExposeHostPort []string `toml:"exposeHostPort"`
 
 	// User namespace
@@ -324,12 +324,12 @@ type UpstreamConfig struct {
 }
 
 type ServiceConfig struct {
-	Type             string `toml:"type"`
-	Restart          string `toml:"restart"`
-	RestartSec       string `toml:"restartSec"`
-	TimeoutStartSec  string `toml:"timeoutStartSec"`
-	TimeoutStopSec   string `toml:"timeoutStopSec"`
-	RemainAfterExit  *bool  `toml:"remainAfterExit"`
+	Type            string `toml:"type"`
+	Restart         string `toml:"restart"`
+	RestartSec      string `toml:"restartSec"`
+	TimeoutStartSec string `toml:"timeoutStartSec"`
+	TimeoutStopSec  string `toml:"timeoutStopSec"`
+	RemainAfterExit *bool  `toml:"remainAfterExit"`
 	// RestartIfChanged controls whether NixOS automatically restarts this
 	// container when its unit file changes during nixos-rebuild switch.
 	// Set to false to keep a long-running container alive across rebuilds.
