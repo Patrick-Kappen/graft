@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zerodawn1990/graft/internal/config"
+	"github.com/Patrick-Kappen/graft/internal/config"
 )
 
 func TestAutodetectConfigFindsFirstCandidate(t *testing.T) {
@@ -206,5 +206,213 @@ func TestRejectUnresolvedGraphFeatures(t *testing.T) {
 	err = rejectUnresolvedGraphFeatures(&config.File{Config: config.Config{Runtime: config.RuntimeConfig{PackageOps: config.PackageOpsConfig{Add: []string{"jq"}}}}})
 	if err == nil || !strings.Contains(err.Error(), "does not apply") {
 		t.Fatalf("error = %v, want packageOps rejection", err)
+	}
+}
+
+func TestExtractFlag(t *testing.T) {
+	tests := []struct {
+		name      string
+		flag      string
+		args      []string
+		wantVal   string
+		wantRest  []string
+	}{
+		{
+			name:     "space-separated value",
+			flag:     "--host",
+			args:     []string{"--host", "myhost", "container"},
+			wantVal:  "myhost",
+			wantRest: []string{"container"},
+		},
+		{
+			name:     "equals-separated value",
+			flag:     "--host",
+			args:     []string{"--host=myhost", "container"},
+			wantVal:  "myhost",
+			wantRest: []string{"container"},
+		},
+		{
+			name:     "flag absent",
+			flag:     "--host",
+			args:     []string{"container"},
+			wantVal:  "",
+			wantRest: []string{"container"},
+		},
+		{
+			name:     "empty args",
+			flag:     "--host",
+			args:     []string{},
+			wantVal:  "",
+			wantRest: []string{},
+		},
+		{
+			name:     "flag at end without value is ignored",
+			flag:     "--host",
+			args:     []string{"container", "--host"},
+			wantVal:  "",
+			wantRest: []string{"container", "--host"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotVal, gotRest := extractFlag(tt.flag, tt.args)
+			if gotVal != tt.wantVal {
+				t.Errorf("value = %q, want %q", gotVal, tt.wantVal)
+			}
+			if len(gotRest) != len(tt.wantRest) {
+				t.Errorf("rest = %v, want %v", gotRest, tt.wantRest)
+				return
+			}
+			for i := range gotRest {
+				if gotRest[i] != tt.wantRest[i] {
+					t.Errorf("rest[%d] = %q, want %q", i, gotRest[i], tt.wantRest[i])
+				}
+			}
+		})
+	}
+}
+
+func TestShadowDirName(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"/home/user/projects", "home_user_projects"},
+		{"/foo", "foo"},
+		{"/a/b/c", "a_b_c"},
+	}
+	for _, tt := range tests {
+		if got := shadowDirName(tt.input); got != tt.want {
+			t.Errorf("shadowDirName(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+
+	// Long paths must be truncated to at most 64 characters.
+	long := "/" + strings.Repeat("x/", 40)
+	got := shadowDirName(long)
+	if len(got) > 64 {
+		t.Errorf("shadowDirName(long) len = %d, want <= 64", len(got))
+	}
+}
+
+func TestSessionMetaRoundtrip(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", dir)
+
+	want := sessionMeta{
+		ContainerName: "my-agent",
+		StartedAt:     "2026-01-01T00:00:00Z",
+		Shadows: []shadowMeta{
+			{Source: "/src/repo", ShadowDir: "/tmp/shadow", Target: "/workspace"},
+		},
+	}
+	if err := writeSessionMeta(want); err != nil {
+		t.Fatalf("writeSessionMeta() error = %v", err)
+	}
+	got, err := readSessionMeta("my-agent")
+	if err != nil {
+		t.Fatalf("readSessionMeta() error = %v", err)
+	}
+	if got.ContainerName != want.ContainerName {
+		t.Errorf("ContainerName = %q, want %q", got.ContainerName, want.ContainerName)
+	}
+	if got.StartedAt != want.StartedAt {
+		t.Errorf("StartedAt = %q, want %q", got.StartedAt, want.StartedAt)
+	}
+	if len(got.Shadows) != 1 || got.Shadows[0].Source != want.Shadows[0].Source {
+		t.Errorf("Shadows = %+v, want %+v", got.Shadows, want.Shadows)
+	}
+}
+
+func TestGraftDiffNoMeta(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	err := graftDiff([]string{"nonexistent-container"})
+	if err == nil {
+		t.Fatal("expected error when no session meta exists")
+	}
+	if !strings.Contains(err.Error(), "no session data") {
+		t.Fatalf("error = %q, want \"no session data\"", err)
+	}
+}
+
+func TestGraftPromoteNoMeta(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	err := graftPromote([]string{"nonexistent-container"})
+	if err == nil {
+		t.Fatal("expected error when no session meta exists")
+	}
+	if !strings.Contains(err.Error(), "no session data") {
+		t.Fatalf("error = %q, want \"no session data\"", err)
+	}
+}
+
+func TestGraftResetNoMeta(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	err := graftReset([]string{"nonexistent-container"})
+	if err == nil {
+		t.Fatal("expected error when no session meta exists")
+	}
+	if !strings.Contains(err.Error(), "no session data") {
+		t.Fatalf("error = %q, want \"no session data\"", err)
+	}
+}
+
+func TestGraftDiffNoArgs(t *testing.T) {
+	err := graftDiff([]string{})
+	if err == nil || !strings.Contains(err.Error(), "diff needs") {
+		t.Fatalf("error = %v, want \"diff needs\"", err)
+	}
+}
+
+func TestGraftPromoteNoArgs(t *testing.T) {
+	err := graftPromote([]string{})
+	if err == nil || !strings.Contains(err.Error(), "promote needs") {
+		t.Fatalf("error = %v, want \"promote needs\"", err)
+	}
+}
+
+func TestGraftResetNoArgs(t *testing.T) {
+	err := graftReset([]string{})
+	if err == nil || !strings.Contains(err.Error(), "reset needs") {
+		t.Fatalf("error = %v, want \"reset needs\"", err)
+	}
+}
+
+func TestGraftPromoteShadows(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", dir)
+
+	// Create a fake source dir and shadow dir with some content.
+	src := filepath.Join(dir, "source")
+	shadow := filepath.Join(dir, "shadow")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(shadow, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Simulate a file the agent wrote inside the container (shadow).
+	if err := os.WriteFile(filepath.Join(shadow, "result.txt"), []byte("done\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	meta := sessionMeta{
+		ContainerName: "test-agent",
+		StartedAt:     "2026-01-01T00:00:00Z",
+		Shadows: []shadowMeta{
+			{Source: src, ShadowDir: shadow, Target: "/work"},
+		},
+	}
+	if err := writeSessionMeta(meta); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := graftPromote([]string{"test-agent"}); err != nil {
+		t.Fatalf("graftPromote() error = %v", err)
+	}
+
+	// result.txt must have been promoted to src.
+	if _, err := os.Stat(filepath.Join(src, "result.txt")); err != nil {
+		t.Errorf("result.txt not promoted: %v", err)
 	}
 }

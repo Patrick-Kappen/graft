@@ -1,6 +1,5 @@
 # Security and isolation notes
 
-For the proxy/maximum-isolation roadmap, see [`network-proxy-security.md`](network-proxy-security.md).
 For the broader hardening checklist, see [`security-roadmap.md`](security-roadmap.md).
 
 `graft` does not enable hidden security policy. Security is explicit TOML.

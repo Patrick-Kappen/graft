@@ -170,17 +170,24 @@ func mergePackageOps(base, override PackageOpsConfig) PackageOpsConfig {
 
 func mergeContainer(base, override ContainerConfig) ContainerConfig {
 	out := override
+	// Scalars: child wins if non-empty.
 	if out.Name == "" {
 		out.Name = base.Name
 	}
 	if out.Hostname == "" {
 		out.Hostname = base.Hostname
 	}
+	if out.Pod == "" {
+		out.Pod = base.Pod
+	}
 	if len(out.Entrypoint) == 0 {
 		out.Entrypoint = base.Entrypoint
 	}
 	if out.StopSignal == "" {
 		out.StopSignal = base.StopSignal
+	}
+	if out.StopTimeout == 0 {
+		out.StopTimeout = base.StopTimeout
 	}
 	if out.WorkingDir == "" {
 		out.WorkingDir = base.WorkingDir
@@ -191,10 +198,91 @@ func mergeContainer(base, override ContainerConfig) ContainerConfig {
 	if out.Group == "" {
 		out.Group = base.Group
 	}
-	// Environment: base as foundation, override wins on key conflict.
+	if out.Timezone == "" {
+		out.Timezone = base.Timezone
+	}
+	if out.Notify == "" {
+		out.Notify = base.Notify
+	}
+	if out.RunInit == nil {
+		out.RunInit = base.RunInit
+	}
+	if out.IP == "" {
+		out.IP = base.IP
+	}
+	if out.IP6 == "" {
+		out.IP6 = base.IP6
+	}
+	if out.SubUIDMap == "" {
+		out.SubUIDMap = base.SubUIDMap
+	}
+	if out.SubGIDMap == "" {
+		out.SubGIDMap = base.SubGIDMap
+	}
+	if out.ShmSize == "" {
+		out.ShmSize = base.ShmSize
+	}
+	if out.LogDriver == "" {
+		out.LogDriver = base.LogDriver
+	}
+	// Maps: base as foundation, override wins on key conflict.
+	out.Annotations = mergeMaps(base.Annotations, override.Annotations)
 	out.Environment = mergeMaps(base.Environment, override.Environment)
-	// PodmanArgs: union.
+	// Booleans.
+	if out.EnvironmentHost == nil {
+		out.EnvironmentHost = base.EnvironmentHost
+	}
+	// Lists: union.
+	out.EnvironmentFile = unionStrings(base.EnvironmentFile, override.EnvironmentFile)
 	out.PodmanArgs = unionStrings(base.PodmanArgs, override.PodmanArgs)
+	out.GlobalArgs = unionStrings(base.GlobalArgs, override.GlobalArgs)
+	out.NetworkAlias = unionStrings(base.NetworkAlias, override.NetworkAlias)
+	out.ExposeHostPort = unionStrings(base.ExposeHostPort, override.ExposeHostPort)
+	out.UIDMap = unionStrings(base.UIDMap, override.UIDMap)
+	out.GIDMap = unionStrings(base.GIDMap, override.GIDMap)
+	out.Mask = unionStrings(base.Mask, override.Mask)
+	out.UnmaskPaths = unionStrings(base.UnmaskPaths, override.UnmaskPaths)
+	out.Sysctl = unionStrings(base.Sysctl, override.Sysctl)
+	// Health: child wins field-by-field.
+	out.Health = mergeHealth(base.Health, override.Health)
+	return out
+}
+
+func mergeHealth(base, override HealthConfig) HealthConfig {
+	out := override
+	if out.Cmd == "" {
+		out.Cmd = base.Cmd
+	}
+	if out.Interval == "" {
+		out.Interval = base.Interval
+	}
+	if out.Timeout == "" {
+		out.Timeout = base.Timeout
+	}
+	if out.Retries == 0 {
+		out.Retries = base.Retries
+	}
+	if out.StartPeriod == "" {
+		out.StartPeriod = base.StartPeriod
+	}
+	if out.OnFailure == "" {
+		out.OnFailure = base.OnFailure
+	}
+	if out.StartupCmd == "" {
+		out.StartupCmd = base.StartupCmd
+	}
+	if out.StartupInterval == "" {
+		out.StartupInterval = base.StartupInterval
+	}
+	if out.StartupRetries == 0 {
+		out.StartupRetries = base.StartupRetries
+	}
+	if out.StartupSuccess == 0 {
+		out.StartupSuccess = base.StartupSuccess
+	}
+	if out.StartupTimeout == "" {
+		out.StartupTimeout = base.StartupTimeout
+	}
 	return out
 }
 
@@ -260,6 +348,8 @@ func mergeNetwork(base, override NetworkConfig) NetworkConfig {
 	}
 	out.Publish = unionStrings(base.Publish, override.Publish)
 	out.DNS = unionStrings(base.DNS, override.DNS)
+	out.DNSOption = unionStrings(base.DNSOption, override.DNSOption)
+	out.DNSSearch = unionStrings(base.DNSSearch, override.DNSSearch)
 	out.AddHost = unionStrings(base.AddHost, override.AddHost)
 	return out
 }
@@ -307,6 +397,18 @@ func mergeSecurity(base, override SecurityConfig) SecurityConfig {
 	}
 	if out.SecurityLabelDisable == nil {
 		out.SecurityLabelDisable = base.SecurityLabelDisable
+	}
+	if out.SecurityLabelFileType == "" {
+		out.SecurityLabelFileType = base.SecurityLabelFileType
+	}
+	if out.SecurityLabelLevel == "" {
+		out.SecurityLabelLevel = base.SecurityLabelLevel
+	}
+	if out.SecurityLabelNested == nil {
+		out.SecurityLabelNested = base.SecurityLabelNested
+	}
+	if out.SecurityLabelType == "" {
+		out.SecurityLabelType = base.SecurityLabelType
 	}
 	out.SecurityOpt = unionStrings(base.SecurityOpt, override.SecurityOpt)
 	if out.UserNS == "" {

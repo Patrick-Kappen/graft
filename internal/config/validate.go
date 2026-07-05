@@ -43,16 +43,35 @@ func (f *File) Validate() error {
 	if err := validateWorkspace(f.Config.Workspace); err != nil {
 		return err
 	}
+	if err := validateHealth(f.Config.Container.Health); err != nil {
+		return err
+	}
 	return nil
+}
+
+func validateHealth(h HealthConfig) error {
+	switch h.OnFailure {
+	case "", "kill", "restart", "stop", "none":
+		return nil
+	default:
+		return fmt.Errorf("unsupported health.onFailure %q; expected kill, restart, stop, or none", h.OnFailure)
+	}
 }
 
 func validateWorkspace(workspace WorkspaceConfig) error {
 	switch workspace.Mode {
 	case "", "none", "copy":
-		return nil
+		// valid
 	default:
 		return fmt.Errorf("unsupported workspace mode %q; expected none or copy", workspace.Mode)
 	}
+	switch workspace.Promote {
+	case "", "off", "prompt", "auto":
+		// valid
+	default:
+		return fmt.Errorf("unsupported workspace.promote %q; expected off, prompt, or auto", workspace.Promote)
+	}
+	return nil
 }
 
 func validateVolumes(volumes []VolumeConfig) error {

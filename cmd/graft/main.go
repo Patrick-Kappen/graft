@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/zerodawn1990/graft/internal/cli"
+	"github.com/Patrick-Kappen/graft/internal/cli"
 )
 
 func main() {

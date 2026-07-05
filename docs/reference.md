@@ -22,7 +22,7 @@ Complete configuration, including wiring graft as a flake input:
 
 ```nix
 {
-  inputs.graft.url = "github:zerodawn1990/graft";
+  inputs.graft.url = "github:Patrick-Kappen/graft";
 
   # In your NixOS configuration:
   # imports = [ inputs.graft.nixosModules.default ];

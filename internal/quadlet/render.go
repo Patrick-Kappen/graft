@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/zerodawn1990/graft/internal/config"
+	"github.com/Patrick-Kappen/graft/internal/config"
 )
 
 type RenderInput struct {
@@ -149,6 +149,50 @@ func RenderRootfsContainer(input RenderInput) (string, error) {
 	for _, arg := range input.Config.Container.PodmanArgs {
 		b.WriteString("PodmanArgs=" + SystemdQuote(arg) + "\n")
 	}
+	for _, arg := range input.Config.Container.GlobalArgs {
+		b.WriteString("GlobalArgs=" + SystemdQuote(arg) + "\n")
+	}
+	writeStringOption(&b, "Pod", input.Config.Container.Pod)
+	writeStringOption(&b, "Timezone", input.Config.Container.Timezone)
+	writeStringOption(&b, "Notify", input.Config.Container.Notify)
+	writeBoolOption(&b, "RunInit", input.Config.Container.RunInit)
+	if input.Config.Container.StopTimeout != 0 {
+		_, _ = fmt.Fprintf(&b, "StopTimeout=%d\n", input.Config.Container.StopTimeout)
+	}
+	for _, key := range sortedKeys(input.Config.Container.Annotations) {
+		b.WriteString("Annotation=" + key + "=" + input.Config.Container.Annotations[key] + "\n")
+	}
+	for _, f := range input.Config.Container.EnvironmentFile {
+		b.WriteString("EnvironmentFile=" + f + "\n")
+	}
+	writeBoolOption(&b, "EnvironmentHost", input.Config.Container.EnvironmentHost)
+	writeStringOption(&b, "IP", input.Config.Container.IP)
+	writeStringOption(&b, "IP6", input.Config.Container.IP6)
+	for _, a := range input.Config.Container.NetworkAlias {
+		b.WriteString("NetworkAlias=" + a + "\n")
+	}
+	for _, p := range input.Config.Container.ExposeHostPort {
+		b.WriteString("ExposeHostPort=" + p + "\n")
+	}
+	for _, m := range input.Config.Container.UIDMap {
+		b.WriteString("UIDMap=" + m + "\n")
+	}
+	for _, m := range input.Config.Container.GIDMap {
+		b.WriteString("GIDMap=" + m + "\n")
+	}
+	writeStringOption(&b, "SubUIDMap", input.Config.Container.SubUIDMap)
+	writeStringOption(&b, "SubGIDMap", input.Config.Container.SubGIDMap)
+	writeStringOption(&b, "ShmSize", input.Config.Container.ShmSize)
+	for _, p := range input.Config.Container.Mask {
+		b.WriteString("Mask=" + p + "\n")
+	}
+	for _, p := range input.Config.Container.UnmaskPaths {
+		b.WriteString("UnmaskPaths=" + p + "\n")
+	}
+	for _, s := range input.Config.Container.Sysctl {
+		b.WriteString("Sysctl=" + s + "\n")
+	}
+	writeStringOption(&b, "LogDriver", input.Config.Container.LogDriver)
 
 	writeBoolOption(&b, "ReadOnly", input.Config.Filesystem.ReadOnly)
 	writeBoolOption(&b, "ReadOnlyTmpfs", input.Config.Filesystem.ReadOnlyTmpfs)
@@ -194,6 +238,12 @@ func RenderRootfsContainer(input RenderInput) (string, error) {
 	for _, host := range input.Config.Network.AddHost {
 		b.WriteString("AddHost=" + host + "\n")
 	}
+	for _, opt := range input.Config.Network.DNSOption {
+		b.WriteString("DNSOption=" + opt + "\n")
+	}
+	for _, s := range input.Config.Network.DNSSearch {
+		b.WriteString("DNSSearch=" + s + "\n")
+	}
 
 	for _, cap := range input.Config.Security.DropCapabilities {
 		b.WriteString("DropCapability=" + cap + "\n")
@@ -209,6 +259,10 @@ func RenderRootfsContainer(input RenderInput) (string, error) {
 		b.WriteString("SecurityOpt=" + opt + "\n")
 	}
 	writeStringOption(&b, "UserNS", input.Config.Security.UserNS)
+	writeStringOption(&b, "SecurityLabelFileType", input.Config.Security.SecurityLabelFileType)
+	writeStringOption(&b, "SecurityLabelLevel", input.Config.Security.SecurityLabelLevel)
+	writeBoolOption(&b, "SecurityLabelNested", input.Config.Security.SecurityLabelNested)
+	writeStringOption(&b, "SecurityLabelType", input.Config.Security.SecurityLabelType)
 
 	writeStringOption(&b, "Memory", input.Config.Resources.Memory)
 	writeStringOption(&b, "MemorySwap", input.Config.Resources.MemorySwap)
@@ -219,6 +273,27 @@ func RenderRootfsContainer(input RenderInput) (string, error) {
 	}
 	for _, ulimit := range input.Config.Resources.Ulimits {
 		b.WriteString("Ulimit=" + ulimit + "\n")
+	}
+	if h := input.Config.Container.Health; h.Cmd != "" {
+		b.WriteString("HealthCmd=" + h.Cmd + "\n")
+		writeStringOption(&b, "HealthInterval", h.Interval)
+		writeStringOption(&b, "HealthTimeout", h.Timeout)
+		if h.Retries != 0 {
+			_, _ = fmt.Fprintf(&b, "HealthRetries=%d\n", h.Retries)
+		}
+		writeStringOption(&b, "HealthStartPeriod", h.StartPeriod)
+		writeStringOption(&b, "HealthOnFailure", h.OnFailure)
+		if h.StartupCmd != "" {
+			b.WriteString("HealthStartupCmd=" + h.StartupCmd + "\n")
+			writeStringOption(&b, "HealthStartupInterval", h.StartupInterval)
+			if h.StartupRetries != 0 {
+				_, _ = fmt.Fprintf(&b, "HealthStartupRetries=%d\n", h.StartupRetries)
+			}
+			if h.StartupSuccess != 0 {
+				_, _ = fmt.Fprintf(&b, "HealthStartupSuccess=%d\n", h.StartupSuccess)
+			}
+			writeStringOption(&b, "HealthStartupTimeout", h.StartupTimeout)
+		}
 	}
 	for _, secret := range input.Config.Secrets {
 		if secret.Name == "" {

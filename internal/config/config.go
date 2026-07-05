@@ -60,15 +60,70 @@ type PackageReplaceConfig struct {
 }
 
 type ContainerConfig struct {
-	Name        string            `toml:"name"`
-	Hostname    string            `toml:"hostname"`
-	Entrypoint  []string          `toml:"entrypoint"`
-	StopSignal  string            `toml:"stopSignal"`
-	WorkingDir  string            `toml:"workingDir"`
-	User        string            `toml:"user"`
-	Group       string            `toml:"group"`
-	Environment map[string]string `toml:"environment"`
-	PodmanArgs  []string          `toml:"podmanArgs"`
+	// Identity
+	Name     string `toml:"name"`
+	Hostname string `toml:"hostname"`
+	Pod      string `toml:"pod"`
+
+	// Execution
+	Entrypoint  []string `toml:"entrypoint"`
+	StopSignal  string   `toml:"stopSignal"`
+	StopTimeout int      `toml:"stopTimeout"`
+	WorkingDir  string   `toml:"workingDir"`
+	User        string   `toml:"user"`
+	Group       string   `toml:"group"`
+	Timezone    string   `toml:"timezone"`
+	Notify      string   `toml:"notify"`
+	RunInit     *bool    `toml:"runInit"`
+
+	// Environment
+	Annotations     map[string]string `toml:"annotations"`
+	Environment     map[string]string `toml:"environment"`
+	EnvironmentFile []string          `toml:"environmentFile"`
+	EnvironmentHost *bool             `toml:"environmentHost"`
+
+	// Podman args
+	PodmanArgs []string `toml:"podmanArgs"`
+	GlobalArgs []string `toml:"globalArgs"`
+
+	// Network identity
+	IP           string   `toml:"ip"`
+	IP6          string   `toml:"ip6"`
+	NetworkAlias []string `toml:"networkAlias"`
+	ExposeHostPort []string `toml:"exposeHostPort"`
+
+	// User namespace
+	UIDMap    []string `toml:"uidMap"`
+	GIDMap    []string `toml:"gidMap"`
+	SubUIDMap string   `toml:"subUidMap"`
+	SubGIDMap string   `toml:"subGidMap"`
+
+	// Filesystem extras
+	ShmSize     string   `toml:"shmSize"`
+	Mask        []string `toml:"mask"`
+	UnmaskPaths []string `toml:"unmaskPaths"`
+	Sysctl      []string `toml:"sysctl"`
+
+	// Logging
+	LogDriver string `toml:"logDriver"`
+
+	// Health checks
+	Health HealthConfig `toml:"health"`
+}
+
+// HealthConfig describes the container health check (Quadlet HealthCmd et al.).
+type HealthConfig struct {
+	Cmd             string `toml:"cmd"`
+	Interval        string `toml:"interval"`
+	Timeout         string `toml:"timeout"`
+	Retries         int    `toml:"retries"`
+	StartPeriod     string `toml:"startPeriod"`
+	OnFailure       string `toml:"onFailure"`
+	StartupCmd      string `toml:"startupCmd"`
+	StartupInterval string `toml:"startupInterval"`
+	StartupRetries  int    `toml:"startupRetries"`
+	StartupSuccess  int    `toml:"startupSuccess"`
+	StartupTimeout  string `toml:"startupTimeout"`
 }
 
 type FilesystemConfig struct {
@@ -93,10 +148,12 @@ type DeviceConfig struct {
 }
 
 type NetworkConfig struct {
-	Mode    string   `toml:"mode"`
-	Publish []string `toml:"publish"`
-	DNS     []string `toml:"dns"`
-	AddHost []string `toml:"addHost"`
+	Mode      string   `toml:"mode"`
+	Publish   []string `toml:"publish"`
+	DNS       []string `toml:"dns"`
+	DNSOption []string `toml:"dnsOption"`
+	DNSSearch []string `toml:"dnsSearch"`
+	AddHost   []string `toml:"addHost"`
 }
 
 type NetworkUnitConfig struct {
@@ -123,14 +180,18 @@ type VolumeUnitConfig struct {
 }
 
 type SecurityConfig struct {
-	DropCapabilities     []string `toml:"dropCapabilities"`
-	AddCapabilities      []string `toml:"addCapabilities"`
-	NoNewPrivileges      *bool    `toml:"noNewPrivileges"`
-	Privileged           *bool    `toml:"privileged"`
-	SeccompProfile       string   `toml:"seccompProfile"`
-	SecurityLabelDisable *bool    `toml:"securityLabelDisable"`
-	SecurityOpt          []string `toml:"securityOpt"`
-	UserNS               string   `toml:"userns"`
+	DropCapabilities      []string `toml:"dropCapabilities"`
+	AddCapabilities       []string `toml:"addCapabilities"`
+	NoNewPrivileges       *bool    `toml:"noNewPrivileges"`
+	Privileged            *bool    `toml:"privileged"`
+	SeccompProfile        string   `toml:"seccompProfile"`
+	SecurityLabelDisable  *bool    `toml:"securityLabelDisable"`
+	SecurityLabelFileType string   `toml:"securityLabelFileType"`
+	SecurityLabelLevel    string   `toml:"securityLabelLevel"`
+	SecurityLabelNested   *bool    `toml:"securityLabelNested"`
+	SecurityLabelType     string   `toml:"securityLabelType"`
+	SecurityOpt           []string `toml:"securityOpt"`
+	UserNS                string   `toml:"userns"`
 }
 
 type ResourcesConfig struct {
@@ -178,6 +239,21 @@ type HomeConfig struct {
 	Mode string `toml:"mode"`
 	// Source is the host path for Mode = "persistent". Supports ~ expansion.
 	Source string `toml:"source"`
+	Target string `toml:"target"`
+	// Session enables session tracking (meta.json sidecar) for managed containers.
+	Session bool `toml:"session"`
+	// Shadow defines host directories to shadow-mount per session.
+	Shadow []ShadowMount `toml:"shadow"`
+}
+
+// ShadowMount describes a host directory that is copied into a per-session
+// temporary directory and bind-mounted into the container read-write. After the
+// session the copy can be reviewed with `graft diff` and promoted back to the
+// original with `graft promote`.
+type ShadowMount struct {
+	// Source is the host directory to shadow (supports ~ expansion).
+	Source string `toml:"source"`
+	// Target is the mount point inside the container. Defaults to Source.
 	Target string `toml:"target"`
 }
 

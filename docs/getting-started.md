@@ -22,20 +22,20 @@ You do **not** need Docker, a registry login, or any image build tooling.
 Run graft straight from the flake without installing anything:
 
 ```bash
-nix run github:zerodawn1990/graft -- --help
+nix run github:Patrick-Kappen/graft -- --help
 ```
 
 Build the binary into `./result/bin/graft`:
 
 ```bash
-nix build github:zerodawn1990/graft
+nix build github:Patrick-Kappen/graft
 ./result/bin/graft --version   # 0.1.0
 ```
 
 Or drop into a dev shell with graft and its toolchain on `PATH`:
 
 ```bash
-nix develop github:zerodawn1990/graft
+nix develop github:Patrick-Kappen/graft
 ```
 
 The rest of this guide assumes `graft` is on your `PATH`.

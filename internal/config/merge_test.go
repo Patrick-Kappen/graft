@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/zerodawn1990/graft/internal/config"
+	"github.com/Patrick-Kappen/graft/internal/config"
 )
 
 // --------------------------------------------------------------------------
