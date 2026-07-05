@@ -55,16 +55,12 @@ let
     in ''
       [Container]
       ContainerName=${containerName}
-      Rootfs=${env}
+      Rootfs=${env}:O
       Exec=${cmd}
       Volume=/nix/store:/nix/store:ro
-      Volume=%h/.local/state/graft/${containerName}/etc:/etc:rw
-      Volume=%h/.local/state/graft/${containerName}/tmp:/tmp:rw
-      Volume=%h/.local/state/graft/${containerName}/var:/var:rw
 
       [Service]
       Restart=${restart}
-      StateDirectory=graft/${containerName}/etc graft/${containerName}/tmp graft/${containerName}/var
 
       [Install]
       WantedBy=default.target
