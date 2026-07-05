@@ -5,6 +5,10 @@
 [![NixOS](https://img.shields.io/badge/NixOS-module-5277C3?logo=nixos&logoColor=white)](docs/nixos-module.md)
 [![Home Manager](https://img.shields.io/badge/Home%20Manager-module-6586c8)](docs/home-manager.md)
 
+**📖 Docs:** [Getting started](docs/getting-started.md) · [Reference](docs/reference.md) · [CLI](docs/cli.md) · [Config](docs/config.md) · [NixOS module](docs/nixos-module.md) · [Home Manager](docs/home-manager.md) · [Design](docs/design.md) · [Security](docs/security.md) · [Vision](docs/vision.md)
+
+---
+
 **Declarative containers from the Nix store — no Dockerfile, no image build.**
 
 `graft` is like [direnv](https://direnv.net/) for containers. You describe a
