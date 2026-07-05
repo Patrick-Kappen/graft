@@ -133,10 +133,10 @@ let
       resolveConfigData stack (readToml (nodePath ref));
 
   loadEntry =
-    isExplicit: source:
+    isExplicit: configSource:
     let
-      configFile = if builtins.isAttrs source then source.configFile else source;
-      configData = if builtins.isAttrs source then source.configData else readToml configFile;
+      configFile = if builtins.isAttrs configSource then configSource.configFile else configSource;
+      configData = if builtins.isAttrs configSource then configSource.configData else readToml configFile;
       effectiveConfig = applyPackageOps (resolveConfigData [ ] configData);
       isNoop = isEmptyValue effectiveConfig;
       deploy = configData.deploy or { };
