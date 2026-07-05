@@ -211,11 +211,11 @@ func TestRejectUnresolvedGraphFeatures(t *testing.T) {
 
 func TestExtractFlag(t *testing.T) {
 	tests := []struct {
-		name      string
-		flag      string
-		args      []string
-		wantVal   string
-		wantRest  []string
+		name     string
+		flag     string
+		args     []string
+		wantVal  string
+		wantRest []string
 	}{
 		{
 			name:     "space-separated value",

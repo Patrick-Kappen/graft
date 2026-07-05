@@ -87,9 +87,9 @@ type ContainerConfig struct {
 	GlobalArgs []string `toml:"globalArgs"`
 
 	// Network identity
-	IP           string   `toml:"ip"`
-	IP6          string   `toml:"ip6"`
-	NetworkAlias []string `toml:"networkAlias"`
+	IP             string   `toml:"ip"`
+	IP6            string   `toml:"ip6"`
+	NetworkAlias   []string `toml:"networkAlias"`
 	ExposeHostPort []string `toml:"exposeHostPort"`
 
 	// User namespace
