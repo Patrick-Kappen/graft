@@ -1,5 +1,10 @@
 # graft
 
+[![CI](https://github.com/Patrick-Kappen/graft/actions/workflows/check.yml/badge.svg)](https://github.com/Patrick-Kappen/graft/actions/workflows/check.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![NixOS](https://img.shields.io/badge/NixOS-module-5277C3?logo=nixos&logoColor=white)](docs/nixos-module.md)
+[![Home Manager](https://img.shields.io/badge/Home%20Manager-module-6586c8)](docs/home-manager.md)
+
 **Declarative containers from the Nix store — no Dockerfile, no image build.**
 
 `graft` is like [direnv](https://direnv.net/) for containers. You describe a
@@ -66,10 +71,10 @@ You need [Nix](https://nixos.org/) (with flakes) and Podman.
 
 ```bash
 # Run graft straight from the flake
-nix run github:zerodawn1990/graft -- --help
+nix run github:Patrick-Kappen/graft -- --help
 
 # Or build the binary
-nix build github:zerodawn1990/graft
+nix build github:Patrick-Kappen/graft
 ./result/bin/graft --help
 ```
 
