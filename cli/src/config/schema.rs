@@ -5,8 +5,8 @@
 //! Validation of required fields (e.g. `home.source` when `home.mode =
 //! "persistent"`) happens at use-time, not at parse-time.
 
-use std::collections::HashMap;
 use serde::Deserialize;
+use std::collections::HashMap;
 
 /// Top-level container configuration.
 #[derive(Debug, Clone, Deserialize, Default)]

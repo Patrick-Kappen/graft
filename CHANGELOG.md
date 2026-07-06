@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- feat(cli): resolve TOML configs to JSON stdout with graft-pause defaults
 - docs: clarify TOML→CLI→JSON→NixOS flow and remove stale defaults
 - refactor(cli): remove all runtime code — CLI is build-time TOML→config generator only
 - fix(cli): systemctl uses --user for non-root, system scope for root — matches Quadlet deploy target

@@ -68,8 +68,7 @@ fn load_from_path(path: &Path, name: &str) -> Result<ContainerConfig> {
 ///
 /// Returns an error if the TOML is malformed or contains unknown fields.
 pub(crate) fn parse_toml(content: &str, name: &str) -> Result<ContainerConfig> {
-    let mut config: ContainerConfig =
-        toml::from_str(content).context("TOML parse error")?;
+    let mut config: ContainerConfig = toml::from_str(content).context("TOML parse error")?;
     // Filename is always leading — overwrite whatever the TOML says.
     config.name = Some(name.to_string());
     Ok(config)
@@ -180,7 +179,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("mycontainer.toml");
         let mut f = std::fs::File::create(&path).unwrap();
-        writeln!(f, r#"version = 1"#).unwrap();
+        writeln!(f, r"version = 1").unwrap();
 
         let cfg = load_from_path(&path, "mycontainer").unwrap();
         assert_eq!(cfg.name.as_deref(), Some("mycontainer"));

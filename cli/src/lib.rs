@@ -2,8 +2,9 @@
 #![deny(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
 
-//! Graft CLI — TOML → Quadlet config file generator.
+//! Graft CLI — TOML → resolved JSON generator.
 
 pub mod cli;
 pub mod commands;
 pub mod config;
+pub mod resolve;
