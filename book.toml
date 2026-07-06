@@ -1,0 +1,14 @@
+[book]
+title = "Graft"
+description = "TOML-driven Podman Quadlet containers, built from the Nix store."
+authors = ["Patrick Kappen"]
+language = "en"
+src = "docs"
+
+[build]
+build-dir = "site"
+create-missing = false
+
+[output.html]
+git-repository-url = "https://github.com/Patrick-Kappen/graft"
+site-url = "/graft/"
