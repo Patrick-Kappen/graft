@@ -112,6 +112,36 @@ graft/
 - [ ] Phase 7 — Graph resolution: `parents` / `children` for composable configs
 - [ ] Phase 8 — Security hardening
 
+## CLI Design (Phase 3+)
+
+### Two-layer TOML
+- **Base TOML** (in nixos-config) — container definition: packages, runtime, defaults
+- **`.graft/config.toml`** (in project repo) — workspace-specific settings, references base
+
+```
+cd /my/project
+graft shell    # finds .graft/config.toml
+               # merges with base TOML from nixos-config
+               # builds + starts container for this workspace
+```
+
+### Persistence modes
+
+| Mode | Description |
+|------|-------------|
+| `ephemeral` (default) | Nothing persists. Auto-cleanup after 1 week. |
+| `persistent` | Also writes TOML to nixos-config. Available after rebuild as systemd service. |
+| `data` | Container is temporary. `.graft/<name>/data/` persists for review/cleanup/promote. |
+
+`data` mode is the foundation for the promote workflow: inspect `.graft/<name>/data/`, decide what to keep, move to real location.
+
+### Smart shell detection (CLI)
+When `shell = "auto"`, the CLI:
+1. Detects `$SHELL` on the host
+2. Finds relevant config files (e.g. `~/.zshrc`, `~/.config/zsh/` for zsh)
+3. Bind-mounts only those files (read-only) into the container
+4. Sets `GRAFT_CONTAINER=<name>` so the prompt can show a container indicator
+
 ## Security Model
 
 ### Container isolation
