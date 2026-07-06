@@ -1,6 +1,7 @@
 # =============================================================================
 # GRAFT — reference.toml
-# Minimaal werkende kern + volledige Roadmap
+# Volledige referentie van alle mogelijke TOML opties.
+# Dit is geen implementatieplan — alleen documentatie van het schema.
 # =============================================================================
 
 

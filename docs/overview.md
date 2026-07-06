@@ -6,15 +6,6 @@ Graft runs Podman containers configured via TOML files, built entirely from the
 Nix store. Software lives in the Nix store and is never installed or exposed on
 the host. The host stays clean — no PATH pollution, no downloaded images.
 
-## Principle
-
-```
-TOML → config file → klaar.
-```
-
-The TOML is for the user — only real choices, no boilerplate.
-The CLI contains all logic and defaults. The Nix module is dumb.
-
 ## Core Flow
 
 ```
