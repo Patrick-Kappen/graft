@@ -2,148 +2,210 @@
 
 ## What is Graft?
 
-Graft runs Podman containers configured via TOML files, built entirely from the
-Nix store. Software lives in the Nix store and is never installed or exposed on
-the host. The host stays clean — no PATH pollution, no downloaded images.
+Graft runs Podman Quadlet containers from TOML files, built entirely from the
+Nix store. The user writes TOML in Graft's own language; Graft resolves it during
+`nixos-rebuild switch`; NixOS materialises the result as rootfs + `.container`
+files.
+
+Software lives in the Nix store and is never installed ad-hoc inside the
+container. The host stays clean — no PATH pollution and no downloaded images.
 
 ## Core Flow
 
-```
+```text
 Edit TOML
   ↓
 nixos-rebuild switch
   ↓
-CLI resolves (base packages, defaults, dependencies)
+Nix calls the Graft CLI via IFD
   ↓
-Nix builds rootfs in store  →  /nix/store/xxx-graft-<name>-env
+CLI writes resolved JSON to stdout
   ↓
-Quadlet .container file generated (complete blueprint, nothing more needed)
+Nix reads the JSON
+  ↓
+Nix builds rootfs in the store → /nix/store/xxx-graft-<name>-env
+  ↓
+NixOS renders a Quadlet .container file
   ↓
 Symlink: /etc/containers/systemd/<name>.container → store
   ↓
-systemd knows about it — container does NOT start automatically unless configured
+systemd knows about the unit; it does not auto-start unless explicitly configured
 ```
 
-## How It Works
+## Responsibilities
 
-1. User writes `.toml` files in their NixOS config under `containers/`
-2. The NixOS module reads each TOML via `builtins.fromTOML` at build time
-3. The CLI resolves the complete spec: adds base packages, default keep-alive, dependencies
-4. `buildEnv` merges all packages into one store path
-5. A `pkgs.runCommand` wraps the env with real system directories (`/etc`, `/tmp`, etc.)
-6. A Quadlet `.container` file is rendered pointing to that store path
-7. `/nix/store` is mounted `:ro` inside the container
-8. The file lives in the Nix store; the module creates a symlink to `/etc/containers/systemd/`
+### TOML
 
-## Everything is a Service
+TOML is user intent only. It is not Quadlet and it is not Nix.
 
-All containers are systemd services managed via Quadlet. There is no distinction
-between a "service container" and a "shell container" — both run their `Exec=`
-command and stay alive as long as that process runs.
-
-The keep-alive mechanism and base packages are handled automatically by the CLI.
-The user only specifies what is extra.
-
-## Container
-
-- Rootfs = Nix store path (read-only lowerdir) + overlay upperdir (writable, gone on stop)
-- `/nix/store` from the host mounted read-only inside the container
-- Not in the store = not available in the container
-- No downloads at runtime — everything resolved at build time
-
-## Rendered Quadlet (example)
-
-```ini
-[Container]
-ContainerName=myapp
-Rootfs=/nix/store/xyz-myapp-env:O
-Exec=bash -c 'sleep infinity'
-Volume=/nix/store:/nix/store:ro
-
-[Service]
-Restart=on-failure
-
-[Install]
-WantedBy=multi-user.target
-```
-
-## TOML
-
-Only user choices. Minimal example:
+The user writes Graft concepts:
 
 ```toml
 version = 1
-name    = "myapp"
+name = "node-dev"
 
-[deploy]
-enable = true
-target = "system"
-```
-
-Extra packages only when needed:
-
-```toml
 [config.runtime]
 packages = ["nodejs"]
 ```
 
+The user does not write rootfs boilerplate, `/nix/store` mounts, overlay setup,
+or default keep-alive commands.
+
+### CLI
+
+The CLI translates TOML into a resolved JSON spec and writes that JSON to stdout.
+It does not write JSON files into the repo.
+
+The CLI owns all logic:
+
+- add `graft-pause` to every rootfs
+- use `/bin/graft-pause` as the default command when the user did not set one
+- preserve the user command when one is set
+- default `deploy.target` to `system`
+- support only `rootfs-store` for now
+- include `restart` only when explicitly set
+- include `deploy.enable` only when explicitly set
+- never invent autostart
+
+### NixOS module
+
+The NixOS module is a dumb materialiser. It reads resolved JSON and mechanically:
+
+1. maps package names to Nix packages
+2. builds a `pkgs.buildEnv`
+3. wraps it with real system directories (`/etc`, `/tmp`, `/var`, `/run`, ...)
+4. renders the Quadlet `.container` file
+5. places the symlink in the Quadlet search path
+
+The module does not decide defaults or interpret TOML semantics.
+
+## IFD / JSON stdout
+
+The build integration is Import From Derivation:
+
+```nix
+resolvedJson = pkgs.runCommand "graft-resolve-${name}" {} ''
+  ${graft}/bin/graft ${tomlFile} > $out
+'';
+
+resolved = builtins.fromJSON (builtins.readFile resolvedJson);
+```
+
+The JSON is a Nix store artefact, not a file to commit.
+
+Cache behaviour:
+
+```text
+TOML unchanged → same derivation → CLI does not run again
+TOML changed   → CLI runs → new resolved JSON
+packages changed → rootfs changes
+command/restart changed → Quadlet changes, rootfs may stay cached
+```
+
+## `graft-pause`
+
+`graft-pause` is a tiny keep-alive binary shipped by the same Rust crate as the
+CLI. The `graft` package provides both binaries:
+
+```text
+/bin/graft
+/bin/graft-pause
+```
+
+Rules:
+
+```text
+no user command → packages = ["graft-pause", ...], command = ["/bin/graft-pause"]
+user command    → packages = ["graft-pause", ...], command = user command
+```
+
+There is no default `bashInteractive`, no default `coreutils`, and no default
+`sleep infinity`.
+
+## Rendered Quadlet example
+
+For a TOML without a command, the resolved spec leads to a Quadlet file like:
+
+```ini
+[Container]
+ContainerName=node-dev
+Rootfs=/nix/store/xyz-graft-node-dev-env:O
+Exec=/bin/graft-pause
+Volume=/nix/store:/nix/store:ro
+```
+
+If the user explicitly sets restart, NixOS may render:
+
+```ini
+[Service]
+Restart=on-failure
+```
+
+If the user explicitly configures autostart, NixOS may render:
+
+```ini
+[Install]
+WantedBy=multi-user.target
+```
+
+Without explicit autostart, the `.container` file can exist while the container
+does not start automatically.
+
+## Rootfs-store container model
+
+- Graft uses `Rootfs=`, not `Image=`, for store-based containers.
+- The rootfs is a store path built from Nix packages.
+- `Rootfs=...:O` gives Podman a writable overlay above the read-only store rootfs.
+- `/nix/store` from the host is mounted read-only inside the container.
+- Not in the store means not available in the container.
+- No downloads happen at runtime.
+
+System containers (`target = "system"`) use rootful Podman and kernel overlayfs
+via `:O`. User containers (`target = "user"`) use rootless overlay via
+`fuse-overlayfs`.
+
+## Everything is a service
+
+All containers are Quadlet/systemd services. There is no separate “shell
+container” concept in the config model. A container stays alive as long as its
+resolved `Exec=` process stays alive.
+
 ## Package Management
 
-Packages are declared in the TOML and resolved at build time via Nix.
-Nothing is installed ad-hoc. To add a tool: add it to `packages = [...]` and rebuild.
-
-## CLI Commands
-
-- `graft up <name>` — start the container (`systemctl start <name>.service`)
-- `graft down <name>` — stop the container
-- More commands added as needed; names are user-defined
+Packages are declared in TOML and resolved at build time via Nix. To add a tool,
+add it to `packages = [...]` and rebuild. Do not install packages ad-hoc inside
+the container.
 
 ## Project Structure
 
-```
+```text
 graft/
   flake.nix
   modules/
-    nixos.nix          # NixOS module (services.graft)
-    home-manager.nix   # Home Manager module (programs.graft)
-  cli/                 # Rust CLI
+    nixos.nix          # NixOS materialisation module
+    home-manager.nix   # Home Manager materialisation module
+  cli/                 # Rust CLI resolver
   examples/
-    reference.toml     # fully annotated example TOML
+    reference.toml     # annotated TOML reference
   docs/
     design.md          # design decisions and principles
     overview.md        # this file
+    quadlet.md         # Quadlet output notes
 ```
 
 ## Flake Outputs
 
 - `nixosModules.graft` — system containers → `/etc/containers/systemd/`
 - `homeManagerModules.graft` — user containers → `~/.config/containers/systemd/`
-- `packages.<system>.default` — the Graft CLI binary
-
-## Tech Stack
-
-- Module: **Nix** (build-time rendering)
-- CLI: **Rust** (config generation, container lifecycle)
-- Runtime: **Podman + Quadlet**
-- Init: **systemd**
-- Packages: **Nix (`buildEnv`)**
-
-## Security Model
-
-### Overlay approach
-- **System containers** (`target = "system"`): kernel overlayfs via `:O` (runs as root)
-- **User containers** (`target = "user"`): `fuse-overlayfs` for rootless overlay
-
-### Phase 8: user isolation
-Each container will get its own restricted UID via `--userns=auto`.
+- `packages.<system>.default` — Graft CLI + `graft-pause`
 
 ## Roadmap
 
 - [x] Phase 1 — Proof of concept: container from Nix store
-- [x] Phase 2 — NixOS module: TOML → buildEnv → Quadlet, end-to-end working
-- [ ] Phase 3 — CLI: `graft up/down`, config generation in Rust
-- [ ] Phase 4 — Promote workflow: diff on exit, graduate to store
-- [ ] Phase 5 — Home directory and workspace isolation
-- [ ] Phase 6 — Agent environments
-- [ ] Phase 7 — Graph resolution: `parents` / `children` for composable configs
+- [x] Phase 2 — NixOS module: TOML → buildEnv → Quadlet, end-to-end proof
+- [ ] Phase 3 — CLI resolver: TOML → resolved JSON stdout
+- [ ] Phase 4 — NixOS module refactor: resolved JSON → rootfs + Quadlet
+- [ ] Phase 5 — Home Manager module refactor
+- [ ] Phase 6 — Promote/diff workflow
+- [ ] Phase 7 — Graph resolution: `parents` / `children`
 - [ ] Phase 8 — Security hardening (`userns=auto`)
