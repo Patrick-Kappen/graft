@@ -142,6 +142,35 @@ When `shell = "auto"`, the CLI:
 3. Bind-mounts only those files (read-only) into the container
 4. Sets `GRAFT_CONTAINER=<name>` so the prompt can show a container indicator
 
+## CLI Architecture
+
+```
+cli/src/
+  main.rs
+  commands/     ← one file per command (shell, up, down, run, list)
+  container/    ← ContainerRuntime trait + Podman impl
+  config/       ← ConfigProvider trait + TOML impl
+  workspace/    ← WorkspaceProvider trait + .graft/ impl
+```
+
+### Layer rules
+- `commands` may depend on `container`, `config`, `workspace`
+- `container` knows nothing about TOML or workspaces
+- `config` knows nothing about containers or workspaces
+- `workspace` knows nothing about containers
+- Dependencies are explicit in function signatures — no hidden state
+
+### Traits
+```rust
+pub trait ContainerRuntime {
+    fn start(&self, name: &str) -> Result<()>;
+    fn stop(&self, name: &str) -> Result<()>;
+    fn exec(&self, name: &str, cmd: &[&str]) -> Result<()>;
+    fn status(&self, name: &str) -> Result<ContainerStatus>;
+}
+// Podman is one implementation — replaceable
+```
+
 ## Security Model
 
 ### Container isolation
