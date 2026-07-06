@@ -8,56 +8,54 @@
 # MVP — het minimaal noodzakelijke dat werkt
 # -----------------------------------------------------------------------------
 
-# version =                      # 1
-# name =                         # string
+# version =
+# name =
 
 # [parents]
-# add =                          # ["base/name"]
+# add =
 
 # [deploy]
-# enable =                       # true | false
-# target =                       # system | user
-# startPodman =                  # true | false  (default: false — wij bepalen wanneer podman start)
-# podmanSocketEnable =           # true | false  (default: false — podman API socket)
+# enable =
+# target =
 
 # [config.runtime]
-# mode =                         # rootfs-store
-# packages =                     # ["bashInteractive", "coreutils"]
-# command =                      # ["bash", "-c", "sleep infinity"]
+# mode =
+# packages =
+# command =
 
 # [config.container]
-# name =                         # string
-# hostname =                     # string
-# entrypoint =                   # ["string"]
-# user =                         # string | int
-# workingDir =                   # string
-# stopSignal =                   # SIGTERM | SIGKILL | ...
-# stopTimeout =                  # int (seconds)
+# name =
+# hostname =
+# entrypoint =
+# user =
+# workingDir =
+# stopSignal =
+# stopTimeout =
 
 # [config.container.environment]
-# KEY =                          # string
+# KEY =
 
 # [[config.filesystem.volumes]]
-# source =                       # string
-# target =                       # string
-# mode =                         # string (e.g. "ro")
+# source =
+# target =
+# mode =
 
 # [config.network]
-# mode =                         # bridge | host | none
-# publish =                      # ["8080:80"]
+# mode =
+# publish =
 
 # [config.security]
-# dropCapabilities =             # ["all"] | ["NET_RAW"]
-# noNewPrivileges =              # true | false
+# dropCapabilities =
+# noNewPrivileges =
 
 # [config.service]
-# type =                         # oneshot | notify
-# restart =                      # on-failure | always | no
+# type =
+# restart =
 
 # NixOS (expliciet opt-in — graft start podman NIET automatisch)
-# virtualisation.podman.enable =                         # true | false  (vereist, maar graft zet dit NIET automatisch aan)
-# virtualisation.podman.dockerSocket.enable =            # true | false  (default: false)
-# virtualisation.podman.networkSocket.enable =           # true | false  (default: false)
+# virtualisation.podman.enable =
+# virtualisation.podman.dockerSocket.enable =
+# virtualisation.podman.networkSocket.enable =
 
 
 # =============================================================================
