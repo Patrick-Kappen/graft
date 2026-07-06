@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- feat(modules): resolve Home Manager containers through CLI IFD JSON
 - feat(modules): resolve NixOS containers through CLI IFD JSON
 - feat(cli): resolve TOML configs to JSON stdout with graft-pause defaults
 - docs: clarify TOML→CLI→JSON→NixOS flow and remove stale defaults

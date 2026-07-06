@@ -13,7 +13,10 @@
         imports = [ ./modules/nixos.nix ];
         services.graft.package = lib.mkDefault self.packages.${pkgs.stdenv.hostPlatform.system}.default;
       };
-      homeManagerModules.graft = import ./modules/home-manager.nix;
+      homeManagerModules.graft = { lib, pkgs, ... }: {
+        imports = [ ./modules/home-manager.nix ];
+        programs.graft.package = lib.mkDefault self.packages.${pkgs.stdenv.hostPlatform.system}.default;
+      };
 
       packages = forAllSystems (system:
         let pkgs = nixpkgs.legacyPackages.${system};

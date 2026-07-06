@@ -8,3 +8,4 @@
 - Verify design decisions against recent discussion before updating docs — older handoffs can contain stale defaults
 - After adding a second Rust binary, use `cargo run --bin graft` because Cargo can no longer infer the binary
 - Use `lib.getExe'` for multi-binary packages in Nix modules so evaluation does not depend on `meta.mainProgram`
+- Mirror NixOS and Home Manager module refactors in the same pass to avoid stale TOML defaults in one module
