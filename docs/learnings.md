@@ -7,3 +7,4 @@
 - Build scope and runtime scope are completely separate — do not mix TOML→config generation with container start/exec logic in the same CLI
 - Verify design decisions against recent discussion before updating docs — older handoffs can contain stale defaults
 - After adding a second Rust binary, use `cargo run --bin graft` because Cargo can no longer infer the binary
+- Use `lib.getExe'` for multi-binary packages in Nix modules so evaluation does not depend on `meta.mainProgram`

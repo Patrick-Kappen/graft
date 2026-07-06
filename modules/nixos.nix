@@ -3,100 +3,129 @@
 let
   cfg = config.services.graft;
 
-  # Read all .toml files from configRoot
   tomlFiles = lib.optionalAttrs (cfg.configRoot != null)
     (lib.filterAttrs
       (name: type: type == "regular" && lib.hasSuffix ".toml" name)
       (builtins.readDir cfg.configRoot));
 
-  # Parse each TOML file into a Nix attrset
+  resolveToml = name: _:
+    let
+      containerName = lib.removeSuffix ".toml" name;
+      tomlFile = cfg.configRoot + "/${name}";
+    in
+    pkgs.runCommand "graft-resolve-${containerName}" { } ''
+      ${lib.getExe' cfg.package "graft"} ${tomlFile} > $out
+    '';
+
+  resolvedJsonFiles = lib.mapAttrs resolveToml tomlFiles;
+
   containers = lib.mapAttrs
-    (name: _: builtins.fromTOML (builtins.readFile (cfg.configRoot + "/${name}")))
-    tomlFiles;
+    (_: resolvedJson: builtins.fromJSON (builtins.readFile resolvedJson))
+    resolvedJsonFiles;
 
-  # Build a rootfs per container:
-  # - real directories for /etc, /tmp, /var, /home, /root, /run, /proc, /sys, /dev
-  # - symlinks for bin, lib, etc from the inner buildEnv (skipping /etc to avoid symlink)
-  containerEnvs = lib.mapAttrs (name: ctr:
-    let
-      containerName = lib.removeSuffix ".toml" name;
-      inner = pkgs.buildEnv {
-        name  = "graft-${containerName}-inner";
-        paths = map (p: pkgs.${p}) (ctr.config.runtime.packages or []);
-        ignoreCollisions = true;
-      };
-    in pkgs.runCommand "graft-${containerName}-env" {} ''
-      # Real system directories (so overlay can write to them)
-      mkdir -p $out/{etc,tmp,var,home,root,run,proc,sys,dev}
-      # Mount points required by crun/Podman at container start
-      ln -s /proc/mounts $out/etc/mtab
-      touch $out/etc/hostname $out/etc/hosts $out/etc/resolv.conf
-      touch $out/run/.containerenv
+  systemContainers = lib.filterAttrs
+    (_: ctr:
+      (ctr.deploy.enable or true) && ctr.deploy.target == "system"
+    )
+    containers;
 
-      # Symlink everything from the inner env except directories we own
-      for entry in ${inner}/*; do
-        name=$(basename "$entry")
-        case "$name" in
-          etc|tmp|var|home|root|run|proc|sys|dev) continue ;;
-        esac
-        ln -s "$entry" "$out/$name"
-      done
+  packageFor = package:
+    if package == "graft-pause" then
+      cfg.package
+    else
+      pkgs.${package};
 
-      # Copy /etc contents from packages (if any) into our real /etc
-      if [ -e ${inner}/etc ]; then
-        cp -rL ${inner}/etc/. $out/etc/ 2>/dev/null || true
-      fi
-    ''
-  ) containers;
+  containerEnvs = lib.mapAttrs
+    (_: ctr:
+      let
+        inner = pkgs.buildEnv {
+          name = "graft-${ctr.name}-inner";
+          paths = map packageFor ctr.runtime.packages;
+          ignoreCollisions = true;
+        };
+      in
+      pkgs.runCommand "graft-${ctr.name}-env" { } ''
+        # Real system directories (so overlay can write to them)
+        mkdir -p $out/{etc,tmp,var,home,root,run,proc,sys,dev}
+        # Mount points required by crun/Podman at container start
+        ln -s /proc/mounts $out/etc/mtab
+        touch $out/etc/hostname $out/etc/hosts $out/etc/resolv.conf
+        touch $out/run/.containerenv
 
-  # Render a Quadlet .container file per container
-  quadletFiles = lib.mapAttrs (name: ctr:
-    let
-      containerName = lib.removeSuffix ".toml" name;
-      cmd     = lib.escapeShellArgs (ctr.config.runtime.command or []);
-      restart = ctr.config.service.restart or "on-failure";
-      env     = containerEnvs.${name};
-    in ''
-      [Container]
-      ContainerName=${containerName}
-      Rootfs=${env}:O
-      Exec=${cmd}
-      Volume=/nix/store:/nix/store:ro
+        # Symlink everything from the inner env except directories we own
+        for entry in ${inner}/*; do
+          name=$(basename "$entry")
+          case "$name" in
+            etc|tmp|var|home|root|run|proc|sys|dev) continue ;;
+          esac
+          ln -s "$entry" "$out/$name"
+        done
+
+        # Copy /etc contents from packages (if any) into our real /etc
+        if [ -e ${inner}/etc ]; then
+          cp -rL ${inner}/etc/. $out/etc/ 2>/dev/null || true
+        fi
+      ''
+    )
+    systemContainers;
+
+  quadletFiles = lib.mapAttrs
+    (name: ctr:
+      let
+        cmd = lib.escapeShellArgs ctr.runtime.command;
+        env = containerEnvs.${name};
+        service = ctr.service or { };
+        restart = service.restart or null;
+      in
+      ''
+        [Container]
+        ContainerName=${ctr.name}
+        Rootfs=${env}:O
+        Exec=${cmd}
+        Volume=/nix/store:/nix/store:ro
+      ''
+      + lib.optionalString (restart != null) ''
 
       [Service]
       Restart=${restart}
-
-      [Install]
-      WantedBy=multi-user.target
     ''
-  ) containers;
+    )
+    systemContainers;
 
-  # Only containers with deploy.enable = true and target = "system" go to systemd
-  systemContainers = lib.filterAttrs (name: ctr:
-    (ctr.deploy.enable or false) &&
-    (ctr.deploy.target or "system") == "system"
-  ) containers;
-
-in {
+in
+{
   options.services.graft = {
     enable = lib.mkEnableOption "Graft — TOML-driven Podman Quadlet containers";
 
+    package = lib.mkOption {
+      type = lib.types.nullOr lib.types.package;
+      default = null;
+      description = "Graft package providing the graft CLI and graft-pause binary.";
+    };
+
     configRoot = lib.mkOption {
-      type        = lib.types.nullOr lib.types.path;
-      default     = null;
+      type = lib.types.nullOr lib.types.path;
+      default = null;
       description = "Directory containing .toml container definitions.";
     };
   };
 
   config = lib.mkIf cfg.enable {
-    # Place rendered Quadlet files for system containers in /etc/containers/systemd/
-    environment.etc = lib.mapAttrs' (name: _:
-      lib.nameValuePair
-        "containers/systemd/${lib.removeSuffix ".toml" name}.container"
-        { text = quadletFiles.${name}; }
-    ) systemContainers;
+    assertions = [
+      {
+        assertion = cfg.configRoot == null || cfg.package != null;
+        message = "services.graft.package must be set when services.graft.configRoot is set.";
+      }
+    ];
 
-    # Expose configRoot to the CLI so it can find base TOMLs for merging
+    environment.etc = lib.mapAttrs'
+      (name: _:
+        lib.nameValuePair
+          "containers/systemd/${lib.removeSuffix ".toml" name}.container"
+          { text = quadletFiles.${name}; }
+      )
+      systemContainers;
+
     environment.variables = lib.mkIf (cfg.configRoot != null) {
       GRAFT_SYSTEM_CONTAINERS = toString cfg.configRoot;
     };
