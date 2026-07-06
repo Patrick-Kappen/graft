@@ -71,9 +71,34 @@ TOML definition. Binaries are never promoted — those always come from Nix.
 - `deploy.enable = true` → auto-starts at boot via systemd
 - `deploy.enable = false` → on-demand via CLI
 
-CLI wraps systemd:
-- `graft shell <name>` → starts container if not running, then `podman exec -it`
-- `graft down <name>` → `systemctl stop <name>`
+### Container resolution (`graft <name>`)
+
+The CLI checks two places and combines them into one flow:
+
+**Case 1 — system container only:**
+- The container was built at nixos rebuild time (`.ini` is already in place for systemd)
+- No local TOML in `pwd/.graft/containers/<name>.toml`
+- CLI starts the container directly — no TOML needed at runtime
+
+**Case 2/3 — local TOML present (in `.graft/containers/`):**
+- No parent → use local TOML as-is
+- Has parent (references a system container) → merge base TOML + local TOML
+- CLI renders a Quadlet `.ini` from the merged config
+- `.ini` is saved to `.graft/` in the project repo
+- CLI starts that `.ini`
+- By default temporary; if the TOML indicates persistent, the `.ini` stays in `.graft/`
+
+**Write locations — strictly enforced:**
+| Source | `.ini` location |
+|--------|----------------|
+| nixos module (build time) | nix store → systemd path (`/etc/containers/systemd/` or `~/.config/containers/systemd/`) |
+| CLI (runtime, case 2/3) | `.graft/` in the project repo — nowhere else |
+
+**Finding base TOMLs for merge (case 3):**
+The nixos module writes the `configRoot` path to a known read location at activation
+(e.g. `/etc/graft/config`). The CLI reads this to locate base TOMLs for merging.
+The base TOMLs themselves stay in the nixos-config repo — they travel with the machine config
+to other machines. The CLI never writes to this location.
 
 ## Project Structure
 ```
@@ -114,15 +139,17 @@ graft/
 
 ## CLI Design (Phase 3+)
 
-### Two-layer TOML
-- **Base TOML** (in nixos-config) — container definition: packages, runtime, defaults
-- **`.graft/config.toml`** (in project repo) — workspace-specific settings, references base
+### Container TOML locations
+- **Base TOML** — in nixos-config, in the directory set via `configRoot`; processed at rebuild, never touched at runtime
+- **Local TOML** — in `pwd/.graft/containers/<name>.toml`; read by CLI at runtime
 
 ```
 cd /my/project
-graft shell    # finds .graft/config.toml
-               # merges with base TOML from nixos-config
-               # builds + starts container for this workspace
+graft devshell   # looks up 'devshell' in system containers
+                 # AND checks .graft/containers/devshell.toml
+                 # if local TOML has parent → merge → render .ini → .graft/
+                 # if local TOML has no parent → render .ini → .graft/
+                 # if only system container → start directly
 ```
 
 ### Persistence modes
