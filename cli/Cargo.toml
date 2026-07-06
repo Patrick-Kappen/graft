@@ -1,0 +1,21 @@
+[package]
+name = "graft"
+version = "0.1.0"
+edition = "2021"
+description = "CLI for Graft — NixOS Podman Quadlet containers from TOML"
+rust-version = "1.80"
+
+[[bin]]
+name = "graft"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+# no external mock libraries — manual mocks keep tests self-contained
