@@ -1,14 +1,11 @@
 //! Configuration loading abstraction.
 
-use anyhow::Result;
-use serde::Deserialize;
+pub mod schema;
+pub mod toml_config;
 
-/// A parsed container configuration.
-#[derive(Debug, Clone, Deserialize)]
-pub struct ContainerConfig {
-    /// Container name.
-    pub name: String,
-}
+pub use schema::ContainerConfig;
+
+use anyhow::Result;
 
 /// Abstraction over configuration sources.
 pub trait ConfigProvider {

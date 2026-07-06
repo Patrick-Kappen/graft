@@ -19,3 +19,4 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [dev-dependencies]
 # no external mock libraries — manual mocks keep tests self-contained
+tempfile = "3"
