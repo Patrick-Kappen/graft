@@ -2,10 +2,8 @@
 #![deny(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
 
-//! Graft CLI — manage Podman Quadlet containers from TOML.
+//! Graft CLI — TOML → Quadlet config file generator.
 
 pub mod cli;
 pub mod commands;
 pub mod config;
-pub mod container;
-pub mod workspace;

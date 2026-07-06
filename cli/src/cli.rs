@@ -1,26 +1,11 @@
 //! CLI argument parsing and command dispatch.
 
 use anyhow::Result;
-use clap::{Parser, Subcommand};
-
-use crate::commands;
-use crate::container::podman::Podman;
+use clap::Parser;
 
 #[derive(Parser)]
-#[command(name = "graft", about = "Manage Graft containers")]
-struct Cli {
-    #[command(subcommand)]
-    command: Command,
-}
-
-#[derive(Subcommand)]
-enum Command {
-    /// Start container if not running, then open an interactive shell.
-    Shell {
-        /// Container name (matches TOML filename without extension).
-        name: String,
-    },
-}
+#[command(name = "graft", about = "TOML → Quadlet config file generator")]
+struct Cli {}
 
 /// Parse CLI arguments and dispatch to the appropriate command.
 ///
@@ -35,10 +20,7 @@ pub fn run() -> Result<()> {
         )
         .init();
 
-    let cli = Cli::parse();
-    let runtime = Podman::new();
+    let _cli = Cli::parse();
 
-    match cli.command {
-        Command::Shell { name } => commands::shell::run(&runtime, &name),
-    }
+    Ok(())
 }
