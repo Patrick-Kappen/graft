@@ -95,5 +95,10 @@ in {
         "containers/systemd/${lib.removeSuffix ".toml" name}.container"
         { text = quadletFiles.${name}; }
     ) userContainers;
+
+    # Expose configRoot to the CLI so it can find base TOMLs for merging
+    home.sessionVariables = lib.mkIf (cfg.configRoot != null) {
+      GRAFT_SYSTEM_CONTAINERS = toString cfg.configRoot;
+    };
   };
 }

@@ -95,10 +95,12 @@ The CLI checks two places and combines them into one flow:
 | CLI (runtime, case 2/3) | `.graft/` in the project repo — nowhere else |
 
 **Finding base TOMLs for merge (case 3):**
-The nixos module writes the `configRoot` path to a known read location at activation
-(e.g. `/etc/graft/config`). The CLI reads this to locate base TOMLs for merging.
-The base TOMLs themselves stay in the nixos-config repo — they travel with the machine config
-to other machines. The CLI never writes to this location.
+The nixos module sets `GRAFT_SYSTEM_CONTAINERS` via `environment.variables` (NixOS) or
+`home.sessionVariables` (Home Manager) at build time. The value is `configRoot` — the
+directory containing the base TOMLs in the nixos-config repo.
+The CLI reads `$GRAFT_SYSTEM_CONTAINERS` to locate base TOMLs for merging.
+The base TOMLs stay in the nixos-config repo and travel with the machine config to other machines.
+The CLI never writes to this location.
 
 ## Project Structure
 ```
