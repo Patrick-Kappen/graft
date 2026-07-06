@@ -89,9 +89,6 @@ in {
   };
 
   config = lib.mkIf cfg.enable {
-    # Ensure Podman is available (mkDefault so existing podman module takes precedence)
-    virtualisation.podman.enable = lib.mkDefault true;
-
     # Place rendered Quadlet files for system containers in /etc/containers/systemd/
     environment.etc = lib.mapAttrs' (name: _:
       lib.nameValuePair
