@@ -63,7 +63,7 @@ Implemented today:
 - `config.container.user` is rendered as Quadlet `User=` when explicitly set.
 - `config.container.group` is rendered as Quadlet `Group=` when explicitly set.
 - `config.container.workingDir` is rendered as Quadlet `WorkingDir=` when explicitly set.
-- `config.container.environment` is rendered as sorted Quadlet `Environment=KEY=value` lines when explicitly set.
+- `config.container.environment` is rendered as sorted, quoted Quadlet `Environment="KEY=value"` lines when explicitly set.
 - `config.container.environmentFile` is rendered as ordered Quadlet `EnvironmentFile=` lines when explicitly set.
 - `config.filesystem.volumes` is rendered as ordered Quadlet `Volume=` lines when explicitly set.
 - `config.network.publish` is rendered as ordered Quadlet `PublishPort=` lines when explicitly set.
@@ -119,8 +119,11 @@ Current working directory validation:
 Future copied workspace support belongs under `config.workspace`; `workingDir`
 only sets the process working directory inside the container.
 
-`config.container.environment` is treated as literal Quadlet `Environment=`
-entries. Output is sorted by key for deterministic builds.
+`config.container.environment` is rendered as quoted Quadlet `Environment=`
+assignments. Output is sorted by key for deterministic builds. The whole
+`KEY=value` assignment is double-quoted so values may contain spaces or `=`.
+Double quotes, backslashes, and `%` specifier markers are escaped for systemd
+syntax.
 
 Current environment validation:
 
@@ -128,8 +131,8 @@ Current environment validation:
 - keys must not contain control characters
 - keys must not contain whitespace or `=`
 - values may be empty
+- values may contain whitespace or `=`
 - values must not contain control characters
-- values must not contain whitespace until quoted value support is implemented
 - no secret handling is performed
 - no environment file generation or host environment passthrough is performed
 

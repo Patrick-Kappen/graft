@@ -351,10 +351,6 @@ fn validate_environment_value(value: &str) -> Result<()> {
         bail!("container environment values cannot contain control characters");
     }
 
-    if value.chars().any(char::is_whitespace) {
-        bail!("container environment values cannot contain whitespace");
-    }
-
     Ok(())
 }
 
@@ -1374,7 +1370,7 @@ mod tests {
     }
 
     #[test]
-    fn whitespace_environment_value_returns_error() {
+    fn whitespace_environment_value_is_preserved() {
         let config = container_config(Container {
             environment: Some(HashMap::from([(
                 "GREETING".to_string(),
@@ -1383,9 +1379,33 @@ mod tests {
             ..Container::default()
         });
 
-        let result = resolve(&config);
+        let resolved = resolve(&config).unwrap();
 
-        assert!(result.is_err());
+        assert_eq!(
+            resolved.container.unwrap().environment.unwrap()["GREETING"],
+            "hello world"
+        );
+    }
+
+    #[test]
+    fn quote_sensitive_environment_values_are_preserved() {
+        let config = container_config(Container {
+            environment: Some(HashMap::from([
+                ("EQUALS".to_string(), "a=b".to_string()),
+                ("PATHLIKE".to_string(), "C:\\Temp".to_string()),
+                ("PERCENT".to_string(), "100%".to_string()),
+                ("QUOTED".to_string(), "say \"hi\"".to_string()),
+            ])),
+            ..Container::default()
+        });
+
+        let resolved = resolve(&config).unwrap();
+        let json = serde_json::to_value(&resolved).unwrap();
+
+        assert_eq!(json["container"]["environment"]["EQUALS"], "a=b");
+        assert_eq!(json["container"]["environment"]["PATHLIKE"], "C:\\Temp");
+        assert_eq!(json["container"]["environment"]["PERCENT"], "100%");
+        assert_eq!(json["container"]["environment"]["QUOTED"], "say \"hi\"");
     }
 
     #[test]

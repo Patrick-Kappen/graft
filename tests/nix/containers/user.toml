@@ -17,6 +17,11 @@ environmentFile = [
 [config.container.environment]
 LOG_LEVEL = "debug"
 EMPTY = ""
+EQUALS = "a=b"
+GREETING = "hello world"
+PATHLIKE = "C:\\Temp"
+PERCENT = "100%"
+QUOTED = "say \"hi\""
 
 [[config.filesystem.volumes]]
 target = "/user-cache"
