@@ -64,6 +64,7 @@ Implemented today:
 - `config.container.workingDir` is rendered as Quadlet `WorkingDir=` when explicitly set.
 - `config.container.environment` is rendered as sorted Quadlet `Environment=KEY=value` lines when explicitly set.
 - `config.container.environmentFile` is rendered as ordered Quadlet `EnvironmentFile=` lines when explicitly set.
+- `config.filesystem.volumes` is rendered as ordered Quadlet `Volume=` lines when explicitly set.
 - `config.network.publish` is rendered as ordered Quadlet `PublishPort=` lines when explicitly set.
 - `config.runtime.mode` supports only `rootfs-store`.
 - `config.runtime.packages` are mapped to Nix packages.
@@ -131,6 +132,25 @@ Current environment file validation:
 - no env file generation is performed
 - no secrets materialisation is performed
 - no host environment passthrough is performed
+
+`config.filesystem.volumes` is treated as literal Quadlet `Volume=` entries.
+User order is preserved. Entries are rendered mechanically as `target`,
+`source:target`, or `source:target:mode`.
+
+Current filesystem volume validation:
+
+- `target` is required by the TOML schema
+- `target` must not be empty or whitespace-only
+- `target` must not contain control characters
+- optional `source`, when present, must not be empty or whitespace-only
+- optional `source`, when present, must not contain control characters
+- optional `mode`, when present, requires `source`
+- optional `mode`, when present, must not be empty or whitespace-only
+- optional `mode`, when present, must not contain control characters
+- no path existence validation is performed
+- no mode allowlist is applied yet
+- no Quadlet `.volume` units are generated
+- no tmpfs, device, raw mount, workspace, home, or promote semantics are rendered
 
 `config.network.publish` is treated as literal Quadlet `PublishPort=` entries.
 User order is preserved.

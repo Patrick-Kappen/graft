@@ -89,6 +89,24 @@ let
         environmentFileLines = lib.concatMapStrings
           (file: "EnvironmentFile=${file}\n")
           environmentFile;
+        filesystem = ctr.filesystem or { };
+        volumes = filesystem.volumes or [ ];
+        volumeLines = lib.concatMapStrings
+          (volume:
+            let
+              source = volume.source or null;
+              target = volume.target;
+              mode = volume.mode or null;
+              mount =
+                if source == null then
+                  target
+                else if mode == null then
+                  "${source}:${target}"
+                else
+                  "${source}:${target}:${mode}";
+            in
+            "Volume=${mount}\n")
+          volumes;
         network = ctr.network or { };
         publish = network.publish or [ ];
         publishLines = lib.concatMapStrings
@@ -115,6 +133,7 @@ let
       ''
       + environmentLines
       + environmentFileLines
+      + volumeLines
       + publishLines
       + lib.optionalString (restart != null) ''
 

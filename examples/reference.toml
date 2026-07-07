@@ -38,9 +38,9 @@
 # KEY =                          # literal Quadlet Environment=KEY=value; sorted; key non-empty/no whitespace/no '='; value no whitespace until quoted values are supported
 
 # [[config.filesystem.volumes]]
-# source =
-# target =
-# mode =
+# source =                        # optional literal Quadlet Volume source; non-empty, no control characters; no existence check
+# target =                        # required literal Quadlet Volume target; non-empty, no control characters; no existence check
+# mode =                          # optional literal Quadlet Volume mode/options; requires source; non-empty, no control characters; no allowlist yet
 
 # [config.network]
 # mode =

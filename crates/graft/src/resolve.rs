@@ -5,7 +5,9 @@ use std::collections::BTreeMap;
 use anyhow::{bail, Result};
 use serde::Serialize;
 
-use crate::config::schema::{Container, ContainerConfig, DeployTarget, Network, Runtime};
+use crate::config::schema::{
+    Container, ContainerConfig, DeployTarget, Filesystem, FilesystemVolume, Network, Runtime,
+};
 
 const SUPPORTED_VERSION: u32 = 1;
 const GRAFT_PAUSE_PACKAGE: &str = "graft-pause";
@@ -25,6 +27,9 @@ pub struct ResolvedContainer {
     /// Optional container settings rendered into Quadlet `[Container]`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub container: Option<ResolvedContainerSettings>,
+    /// Optional filesystem settings rendered into Quadlet `[Container]`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filesystem: Option<ResolvedFilesystem>,
     /// Optional network settings rendered into Quadlet `[Container]`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub network: Option<ResolvedNetwork>,
@@ -87,6 +92,29 @@ pub struct ResolvedContainerSettings {
     pub environment_file: Option<Vec<String>>,
 }
 
+/// Resolved filesystem settings.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolvedFilesystem {
+    /// Optional volume mounts rendered as Quadlet `Volume=`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub volumes: Option<Vec<ResolvedFilesystemVolume>>,
+}
+
+/// Resolved filesystem volume mount.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolvedFilesystemVolume {
+    /// Optional source path or volume name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    /// Required container target path.
+    pub target: String,
+    /// Optional volume mode/options.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
+}
+
 /// Resolved network settings.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -139,6 +167,7 @@ pub fn resolve(config: &ContainerConfig) -> Result<ResolvedContainer> {
             command: resolve_command(runtime)?,
         },
         container: resolve_container(config)?,
+        filesystem: resolve_filesystem(config)?,
         network: resolve_network(config)?,
         service: resolve_service(config)?,
     })
@@ -316,6 +345,86 @@ fn validate_environment_file_entry(entry: &str) -> Result<()> {
 
     if entry.chars().any(char::is_control) {
         bail!("container environmentFile entries cannot contain control characters");
+    }
+
+    Ok(())
+}
+
+fn resolve_filesystem(config: &ContainerConfig) -> Result<Option<ResolvedFilesystem>> {
+    let filesystem = config
+        .config
+        .as_ref()
+        .and_then(|config| config.filesystem.as_ref());
+    let volumes = resolve_volumes(filesystem)?;
+
+    if volumes.is_none() {
+        return Ok(None);
+    }
+
+    Ok(Some(ResolvedFilesystem { volumes }))
+}
+
+fn resolve_volumes(
+    filesystem: Option<&Filesystem>,
+) -> Result<Option<Vec<ResolvedFilesystemVolume>>> {
+    let Some(volumes) = filesystem.and_then(|filesystem| filesystem.volumes.as_ref()) else {
+        return Ok(None);
+    };
+
+    if volumes.is_empty() {
+        return Ok(None);
+    }
+
+    let mut resolved = Vec::with_capacity(volumes.len());
+
+    for volume in volumes {
+        resolved.push(resolve_volume(volume)?);
+    }
+
+    Ok(Some(resolved))
+}
+
+fn resolve_volume(volume: &FilesystemVolume) -> Result<ResolvedFilesystemVolume> {
+    validate_volume_target(&volume.target)?;
+
+    if let Some(source) = volume.source.as_deref() {
+        validate_volume_source(source)?;
+    }
+
+    if let Some(mode) = volume.mode.as_deref() {
+        validate_volume_mode(mode)?;
+    }
+
+    if volume.source.is_none() && volume.mode.is_some() {
+        bail!("filesystem volume mode requires source");
+    }
+
+    Ok(ResolvedFilesystemVolume {
+        source: volume.source.clone(),
+        target: volume.target.clone(),
+        mode: volume.mode.clone(),
+    })
+}
+
+fn validate_volume_target(target: &str) -> Result<()> {
+    validate_volume_part("target", target)
+}
+
+fn validate_volume_source(source: &str) -> Result<()> {
+    validate_volume_part("source", source)
+}
+
+fn validate_volume_mode(mode: &str) -> Result<()> {
+    validate_volume_part("mode", mode)
+}
+
+fn validate_volume_part(name: &str, value: &str) -> Result<()> {
+    if value.trim().is_empty() {
+        bail!("filesystem volume {name} cannot be empty");
+    }
+
+    if value.chars().any(char::is_control) {
+        bail!("filesystem volume {name} cannot contain control characters");
     }
 
     Ok(())
@@ -546,6 +655,18 @@ mod tests {
             name: Some("dev".to_string()),
             config: Some(Config {
                 container: Some(container),
+                ..Config::default()
+            }),
+            ..ContainerConfig::default()
+        }
+    }
+
+    fn filesystem_config(filesystem: Filesystem) -> ContainerConfig {
+        ContainerConfig {
+            version: Some(SUPPORTED_VERSION),
+            name: Some("dev".to_string()),
+            config: Some(Config {
+                filesystem: Some(filesystem),
                 ..Config::default()
             }),
             ..ContainerConfig::default()
@@ -1182,6 +1303,264 @@ mod tests {
     }
 
     #[test]
+    fn volumes_have_no_default() {
+        let resolved = resolve(&named_config()).unwrap();
+        assert_eq!(resolved.filesystem, None);
+    }
+
+    #[test]
+    fn empty_volumes_are_omitted() {
+        let config = filesystem_config(Filesystem {
+            volumes: Some(Vec::new()),
+            ..Filesystem::default()
+        });
+
+        let resolved = resolve(&config).unwrap();
+
+        assert_eq!(resolved.filesystem, None);
+    }
+
+    #[test]
+    fn target_only_volume_is_preserved() {
+        let config = filesystem_config(Filesystem {
+            volumes: Some(vec![FilesystemVolume {
+                source: None,
+                target: "/data".to_string(),
+                mode: None,
+            }]),
+            ..Filesystem::default()
+        });
+
+        let resolved = resolve(&config).unwrap();
+
+        assert_eq!(
+            resolved.filesystem,
+            Some(ResolvedFilesystem {
+                volumes: Some(vec![ResolvedFilesystemVolume {
+                    source: None,
+                    target: "/data".to_string(),
+                    mode: None,
+                }]),
+            })
+        );
+
+        let json = serde_json::to_value(&resolved).unwrap();
+        assert_eq!(json["filesystem"]["volumes"][0]["target"], "/data");
+        assert_eq!(json["filesystem"]["volumes"][0].get("source"), None);
+        assert_eq!(json["filesystem"]["volumes"][0].get("mode"), None);
+    }
+
+    #[test]
+    fn source_and_target_volume_is_preserved() {
+        let config = filesystem_config(Filesystem {
+            volumes: Some(vec![FilesystemVolume {
+                source: Some("/host/data".to_string()),
+                target: "/data".to_string(),
+                mode: None,
+            }]),
+            ..Filesystem::default()
+        });
+
+        let resolved = resolve(&config).unwrap();
+
+        assert_eq!(
+            resolved.filesystem,
+            Some(ResolvedFilesystem {
+                volumes: Some(vec![ResolvedFilesystemVolume {
+                    source: Some("/host/data".to_string()),
+                    target: "/data".to_string(),
+                    mode: None,
+                }]),
+            })
+        );
+    }
+
+    #[test]
+    fn source_target_and_mode_volume_is_preserved() {
+        let config = filesystem_config(Filesystem {
+            volumes: Some(vec![FilesystemVolume {
+                source: Some("/host/config".to_string()),
+                target: "/config".to_string(),
+                mode: Some("ro".to_string()),
+            }]),
+            ..Filesystem::default()
+        });
+
+        let resolved = resolve(&config).unwrap();
+
+        assert_eq!(
+            resolved.filesystem,
+            Some(ResolvedFilesystem {
+                volumes: Some(vec![ResolvedFilesystemVolume {
+                    source: Some("/host/config".to_string()),
+                    target: "/config".to_string(),
+                    mode: Some("ro".to_string()),
+                }]),
+            })
+        );
+    }
+
+    #[test]
+    fn volume_mode_without_source_returns_error() {
+        let config = filesystem_config(Filesystem {
+            volumes: Some(vec![FilesystemVolume {
+                source: None,
+                target: "/data".to_string(),
+                mode: Some("ro".to_string()),
+            }]),
+            ..Filesystem::default()
+        });
+
+        let result = resolve(&config);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn empty_volume_target_returns_error() {
+        let config = filesystem_config(Filesystem {
+            volumes: Some(vec![FilesystemVolume {
+                source: None,
+                target: String::new(),
+                mode: None,
+            }]),
+            ..Filesystem::default()
+        });
+
+        let result = resolve(&config);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn whitespace_volume_target_returns_error() {
+        let config = filesystem_config(Filesystem {
+            volumes: Some(vec![FilesystemVolume {
+                source: None,
+                target: "  ".to_string(),
+                mode: None,
+            }]),
+            ..Filesystem::default()
+        });
+
+        let result = resolve(&config);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn empty_volume_source_returns_error() {
+        let config = filesystem_config(Filesystem {
+            volumes: Some(vec![FilesystemVolume {
+                source: Some(String::new()),
+                target: "/data".to_string(),
+                mode: None,
+            }]),
+            ..Filesystem::default()
+        });
+
+        let result = resolve(&config);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn whitespace_volume_source_returns_error() {
+        let config = filesystem_config(Filesystem {
+            volumes: Some(vec![FilesystemVolume {
+                source: Some("  ".to_string()),
+                target: "/data".to_string(),
+                mode: None,
+            }]),
+            ..Filesystem::default()
+        });
+
+        let result = resolve(&config);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn empty_volume_mode_returns_error() {
+        let config = filesystem_config(Filesystem {
+            volumes: Some(vec![FilesystemVolume {
+                source: Some("/host/data".to_string()),
+                target: "/data".to_string(),
+                mode: Some(String::new()),
+            }]),
+            ..Filesystem::default()
+        });
+
+        let result = resolve(&config);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn whitespace_volume_mode_returns_error() {
+        let config = filesystem_config(Filesystem {
+            volumes: Some(vec![FilesystemVolume {
+                source: Some("/host/data".to_string()),
+                target: "/data".to_string(),
+                mode: Some("  ".to_string()),
+            }]),
+            ..Filesystem::default()
+        });
+
+        let result = resolve(&config);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn control_character_in_volume_target_returns_error() {
+        let config = filesystem_config(Filesystem {
+            volumes: Some(vec![FilesystemVolume {
+                source: None,
+                target: "/da\nta".to_string(),
+                mode: None,
+            }]),
+            ..Filesystem::default()
+        });
+
+        let result = resolve(&config);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn control_character_in_volume_source_returns_error() {
+        let config = filesystem_config(Filesystem {
+            volumes: Some(vec![FilesystemVolume {
+                source: Some("/host/da\nta".to_string()),
+                target: "/data".to_string(),
+                mode: None,
+            }]),
+            ..Filesystem::default()
+        });
+
+        let result = resolve(&config);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn control_character_in_volume_mode_returns_error() {
+        let config = filesystem_config(Filesystem {
+            volumes: Some(vec![FilesystemVolume {
+                source: Some("/host/data".to_string()),
+                target: "/data".to_string(),
+                mode: Some("r\no".to_string()),
+            }]),
+            ..Filesystem::default()
+        });
+
+        let result = resolve(&config);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
     fn publish_has_no_default() {
         let resolved = resolve(&named_config()).unwrap();
         assert_eq!(resolved.network, None);
@@ -1423,6 +1802,7 @@ mod tests {
         let json = serde_json::to_value(&resolved).unwrap();
 
         assert_eq!(json.get("container"), None);
+        assert_eq!(json.get("filesystem"), None);
         assert_eq!(json.get("network"), None);
         assert_eq!(json.get("service"), None);
         assert_eq!(json["deploy"].get("enable"), None);
