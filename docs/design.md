@@ -193,7 +193,8 @@ Currently proven:
 - user/rootless Quadlet runtime
 - clean keep-alive shutdown
 
-Future work is tracked in [Roadmap](roadmap.md).
+Future work is tracked in [Roadmap](roadmap.md). Deliberate exclusions are
+tracked in [Non-goals and deferred scope](non-goals.md).
 
 ## Future CLI control plane
 
@@ -214,6 +215,8 @@ evaluation stays deterministic and side-effect free.
 
 ## Non-goals
 
+The high-level constraints are:
+
 - TOML should not become raw Quadlet.
 - TOML should not become raw Nix.
 - Nix modules should not contain business logic.
@@ -221,3 +224,5 @@ evaluation stays deterministic and side-effect free.
 - Containers should not auto-start unless explicitly configured.
 - Promote/diff workflows must never promote binaries.
 - Hidden module state should be avoided.
+
+See [Non-goals and deferred scope](non-goals.md) for the current detailed list.

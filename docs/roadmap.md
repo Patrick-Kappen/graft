@@ -171,6 +171,11 @@ Escape hatches must not override keys owned by Graft.
 
 ## Non-goals and constraints
 
+The detailed list of deliberate exclusions lives in
+[Non-goals and deferred scope](non-goals.md).
+
+The short version:
+
 - TOML should not become raw Quadlet.
 - TOML should not become raw Nix.
 - Nix modules should not contain business logic.
