@@ -62,7 +62,7 @@ Current CLI rules:
 - preserve user commands exactly
 - default `deploy.target` to `system`
 - support only `rootfs-store` today
-- include `restart` only when explicitly set
+- include supported container, environment, filesystem, network, and service fields only when explicitly set
 - include `deploy.enable` only when explicitly set
 - never invent autostart
 
@@ -138,11 +138,23 @@ Exec=/bin/graft-pause
 Volume=/nix/store:/nix/store:ro
 ```
 
-If the user explicitly sets restart, the matching Nix module may render:
+Supported optional fields render mechanically when configured:
 
 ```ini
+HostName=node-dev.local
+User=1000
+Group=1000
+WorkingDir=/workspace
+Environment="GREETING=hello world"
+EnvironmentFile=/run/graft/node-dev.env
+PublishPort=127.0.0.1:8080:8080
+Volume=/home/me/project:/workspace
+
 [Service]
 Restart=on-failure
+RestartSec=10s
+TimeoutStartSec=2m
+TimeoutStopSec=30s
 ```
 
 The current modules do not render `[Install]` by default. A `.container` file can
@@ -178,7 +190,9 @@ the container.
 ## Current scope
 
 The current MVP proves the rootfs-store path for both NixOS and Home Manager.
-The TOML schema is intentionally broader than the fields currently rendered.
+It renders a useful subset of Quadlet fields, while the TOML schema remains
+broader than the implemented renderer. See [Reference](reference.md) for the
+current field list and [Non-goals](non-goals.md) for deliberate exclusions.
 
 For the long-term direction, see [Roadmap](roadmap.md).
 
@@ -199,6 +213,8 @@ graft/
     overview.md        # this file
     quadlet.md         # Quadlet output notes
     roadmap.md         # roadmap and future direction
+    non-goals.md       # deliberate exclusions and deferred scope
+    development.md     # contributor workflow and renderer checklist
 ```
 
 ## Flake outputs

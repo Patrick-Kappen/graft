@@ -16,6 +16,9 @@ The current implementation proves the core rootfs-store path:
 - `target = "user"` renders user/rootless containers.
 - Containers start and stop through systemd.
 - `graft-pause` provides a tiny default keep-alive command.
+- Common Quadlet fields are rendered for container identity, working directory,
+  quoted environment, environment files, published ports, volumes, and service
+  timing.
 
 The MVP intentionally does not cover the full TOML schema yet.
 
@@ -151,20 +154,20 @@ System containers and user containers may need different defaults, but those
 rules should be resolved by the CLI and materialised mechanically by the Nix
 modules.
 
-## Full Quadlet coverage
+## Broader Quadlet coverage
 
-The TOML schema already contains more concepts than the MVP renders. Later
-phases should map more of that schema into resolved JSON and Quadlet output.
+The TOML schema already contains more concepts than the MVP renders. The current
+renderer covers useful basics, but later phases should map more of the schema
+into resolved JSON and Quadlet output.
 
-Areas to cover:
+Remaining areas include:
 
-- volumes and mounts
-- networks
-- secrets
-- resources
-- health checks
-- environment files
+- additional mount types beyond basic `Volume=` entries
+- Quadlet `.network` and `.volume` units
+- secrets and credentials
+- resources and health checks
 - labels and annotations
+- DNS, aliases, and network policy
 - podman args / explicit escape hatches
 
 Escape hatches must not override keys owned by Graft.

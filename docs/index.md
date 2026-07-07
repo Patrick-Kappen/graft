@@ -17,8 +17,11 @@ details; Nix materialises the rootfs and Quadlet output.
   and Quadlet output.
 - [Quadlet output](quadlet.md) describes the generated `.container` files.
 - [Roadmap](roadmap.md) describes the longer-term direction.
+- [Non-goals and deferred scope](non-goals.md) lists deliberate exclusions.
 - [Reference](reference.md) links to the annotated TOML reference and current
   module options.
+- [Development](development.md) captures contributor workflow and renderer
+  checklists.
 
 ## Current scope
 
@@ -29,4 +32,6 @@ The current MVP focuses on `rootfs-store` containers:
 - Home Manager user/rootless Quadlet output
 - manual start/stop through systemd
 - packages and commands resolved from TOML
+- useful Quadlet rendering for identity, working directory, environment,
+  environment files, published ports, volumes, and service timing
 - clean shutdown through `graft-pause`
