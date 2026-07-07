@@ -114,6 +114,14 @@ let
           publish;
         service = ctr.service or { };
         restart = service.restart or null;
+        restartSec = service.restartSec or null;
+        timeoutStartSec = service.timeoutStartSec or null;
+        timeoutStopSec = service.timeoutStopSec or null;
+        serviceLines = lib.optionalString (restart != null) "Restart=${restart}\n"
+          + lib.optionalString (restartSec != null) "RestartSec=${restartSec}\n"
+          + lib.optionalString (timeoutStartSec != null) "TimeoutStartSec=${timeoutStartSec}\n"
+          + lib.optionalString (timeoutStopSec != null) "TimeoutStopSec=${timeoutStopSec}\n";
+        serviceSection = lib.optionalString (serviceLines != "") "\n[Service]\n${serviceLines}";
       in
       ''
         [Container]
@@ -135,11 +143,7 @@ let
       + environmentFileLines
       + volumeLines
       + publishLines
-      + lib.optionalString (restart != null) ''
-
-        [Service]
-        Restart=${restart}
-      ''
+      + serviceSection
     )
     userContainers;
 
