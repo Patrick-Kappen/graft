@@ -7,6 +7,7 @@ target = "user"
 [config.container]
 hostname = "nix-check-user.local"
 user = "1000"
+group = "1000"
 workingDir = "/workspace"
 environmentFile = [
   "/etc/graft/user.env",

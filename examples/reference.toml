@@ -28,7 +28,8 @@
 # name =
 # hostname =                     # literal Quadlet HostName; non-empty, no control characters; no template expansion yet
 # entrypoint =
-# user =                         # literal Quadlet User; non-empty, no control characters; no UID/GID validation yet
+# user =                         # literal Quadlet User; non-empty, no control characters; no UID validation yet
+# group =                        # literal Quadlet Group; non-empty, no control characters; no GID validation yet
 # workingDir =                   # literal Quadlet WorkingDir; non-empty, no control characters; no path existence check
 # environmentFile =              # literal Quadlet EnvironmentFile entries; non-empty, no control characters; user order preserved; files are not generated
 # stopSignal =
@@ -93,7 +94,6 @@
 
 # [config.container] - advanced
 # pod =                          # string
-# group =                        # string | int
 # timezone =                     # local | UTC | Europe/Amsterdam | ...
 # notify =                       # container | healthy
 # runInit =                      # true | false

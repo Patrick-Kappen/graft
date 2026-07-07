@@ -79,6 +79,7 @@ let
         container = ctr.container or { };
         hostname = container.hostname or null;
         user = container.user or null;
+        group = container.group or null;
         workingDir = container.workingDir or null;
         environment = container.environment or { };
         environmentKeys = lib.sort builtins.lessThan (builtins.attrNames environment);
@@ -135,6 +136,9 @@ let
       ''
       + lib.optionalString (user != null) ''
         User=${user}
+      ''
+      + lib.optionalString (group != null) ''
+        Group=${group}
       ''
       + lib.optionalString (workingDir != null) ''
         WorkingDir=${workingDir}

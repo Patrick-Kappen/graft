@@ -82,6 +82,9 @@ pub struct ResolvedContainerSettings {
     /// Optional user rendered as Quadlet `User=`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user: Option<String>,
+    /// Optional group rendered as Quadlet `Group=`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
     /// Optional working directory rendered as Quadlet `WorkingDir=`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub working_dir: Option<String>,
@@ -190,12 +193,14 @@ fn resolve_container(config: &ContainerConfig) -> Result<Option<ResolvedContaine
         .and_then(|config| config.container.as_ref());
     let hostname = resolve_hostname(container)?;
     let user = resolve_user(container)?;
+    let group = resolve_group(container)?;
     let working_dir = resolve_working_dir(container)?;
     let environment = resolve_environment(container)?;
     let environment_file = resolve_environment_file(container)?;
 
     if hostname.is_none()
         && user.is_none()
+        && group.is_none()
         && working_dir.is_none()
         && environment.is_none()
         && environment_file.is_none()
@@ -206,6 +211,7 @@ fn resolve_container(config: &ContainerConfig) -> Result<Option<ResolvedContaine
     Ok(Some(ResolvedContainerSettings {
         hostname,
         user,
+        group,
         working_dir,
         environment,
         environment_file,
@@ -251,6 +257,28 @@ fn validate_user(user: &str) -> Result<()> {
 
     if user.chars().any(char::is_control) {
         bail!("container user cannot contain control characters");
+    }
+
+    Ok(())
+}
+
+fn resolve_group(container: Option<&Container>) -> Result<Option<String>> {
+    let Some(group) = container.and_then(|container| container.group.as_ref()) else {
+        return Ok(None);
+    };
+
+    validate_group(group)?;
+
+    Ok(Some(group.clone()))
+}
+
+fn validate_group(group: &str) -> Result<()> {
+    if group.trim().is_empty() {
+        bail!("container group cannot be empty");
+    }
+
+    if group.chars().any(char::is_control) {
+        bail!("container group cannot contain control characters");
     }
 
     Ok(())
@@ -944,6 +972,7 @@ mod tests {
             Some(ResolvedContainerSettings {
                 hostname: Some("web.local".to_string()),
                 user: None,
+                group: None,
                 working_dir: None,
                 environment: None,
                 environment_file: None,
@@ -990,6 +1019,7 @@ mod tests {
 
         assert_eq!(container.hostname, Some("web.local".to_string()));
         assert_eq!(container.user, None);
+        assert_eq!(container.group, None);
         assert_eq!(container.working_dir, None);
         assert_eq!(container.environment, None);
         assert_eq!(container.environment_file, None);
@@ -1009,6 +1039,7 @@ mod tests {
             Some(ResolvedContainerSettings {
                 hostname: None,
                 user: Some("1000".to_string()),
+                group: None,
                 working_dir: None,
                 environment: None,
                 environment_file: None,
@@ -1018,6 +1049,7 @@ mod tests {
         let json = serde_json::to_value(&resolved).unwrap();
         assert_eq!(json["container"]["user"], "1000");
         assert_eq!(json["container"].get("hostname"), None);
+        assert_eq!(json["container"].get("group"), None);
         assert_eq!(json["container"].get("workingDir"), None);
     }
 
@@ -1036,6 +1068,7 @@ mod tests {
             Some(ResolvedContainerSettings {
                 hostname: Some("web.local".to_string()),
                 user: Some("1000".to_string()),
+                group: None,
                 working_dir: None,
                 environment: None,
                 environment_file: None,
@@ -1068,6 +1101,85 @@ mod tests {
     }
 
     #[test]
+    fn explicit_group_is_preserved() {
+        let config = container_config(Container {
+            group: Some("1000".to_string()),
+            ..Container::default()
+        });
+
+        let resolved = resolve(&config).unwrap();
+
+        assert_eq!(
+            resolved.container,
+            Some(ResolvedContainerSettings {
+                hostname: None,
+                user: None,
+                group: Some("1000".to_string()),
+                working_dir: None,
+                environment: None,
+                environment_file: None,
+            })
+        );
+
+        let json = serde_json::to_value(&resolved).unwrap();
+        assert_eq!(json["container"]["group"], "1000");
+        assert_eq!(json["container"].get("hostname"), None);
+        assert_eq!(json["container"].get("user"), None);
+        assert_eq!(json["container"].get("workingDir"), None);
+    }
+
+    #[test]
+    fn user_and_group_are_preserved_together() {
+        let config = container_config(Container {
+            user: Some("1000".to_string()),
+            group: Some("1000".to_string()),
+            ..Container::default()
+        });
+
+        let resolved = resolve(&config).unwrap();
+
+        assert_eq!(
+            resolved.container,
+            Some(ResolvedContainerSettings {
+                hostname: None,
+                user: Some("1000".to_string()),
+                group: Some("1000".to_string()),
+                working_dir: None,
+                environment: None,
+                environment_file: None,
+            })
+        );
+
+        let json = serde_json::to_value(&resolved).unwrap();
+        assert_eq!(json["container"]["user"], "1000");
+        assert_eq!(json["container"]["group"], "1000");
+    }
+
+    #[test]
+    fn empty_group_returns_error() {
+        let config = container_config(Container {
+            group: Some("  ".to_string()),
+            ..Container::default()
+        });
+
+        let result = resolve(&config);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn control_character_in_group_returns_error() {
+        let config = container_config(Container {
+            group: Some("1000\n".to_string()),
+            ..Container::default()
+        });
+
+        let result = resolve(&config);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
     fn explicit_working_dir_is_preserved() {
         let config = container_config(Container {
             working_dir: Some("/workspace".to_string()),
@@ -1081,6 +1193,7 @@ mod tests {
             Some(ResolvedContainerSettings {
                 hostname: None,
                 user: None,
+                group: None,
                 working_dir: Some("/workspace".to_string()),
                 environment: None,
                 environment_file: None,
@@ -1109,6 +1222,7 @@ mod tests {
             Some(ResolvedContainerSettings {
                 hostname: Some("web.local".to_string()),
                 user: Some("1000".to_string()),
+                group: None,
                 working_dir: Some("/workspace".to_string()),
                 environment: None,
                 environment_file: None,
@@ -1169,6 +1283,7 @@ mod tests {
             Some(ResolvedContainerSettings {
                 hostname: None,
                 user: None,
+                group: None,
                 working_dir: None,
                 environment: Some(BTreeMap::from([
                     ("EMPTY".to_string(), String::new()),
@@ -1317,6 +1432,7 @@ mod tests {
             Some(ResolvedContainerSettings {
                 hostname: None,
                 user: None,
+                group: None,
                 working_dir: None,
                 environment: None,
                 environment_file: Some(vec![

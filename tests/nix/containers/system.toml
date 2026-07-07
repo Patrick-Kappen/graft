@@ -4,6 +4,7 @@ name = "nix-check-system"
 [config.container]
 hostname = "nix-check-system.local"
 user = "1000"
+group = "1000"
 workingDir = "/workspace"
 environmentFile = [
   "/etc/graft/system.env",
