@@ -1,5 +1,7 @@
 //! Resolve user TOML config into the JSON spec consumed by Nix.
 
+use std::collections::BTreeMap;
+
 use anyhow::{bail, Result};
 use serde::Serialize;
 
@@ -74,6 +76,9 @@ pub struct ResolvedContainerSettings {
     /// Optional working directory rendered as Quadlet `WorkingDir=`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub working_dir: Option<String>,
+    /// Optional environment variables rendered as Quadlet `Environment=`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub environment: Option<BTreeMap<String, String>>,
 }
 
 /// Resolved service settings.
@@ -131,8 +136,9 @@ fn resolve_container(config: &ContainerConfig) -> Result<Option<ResolvedContaine
     let hostname = resolve_hostname(container)?;
     let user = resolve_user(container)?;
     let working_dir = resolve_working_dir(container)?;
+    let environment = resolve_environment(container)?;
 
-    if hostname.is_none() && user.is_none() && working_dir.is_none() {
+    if hostname.is_none() && user.is_none() && working_dir.is_none() && environment.is_none() {
         return Ok(None);
     }
 
@@ -140,6 +146,7 @@ fn resolve_container(config: &ContainerConfig) -> Result<Option<ResolvedContaine
         hostname,
         user,
         working_dir,
+        environment,
     }))
 }
 
@@ -204,6 +211,58 @@ fn validate_working_dir(working_dir: &str) -> Result<()> {
 
     if working_dir.chars().any(char::is_control) {
         bail!("container workingDir cannot contain control characters");
+    }
+
+    Ok(())
+}
+
+fn resolve_environment(container: Option<&Container>) -> Result<Option<BTreeMap<String, String>>> {
+    let Some(environment) = container.and_then(|container| container.environment.as_ref()) else {
+        return Ok(None);
+    };
+
+    if environment.is_empty() {
+        return Ok(None);
+    }
+
+    let mut resolved = BTreeMap::new();
+
+    for (key, value) in environment {
+        validate_environment_key(key)?;
+        validate_environment_value(value)?;
+        resolved.insert(key.clone(), value.clone());
+    }
+
+    Ok(Some(resolved))
+}
+
+fn validate_environment_key(key: &str) -> Result<()> {
+    if key.trim().is_empty() {
+        bail!("container environment keys cannot be empty");
+    }
+
+    if key.chars().any(char::is_control) {
+        bail!("container environment keys cannot contain control characters");
+    }
+
+    if key.chars().any(char::is_whitespace) {
+        bail!("container environment keys cannot contain whitespace");
+    }
+
+    if key.contains('=') {
+        bail!("container environment keys cannot contain equals signs");
+    }
+
+    Ok(())
+}
+
+fn validate_environment_value(value: &str) -> Result<()> {
+    if value.chars().any(char::is_control) {
+        bail!("container environment values cannot contain control characters");
+    }
+
+    if value.chars().any(char::is_whitespace) {
+        bail!("container environment values cannot contain whitespace");
     }
 
     Ok(())
@@ -360,6 +419,8 @@ fn push_unique(packages: &mut Vec<String>, package: &str) {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::{BTreeMap, HashMap};
+
     use crate::config::schema::{Config, Deploy, Service};
 
     use super::*;
@@ -584,6 +645,7 @@ mod tests {
                 hostname: Some("web.local".to_string()),
                 user: None,
                 working_dir: None,
+                environment: None,
             })
         );
 
@@ -628,6 +690,7 @@ mod tests {
         assert_eq!(container.hostname, Some("web.local".to_string()));
         assert_eq!(container.user, None);
         assert_eq!(container.working_dir, None);
+        assert_eq!(container.environment, None);
     }
 
     #[test]
@@ -645,6 +708,7 @@ mod tests {
                 hostname: None,
                 user: Some("1000".to_string()),
                 working_dir: None,
+                environment: None,
             })
         );
 
@@ -670,6 +734,7 @@ mod tests {
                 hostname: Some("web.local".to_string()),
                 user: Some("1000".to_string()),
                 working_dir: None,
+                environment: None,
             })
         );
     }
@@ -713,6 +778,7 @@ mod tests {
                 hostname: None,
                 user: None,
                 working_dir: Some("/workspace".to_string()),
+                environment: None,
             })
         );
 
@@ -739,6 +805,7 @@ mod tests {
                 hostname: Some("web.local".to_string()),
                 user: Some("1000".to_string()),
                 working_dir: Some("/workspace".to_string()),
+                environment: None,
             })
         );
     }
@@ -759,6 +826,153 @@ mod tests {
     fn control_character_in_working_dir_returns_error() {
         let config = container_config(Container {
             working_dir: Some("/work\nspace".to_string()),
+            ..Container::default()
+        });
+
+        let result = resolve(&config);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn empty_environment_is_omitted() {
+        let config = container_config(Container {
+            environment: Some(HashMap::new()),
+            ..Container::default()
+        });
+
+        let resolved = resolve(&config).unwrap();
+
+        assert_eq!(resolved.container, None);
+    }
+
+    #[test]
+    fn explicit_environment_is_preserved() {
+        let config = container_config(Container {
+            environment: Some(HashMap::from([
+                ("LOG_LEVEL".to_string(), "debug".to_string()),
+                ("EMPTY".to_string(), String::new()),
+            ])),
+            ..Container::default()
+        });
+
+        let resolved = resolve(&config).unwrap();
+
+        assert_eq!(
+            resolved.container,
+            Some(ResolvedContainerSettings {
+                hostname: None,
+                user: None,
+                working_dir: None,
+                environment: Some(BTreeMap::from([
+                    ("EMPTY".to_string(), String::new()),
+                    ("LOG_LEVEL".to_string(), "debug".to_string()),
+                ])),
+            })
+        );
+
+        let json = serde_json::to_value(&resolved).unwrap();
+        assert_eq!(json["container"]["environment"]["EMPTY"], "");
+        assert_eq!(json["container"]["environment"]["LOG_LEVEL"], "debug");
+    }
+
+    #[test]
+    fn environment_output_is_sorted() {
+        let config = container_config(Container {
+            environment: Some(HashMap::from([
+                ("Z_LAST".to_string(), "last".to_string()),
+                ("A_FIRST".to_string(), "first".to_string()),
+                ("MIDDLE".to_string(), "middle".to_string()),
+            ])),
+            ..Container::default()
+        });
+
+        let resolved = resolve(&config).unwrap();
+        let environment = resolved.container.unwrap().environment.unwrap();
+        let keys = environment.keys().cloned().collect::<Vec<_>>();
+
+        assert_eq!(keys, ["A_FIRST", "MIDDLE", "Z_LAST"]);
+    }
+
+    #[test]
+    fn empty_environment_key_returns_error() {
+        let config = container_config(Container {
+            environment: Some(HashMap::from([(String::new(), "value".to_string())])),
+            ..Container::default()
+        });
+
+        let result = resolve(&config);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn whitespace_environment_key_returns_error() {
+        let config = container_config(Container {
+            environment: Some(HashMap::from([(
+                "BAD KEY".to_string(),
+                "value".to_string(),
+            )])),
+            ..Container::default()
+        });
+
+        let result = resolve(&config);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn equals_sign_in_environment_key_returns_error() {
+        let config = container_config(Container {
+            environment: Some(HashMap::from([(
+                "BAD=KEY".to_string(),
+                "value".to_string(),
+            )])),
+            ..Container::default()
+        });
+
+        let result = resolve(&config);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn control_character_in_environment_key_returns_error() {
+        let config = container_config(Container {
+            environment: Some(HashMap::from([(
+                "BAD\nKEY".to_string(),
+                "value".to_string(),
+            )])),
+            ..Container::default()
+        });
+
+        let result = resolve(&config);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn whitespace_environment_value_returns_error() {
+        let config = container_config(Container {
+            environment: Some(HashMap::from([(
+                "GREETING".to_string(),
+                "hello world".to_string(),
+            )])),
+            ..Container::default()
+        });
+
+        let result = resolve(&config);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn control_character_in_environment_value_returns_error() {
+        let config = container_config(Container {
+            environment: Some(HashMap::from([(
+                "BAD".to_string(),
+                "line\nbreak".to_string(),
+            )])),
             ..Container::default()
         });
 

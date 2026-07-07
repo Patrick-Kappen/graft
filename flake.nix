@@ -102,9 +102,11 @@
             assert lib.hasInfix "HostName=nix-check-system.local" nixosRendered;
             assert lib.hasInfix "User=1000" nixosRendered;
             assert lib.hasInfix "WorkingDir=/workspace" nixosRendered;
+            assert lib.hasInfix "Environment=EMPTY=\nEnvironment=LOG_LEVEL=debug" nixosRendered;
             assert !lib.hasInfix "HostName=" nixosPlainRendered;
             assert !lib.hasInfix "User=" nixosPlainRendered;
             assert !lib.hasInfix "WorkingDir=" nixosPlainRendered;
+            assert !lib.hasInfix "Environment=" nixosPlainRendered;
             assert !(nixosEval.config.environment.etc ? "containers/systemd/user.container");
             pkgs.writeText "graft-nixos-module-eval" nixosRendered;
 
@@ -112,9 +114,11 @@
             assert lib.hasInfix "HostName=nix-check-user.local" homeManagerRendered;
             assert lib.hasInfix "User=1000" homeManagerRendered;
             assert lib.hasInfix "WorkingDir=/workspace" homeManagerRendered;
+            assert lib.hasInfix "Environment=EMPTY=\nEnvironment=LOG_LEVEL=debug" homeManagerRendered;
             assert !lib.hasInfix "HostName=" homeManagerPlainRendered;
             assert !lib.hasInfix "User=" homeManagerPlainRendered;
             assert !lib.hasInfix "WorkingDir=" homeManagerPlainRendered;
+            assert !lib.hasInfix "Environment=" homeManagerPlainRendered;
             assert !(homeManagerEval.config.xdg.configFile ? "containers/systemd/system.container");
             pkgs.writeText "graft-home-manager-module-eval" homeManagerRendered;
         }

@@ -80,6 +80,11 @@ let
         hostname = container.hostname or null;
         user = container.user or null;
         workingDir = container.workingDir or null;
+        environment = container.environment or { };
+        environmentKeys = lib.sort builtins.lessThan (builtins.attrNames environment);
+        environmentLines = lib.concatMapStrings
+          (key: "Environment=${key}=${environment.${key}}\n")
+          environmentKeys;
         service = ctr.service or { };
         restart = service.restart or null;
       in
@@ -99,6 +104,7 @@ let
       + lib.optionalString (workingDir != null) ''
         WorkingDir=${workingDir}
       ''
+      + environmentLines
       + lib.optionalString (restart != null) ''
 
       [Service]
