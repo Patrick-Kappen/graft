@@ -72,6 +72,7 @@ Implemented today:
 - missing `config.runtime.command` becomes `['/bin/graft-pause']`.
 - explicit `config.runtime.command` is preserved.
 - `config.service.restart` is rendered only when explicitly set.
+- `config.service.restartSec`, `timeoutStartSec`, and `timeoutStopSec` are rendered only when explicitly set.
 
 ### Container field validation
 
@@ -163,6 +164,17 @@ Current published port validation:
 - no Quadlet `.network` units are generated
 - no DNS settings or network aliases are rendered
 - no automatic firewall rules are managed
+
+`config.service.restartSec`, `timeoutStartSec`, and `timeoutStopSec` are treated
+as literal systemd service timing values. A `[Service]` section is rendered when
+at least one supported service field is set.
+
+Current service timing validation:
+
+- values must not be empty or whitespace-only
+- values must not contain control characters
+- no systemd timespan parsing is performed yet
+- `[Install]`, autostart, service type, `remainAfterExit`, and `restartIfChanged` are not rendered
 
 Not all fields from the annotated TOML reference are rendered yet. Fields that
 are parsed but not listed above should be treated as reserved/roadmap fields. See

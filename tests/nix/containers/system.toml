@@ -31,3 +31,8 @@ publish = [
   "127.0.0.1:18080:80",
   "18443:443/tcp",
 ]
+
+[config.service]
+restartSec = "10s"
+timeoutStartSec = "2m"
+timeoutStopSec = "30s"

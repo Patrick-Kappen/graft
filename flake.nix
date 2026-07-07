@@ -106,6 +106,7 @@
             assert lib.hasInfix "EnvironmentFile=/etc/graft/system.env\nEnvironmentFile=/run/graft/shared.env" nixosRendered;
             assert lib.hasInfix "Volume=/system-cache\nVolume=/tmp/graft-system-data:/data\nVolume=/tmp/graft-system-config:/config:ro" nixosRendered;
             assert lib.hasInfix "PublishPort=127.0.0.1:18080:80\nPublishPort=18443:443/tcp" nixosRendered;
+            assert lib.hasInfix "\n[Service]\nRestartSec=10s\nTimeoutStartSec=2m\nTimeoutStopSec=30s" nixosRendered;
             assert !lib.hasInfix "HostName=" nixosPlainRendered;
             assert !lib.hasInfix "User=" nixosPlainRendered;
             assert !lib.hasInfix "WorkingDir=" nixosPlainRendered;
@@ -115,6 +116,9 @@
             assert !lib.hasInfix "Volume=/tmp/graft-system-data:/data" nixosPlainRendered;
             assert !lib.hasInfix "Volume=/tmp/graft-system-config:/config:ro" nixosPlainRendered;
             assert !lib.hasInfix "PublishPort=" nixosPlainRendered;
+            assert !lib.hasInfix "RestartSec=" nixosPlainRendered;
+            assert !lib.hasInfix "TimeoutStartSec=" nixosPlainRendered;
+            assert !lib.hasInfix "TimeoutStopSec=" nixosPlainRendered;
             assert !(nixosEval.config.environment.etc ? "containers/systemd/user.container");
             pkgs.writeText "graft-nixos-module-eval" nixosRendered;
 
@@ -126,6 +130,7 @@
             assert lib.hasInfix "EnvironmentFile=/etc/graft/user.env\nEnvironmentFile=/run/graft/shared.env" homeManagerRendered;
             assert lib.hasInfix "Volume=/user-cache\nVolume=/tmp/graft-user-data:/data\nVolume=/tmp/graft-user-config:/config:ro" homeManagerRendered;
             assert lib.hasInfix "PublishPort=127.0.0.1:28080:80\nPublishPort=28443:443/tcp" homeManagerRendered;
+            assert lib.hasInfix "\n[Service]\nRestartSec=10s\nTimeoutStartSec=2m\nTimeoutStopSec=30s" homeManagerRendered;
             assert !lib.hasInfix "HostName=" homeManagerPlainRendered;
             assert !lib.hasInfix "User=" homeManagerPlainRendered;
             assert !lib.hasInfix "WorkingDir=" homeManagerPlainRendered;
@@ -135,6 +140,9 @@
             assert !lib.hasInfix "Volume=/tmp/graft-user-data:/data" homeManagerPlainRendered;
             assert !lib.hasInfix "Volume=/tmp/graft-user-config:/config:ro" homeManagerPlainRendered;
             assert !lib.hasInfix "PublishPort=" homeManagerPlainRendered;
+            assert !lib.hasInfix "RestartSec=" homeManagerPlainRendered;
+            assert !lib.hasInfix "TimeoutStartSec=" homeManagerPlainRendered;
+            assert !lib.hasInfix "TimeoutStopSec=" homeManagerPlainRendered;
             assert !(homeManagerEval.config.xdg.configFile ? "containers/systemd/system.container");
             pkgs.writeText "graft-home-manager-module-eval" homeManagerRendered;
         }

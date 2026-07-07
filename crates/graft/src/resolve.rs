@@ -7,6 +7,7 @@ use serde::Serialize;
 
 use crate::config::schema::{
     Container, ContainerConfig, DeployTarget, Filesystem, FilesystemVolume, Network, Runtime,
+    Service,
 };
 
 const SUPPORTED_VERSION: u32 = 1;
@@ -131,6 +132,15 @@ pub struct ResolvedService {
     /// Optional systemd restart policy.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub restart: Option<String>,
+    /// Optional restart delay rendered as systemd `RestartSec=`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub restart_sec: Option<String>,
+    /// Optional start timeout rendered as systemd `TimeoutStartSec=`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timeout_start_sec: Option<String>,
+    /// Optional stop timeout rendered as systemd `TimeoutStopSec=`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timeout_stop_sec: Option<String>,
 }
 
 /// Resolve a parsed TOML config into the JSON-ready container spec.
@@ -583,21 +593,49 @@ fn validate_command_arg(arg: &str) -> Result<()> {
 }
 
 fn resolve_service(config: &ContainerConfig) -> Result<Option<ResolvedService>> {
-    let restart = config
+    let service = config
         .config
         .as_ref()
-        .and_then(|config| config.service.as_ref())
-        .and_then(|service| service.restart.as_ref());
+        .and_then(|config| config.service.as_ref());
 
-    let Some(restart) = restart else {
+    let restart = resolve_restart_policy(service)?;
+    let restart_sec = resolve_service_timing(
+        service.and_then(|service| service.restart_sec.as_deref()),
+        "restartSec",
+    )?;
+    let timeout_start_sec = resolve_service_timing(
+        service.and_then(|service| service.timeout_start_sec.as_deref()),
+        "timeoutStartSec",
+    )?;
+    let timeout_stop_sec = resolve_service_timing(
+        service.and_then(|service| service.timeout_stop_sec.as_deref()),
+        "timeoutStopSec",
+    )?;
+
+    if restart.is_none()
+        && restart_sec.is_none()
+        && timeout_start_sec.is_none()
+        && timeout_stop_sec.is_none()
+    {
+        return Ok(None);
+    }
+
+    Ok(Some(ResolvedService {
+        restart,
+        restart_sec,
+        timeout_start_sec,
+        timeout_stop_sec,
+    }))
+}
+
+fn resolve_restart_policy(service: Option<&Service>) -> Result<Option<String>> {
+    let Some(restart) = service.and_then(|service| service.restart.as_ref()) else {
         return Ok(None);
     };
 
     validate_restart_policy(restart)?;
 
-    Ok(Some(ResolvedService {
-        restart: Some(restart.clone()),
-    }))
+    Ok(Some(restart.clone()))
 }
 
 fn validate_restart_policy(restart: &str) -> Result<()> {
@@ -613,6 +651,28 @@ fn validate_restart_policy(restart: &str) -> Result<()> {
     } else {
         bail!("unsupported restart policy: {restart}");
     }
+}
+
+fn resolve_service_timing(value: Option<&str>, field_name: &str) -> Result<Option<String>> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+
+    validate_service_timing(value, field_name)?;
+
+    Ok(Some(value.to_string()))
+}
+
+fn validate_service_timing(value: &str, field_name: &str) -> Result<()> {
+    if value.trim().is_empty() {
+        bail!("service {field_name} cannot be empty");
+    }
+
+    if value.chars().any(char::is_control) {
+        bail!("service {field_name} cannot contain control characters");
+    }
+
+    Ok(())
 }
 
 fn push_unique(packages: &mut Vec<String>, package: &str) {
@@ -679,6 +739,18 @@ mod tests {
             name: Some("dev".to_string()),
             config: Some(Config {
                 network: Some(network),
+                ..Config::default()
+            }),
+            ..ContainerConfig::default()
+        }
+    }
+
+    fn service_config(service: Service) -> ContainerConfig {
+        ContainerConfig {
+            version: Some(SUPPORTED_VERSION),
+            name: Some("dev".to_string()),
+            config: Some(Config {
+                service: Some(service),
                 ..Config::default()
             }),
             ..ContainerConfig::default()
@@ -1649,18 +1721,10 @@ mod tests {
 
     #[test]
     fn explicit_restart_is_preserved() {
-        let config = ContainerConfig {
-            version: Some(SUPPORTED_VERSION),
-            name: Some("dev".to_string()),
-            config: Some(Config {
-                service: Some(Service {
-                    restart: Some("on-failure".to_string()),
-                    ..Service::default()
-                }),
-                ..Config::default()
-            }),
-            ..ContainerConfig::default()
-        };
+        let config = service_config(Service {
+            restart: Some("on-failure".to_string()),
+            ..Service::default()
+        });
 
         let resolved = resolve(&config).unwrap();
 
@@ -1668,8 +1732,75 @@ mod tests {
             resolved.service,
             Some(ResolvedService {
                 restart: Some("on-failure".to_string()),
+                restart_sec: None,
+                timeout_start_sec: None,
+                timeout_stop_sec: None,
             })
         );
+    }
+
+    #[test]
+    fn explicit_service_timing_is_preserved() {
+        let config = service_config(Service {
+            restart_sec: Some("10s".to_string()),
+            timeout_start_sec: Some("2m".to_string()),
+            timeout_stop_sec: Some("30s".to_string()),
+            ..Service::default()
+        });
+
+        let resolved = resolve(&config).unwrap();
+
+        assert_eq!(
+            resolved.service,
+            Some(ResolvedService {
+                restart: None,
+                restart_sec: Some("10s".to_string()),
+                timeout_start_sec: Some("2m".to_string()),
+                timeout_stop_sec: Some("30s".to_string()),
+            })
+        );
+
+        let json = serde_json::to_value(&resolved).unwrap();
+        assert_eq!(json["service"]["restartSec"], "10s");
+        assert_eq!(json["service"]["timeoutStartSec"], "2m");
+        assert_eq!(json["service"]["timeoutStopSec"], "30s");
+        assert_eq!(json["service"].get("restart"), None);
+    }
+
+    #[test]
+    fn empty_restart_sec_returns_error() {
+        let config = service_config(Service {
+            restart_sec: Some(String::new()),
+            ..Service::default()
+        });
+
+        let result = resolve(&config);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn whitespace_timeout_start_sec_returns_error() {
+        let config = service_config(Service {
+            timeout_start_sec: Some("  ".to_string()),
+            ..Service::default()
+        });
+
+        let result = resolve(&config);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn control_character_in_timeout_stop_sec_returns_error() {
+        let config = service_config(Service {
+            timeout_stop_sec: Some("30\ns".to_string()),
+            ..Service::default()
+        });
+
+        let result = resolve(&config);
+
+        assert!(result.is_err());
     }
 
     #[test]

@@ -53,6 +53,9 @@
 # [config.service]
 # type =
 # restart =
+# restartSec =                   # literal systemd RestartSec; non-empty, no control characters; no timespan parser yet
+# timeoutStartSec =              # literal systemd TimeoutStartSec; non-empty, no control characters; no timespan parser yet
+# timeoutStopSec =               # literal systemd TimeoutStopSec; non-empty, no control characters; no timespan parser yet
 
 # NixOS (explicit opt-in; Graft does NOT start Podman automatically)
 # virtualisation.podman.enable =

@@ -96,21 +96,25 @@ the user sets a command, that command becomes `Exec=`.
 This avoids default dependencies on `bashInteractive`, `coreutils`, or
 `sleep infinity`.
 
-## Restart
+## Service settings
 
-`Restart=` has no Graft default.
+Service settings have no Graft defaults.
 
-Only an explicit user restart setting renders a `[Service]` section with a
-restart policy.
+A `[Service]` section is rendered only when at least one supported service field
+is explicitly set. Supported fields currently include `Restart=`, `RestartSec=`,
+`TimeoutStartSec=`, and `TimeoutStopSec=`.
 
 Example:
 
 ```ini
 [Service]
 Restart=on-failure
+RestartSec=10s
+TimeoutStartSec=2m
+TimeoutStopSec=30s
 ```
 
-Without explicit restart, no restart policy is rendered.
+Without explicit service settings, no `[Service]` section is rendered.
 
 ## Autostart
 
