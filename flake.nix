@@ -130,7 +130,7 @@
             assert lib.hasInfix "EnvironmentFile=/etc/graft/user.env\nEnvironmentFile=/run/graft/shared.env" homeManagerRendered;
             assert lib.hasInfix "Volume=/user-cache\nVolume=/tmp/graft-user-data:/data\nVolume=/tmp/graft-user-config:/config:ro" homeManagerRendered;
             assert lib.hasInfix "PublishPort=127.0.0.1:28080:80\nPublishPort=28443:443/tcp" homeManagerRendered;
-            assert lib.hasInfix "RestartSec=10s\nTimeoutStartSec=2m\nTimeoutStopSec=30s" homeManagerRendered;
+            assert lib.hasInfix "\n[Service]\nRestartSec=10s\nTimeoutStartSec=2m\nTimeoutStopSec=30s" homeManagerRendered;
             assert !lib.hasInfix "HostName=" homeManagerPlainRendered;
             assert !lib.hasInfix "User=" homeManagerPlainRendered;
             assert !lib.hasInfix "WorkingDir=" homeManagerPlainRendered;
