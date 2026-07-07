@@ -102,4 +102,3 @@ Related tracking issues:
 - [#12: Design context-aware template variables for repo branch worktree and agent](https://github.com/Patrick-Kappen/graft/issues/12)
 - [#13: Backlog: reduce Nix module rendering complexity](https://github.com/Patrick-Kappen/graft/issues/13)
 - [#27: Design Git-aware copied workspace workflow](https://github.com/Patrick-Kappen/graft/issues/27)
-- [#29: Support quoted environment variable values](https://github.com/Patrick-Kappen/graft/issues/29)

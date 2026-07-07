@@ -96,6 +96,15 @@
           nixosPlainRendered = nixosEval.config.environment.etc."containers/systemd/plain-system.container".text;
           homeManagerRendered = homeManagerEval.config.xdg.configFile."containers/systemd/user.container".text;
           homeManagerPlainRendered = homeManagerEval.config.xdg.configFile."containers/systemd/plain-user.container".text;
+          expectedEnvironmentLines = lib.concatStringsSep "\n" [
+            ''Environment="EMPTY="''
+            ''Environment="EQUALS=a=b"''
+            ''Environment="GREETING=hello world"''
+            ''Environment="LOG_LEVEL=debug"''
+            ''Environment="PATHLIKE=C:\\Temp"''
+            ''Environment="PERCENT=100%%"''
+            ''Environment="QUOTED=say \"hi\""''
+          ];
         in
         {
           nixos-module-eval = assert lib.hasInfix "ContainerName=nix-check-system" nixosRendered;
@@ -103,7 +112,7 @@
             assert lib.hasInfix "User=1000" nixosRendered;
             assert lib.hasInfix "Group=1000" nixosRendered;
             assert lib.hasInfix "WorkingDir=/workspace" nixosRendered;
-            assert lib.hasInfix "Environment=EMPTY=\nEnvironment=LOG_LEVEL=debug" nixosRendered;
+            assert lib.hasInfix expectedEnvironmentLines nixosRendered;
             assert lib.hasInfix "EnvironmentFile=/etc/graft/system.env\nEnvironmentFile=/run/graft/shared.env" nixosRendered;
             assert lib.hasInfix "Volume=/system-cache\nVolume=/tmp/graft-system-data:/data\nVolume=/tmp/graft-system-config:/config:ro" nixosRendered;
             assert lib.hasInfix "PublishPort=127.0.0.1:18080:80\nPublishPort=18443:443/tcp" nixosRendered;
@@ -129,7 +138,7 @@
             assert lib.hasInfix "User=1000" homeManagerRendered;
             assert lib.hasInfix "Group=1000" homeManagerRendered;
             assert lib.hasInfix "WorkingDir=/workspace" homeManagerRendered;
-            assert lib.hasInfix "Environment=EMPTY=\nEnvironment=LOG_LEVEL=debug" homeManagerRendered;
+            assert lib.hasInfix expectedEnvironmentLines homeManagerRendered;
             assert lib.hasInfix "EnvironmentFile=/etc/graft/user.env\nEnvironmentFile=/run/graft/shared.env" homeManagerRendered;
             assert lib.hasInfix "Volume=/user-cache\nVolume=/tmp/graft-user-data:/data\nVolume=/tmp/graft-user-config:/config:ro" homeManagerRendered;
             assert lib.hasInfix "PublishPort=127.0.0.1:28080:80\nPublishPort=28443:443/tcp" homeManagerRendered;

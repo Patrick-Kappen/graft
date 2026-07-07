@@ -36,7 +36,7 @@
 # stopTimeout =
 
 # [config.container.environment]
-# KEY =                          # literal Quadlet Environment=KEY=value; sorted; key non-empty/no whitespace/no '='; value no whitespace until quoted values are supported
+# KEY =                          # quoted Quadlet Environment="KEY=value"; sorted; key non-empty/no whitespace/no '='; value no control chars; quotes/backslashes/% escaped
 
 # [[config.filesystem.volumes]]
 # source =                        # optional literal Quadlet Volume source; non-empty, no control characters; no existence check

@@ -96,6 +96,20 @@ the user sets a command, that command becomes `Exec=`.
 This avoids default dependencies on `bashInteractive`, `coreutils`, or
 `sleep infinity`.
 
+## Environment variables
+
+Environment variables are rendered as sorted, quoted systemd assignments:
+
+```ini
+Environment="GREETING=hello world"
+Environment="PERCENT=100%%"
+Environment="QUOTED=say \"hi\""
+```
+
+The whole `KEY=value` assignment is quoted. Double quotes, backslashes, and `%`
+specifier markers are escaped before rendering. Environment values are not a
+secret transport.
+
 ## Service settings
 
 Service settings have no Graft defaults.

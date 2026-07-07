@@ -3,6 +3,9 @@
 let
   cfg = config.services.graft;
 
+  escapeSystemdQuoted = value:
+    lib.replaceStrings [ "\\" "\"" "%" ] [ "\\\\" "\\\"" "%%" ] value;
+
   tomlFiles = lib.optionalAttrs (cfg.configRoot != null)
     (lib.filterAttrs
       (name: type: type == "regular" && lib.hasSuffix ".toml" name)
@@ -84,7 +87,9 @@ let
         environment = container.environment or { };
         environmentKeys = lib.sort builtins.lessThan (builtins.attrNames environment);
         environmentLines = lib.concatMapStrings
-          (key: "Environment=${key}=${environment.${key}}\n")
+          (key:
+            let assignment = "${key}=${environment.${key}}";
+            in "Environment=\"${escapeSystemdQuoted assignment}\"\n")
           environmentKeys;
         environmentFile = container.environmentFile or [ ];
         environmentFileLines = lib.concatMapStrings
