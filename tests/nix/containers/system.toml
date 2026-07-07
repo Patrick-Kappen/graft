@@ -5,3 +5,7 @@ name = "nix-check-system"
 hostname = "nix-check-system.local"
 user = "1000"
 workingDir = "/workspace"
+
+[config.container.environment]
+LOG_LEVEL = "debug"
+EMPTY = ""
