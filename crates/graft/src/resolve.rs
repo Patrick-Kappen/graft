@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use anyhow::{bail, Result};
 use serde::Serialize;
 
-use crate::config::schema::{Container, ContainerConfig, DeployTarget, Runtime};
+use crate::config::schema::{Container, ContainerConfig, DeployTarget, Network, Runtime};
 
 const SUPPORTED_VERSION: u32 = 1;
 const GRAFT_PAUSE_PACKAGE: &str = "graft-pause";
@@ -25,6 +25,9 @@ pub struct ResolvedContainer {
     /// Optional container settings rendered into Quadlet `[Container]`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub container: Option<ResolvedContainerSettings>,
+    /// Optional network settings rendered into Quadlet `[Container]`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub network: Option<ResolvedNetwork>,
     /// Optional systemd service settings.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub service: Option<ResolvedService>,
@@ -84,6 +87,15 @@ pub struct ResolvedContainerSettings {
     pub environment_file: Option<Vec<String>>,
 }
 
+/// Resolved network settings.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolvedNetwork {
+    /// Optional published ports rendered as Quadlet `PublishPort=`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub publish: Option<Vec<String>>,
+}
+
 /// Resolved service settings.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -127,6 +139,7 @@ pub fn resolve(config: &ContainerConfig) -> Result<ResolvedContainer> {
             command: resolve_command(runtime)?,
         },
         container: resolve_container(config)?,
+        network: resolve_network(config)?,
         service: resolve_service(config)?,
     })
 }
@@ -303,6 +316,48 @@ fn validate_environment_file_entry(entry: &str) -> Result<()> {
 
     if entry.chars().any(char::is_control) {
         bail!("container environmentFile entries cannot contain control characters");
+    }
+
+    Ok(())
+}
+
+fn resolve_network(config: &ContainerConfig) -> Result<Option<ResolvedNetwork>> {
+    let network = config
+        .config
+        .as_ref()
+        .and_then(|config| config.network.as_ref());
+    let publish = resolve_publish(network)?;
+
+    if publish.is_none() {
+        return Ok(None);
+    }
+
+    Ok(Some(ResolvedNetwork { publish }))
+}
+
+fn resolve_publish(network: Option<&Network>) -> Result<Option<Vec<String>>> {
+    let Some(publish) = network.and_then(|network| network.publish.as_ref()) else {
+        return Ok(None);
+    };
+
+    if publish.is_empty() {
+        return Ok(None);
+    }
+
+    for entry in publish {
+        validate_publish_entry(entry)?;
+    }
+
+    Ok(Some(publish.clone()))
+}
+
+fn validate_publish_entry(entry: &str) -> Result<()> {
+    if entry.trim().is_empty() {
+        bail!("network publish entries cannot be empty");
+    }
+
+    if entry.chars().any(char::is_control) {
+        bail!("network publish entries cannot contain control characters");
     }
 
     Ok(())
@@ -491,6 +546,18 @@ mod tests {
             name: Some("dev".to_string()),
             config: Some(Config {
                 container: Some(container),
+                ..Config::default()
+            }),
+            ..ContainerConfig::default()
+        }
+    }
+
+    fn network_config(network: Network) -> ContainerConfig {
+        ContainerConfig {
+            version: Some(SUPPORTED_VERSION),
+            name: Some("dev".to_string()),
+            config: Some(Config {
+                network: Some(network),
                 ..Config::default()
             }),
             ..ContainerConfig::default()
@@ -1115,6 +1182,87 @@ mod tests {
     }
 
     #[test]
+    fn publish_has_no_default() {
+        let resolved = resolve(&named_config()).unwrap();
+        assert_eq!(resolved.network, None);
+    }
+
+    #[test]
+    fn empty_publish_is_omitted() {
+        let config = network_config(Network {
+            publish: Some(Vec::new()),
+            ..Network::default()
+        });
+
+        let resolved = resolve(&config).unwrap();
+
+        assert_eq!(resolved.network, None);
+    }
+
+    #[test]
+    fn explicit_publish_is_preserved() {
+        let config = network_config(Network {
+            publish: Some(vec![
+                "127.0.0.1:8080:80".to_string(),
+                "8443:443/tcp".to_string(),
+            ]),
+            ..Network::default()
+        });
+
+        let resolved = resolve(&config).unwrap();
+
+        assert_eq!(
+            resolved.network,
+            Some(ResolvedNetwork {
+                publish: Some(vec![
+                    "127.0.0.1:8080:80".to_string(),
+                    "8443:443/tcp".to_string(),
+                ]),
+            })
+        );
+
+        let json = serde_json::to_value(&resolved).unwrap();
+        assert_eq!(json["network"]["publish"][0], "127.0.0.1:8080:80");
+        assert_eq!(json["network"]["publish"][1], "8443:443/tcp");
+    }
+
+    #[test]
+    fn empty_publish_entry_returns_error() {
+        let config = network_config(Network {
+            publish: Some(vec![String::new()]),
+            ..Network::default()
+        });
+
+        let result = resolve(&config);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn whitespace_publish_entry_returns_error() {
+        let config = network_config(Network {
+            publish: Some(vec!["  ".to_string()]),
+            ..Network::default()
+        });
+
+        let result = resolve(&config);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn control_character_in_publish_entry_returns_error() {
+        let config = network_config(Network {
+            publish: Some(vec!["8080:\n80".to_string()]),
+            ..Network::default()
+        });
+
+        let result = resolve(&config);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
     fn restart_has_no_default() {
         let resolved = resolve(&named_config()).unwrap();
         assert_eq!(resolved.service, None);
@@ -1275,6 +1423,7 @@ mod tests {
         let json = serde_json::to_value(&resolved).unwrap();
 
         assert_eq!(json.get("container"), None);
+        assert_eq!(json.get("network"), None);
         assert_eq!(json.get("service"), None);
         assert_eq!(json["deploy"].get("enable"), None);
     }

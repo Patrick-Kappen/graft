@@ -16,3 +16,9 @@ environmentFile = [
 [config.container.environment]
 LOG_LEVEL = "debug"
 EMPTY = ""
+
+[config.network]
+publish = [
+  "127.0.0.1:28080:80",
+  "28443:443/tcp",
+]

@@ -44,7 +44,7 @@
 
 # [config.network]
 # mode =
-# publish =
+# publish =                      # literal Quadlet PublishPort entries; non-empty, no control characters; user order preserved
 
 # [config.security]
 # dropCapabilities =

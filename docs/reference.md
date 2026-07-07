@@ -64,6 +64,7 @@ Implemented today:
 - `config.container.workingDir` is rendered as Quadlet `WorkingDir=` when explicitly set.
 - `config.container.environment` is rendered as sorted Quadlet `Environment=KEY=value` lines when explicitly set.
 - `config.container.environmentFile` is rendered as ordered Quadlet `EnvironmentFile=` lines when explicitly set.
+- `config.network.publish` is rendered as ordered Quadlet `PublishPort=` lines when explicitly set.
 - `config.runtime.mode` supports only `rootfs-store`.
 - `config.runtime.packages` are mapped to Nix packages.
 - `graft-pause` is always added to the package list.
@@ -130,6 +131,18 @@ Current environment file validation:
 - no env file generation is performed
 - no secrets materialisation is performed
 - no host environment passthrough is performed
+
+`config.network.publish` is treated as literal Quadlet `PublishPort=` entries.
+User order is preserved.
+
+Current published port validation:
+
+- entries must not be empty or whitespace-only
+- entries must not contain control characters
+- no port syntax validation is performed yet
+- no Quadlet `.network` units are generated
+- no DNS settings or network aliases are rendered
+- no automatic firewall rules are managed
 
 Not all fields from the annotated TOML reference are rendered yet. Fields that
 are parsed but not listed above should be treated as reserved/roadmap fields. See
