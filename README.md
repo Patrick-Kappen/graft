@@ -20,7 +20,9 @@
   <a href="docs/design.md">Design</a> ·
   <a href="docs/quadlet.md">Quadlet</a> ·
   <a href="docs/roadmap.md">Roadmap</a> ·
+  <a href="docs/non-goals.md">Non-goals</a> ·
   <a href="docs/reference.md">Reference</a> ·
+  <a href="docs/development.md">Development</a> ·
   <a href="examples/reference.toml">Annotated TOML</a>
 </p>
 
@@ -36,8 +38,9 @@ No container images. No ad-hoc package installs. No hand-written Quadlet
 boilerplate.
 
 > Status: early MVP. The current `rootfs-store` flow works for NixOS system
-> containers and Home Manager user containers. The broader roadmap is still
-> evolving; see [Roadmap](docs/roadmap.md).
+> containers and Home Manager user containers, with useful Quadlet rendering for
+> common container fields. The broader roadmap is still evolving; see
+> [Roadmap](docs/roadmap.md) and [Non-goals](docs/non-goals.md).
 
 ## A tiny container
 
@@ -243,7 +246,10 @@ restart = "on-failure"
 - User command → preserved exactly.
 - Packages → `graft-pause` plus user packages, deduplicated.
 - Deploy target → defaults to `system`.
-- Restart → rendered only when explicitly configured.
+- Container fields → `HostName=`, `User=`, `Group=`, and `WorkingDir=` render when explicitly configured.
+- Environment → sorted, quoted `Environment="KEY=value"` lines; environment files preserve user order.
+- Filesystem/network → ordered `Volume=` and `PublishPort=` lines.
+- Service timing → `Restart=`, `RestartSec=`, `TimeoutStartSec=`, and `TimeoutStopSec=` render only when explicitly configured.
 - Autostart → not rendered by default.
 - `graft-pause` exits cleanly on `SIGTERM` and `SIGINT`.
 
@@ -274,7 +280,9 @@ See [Roadmap](docs/roadmap.md).
 - [Design](docs/design.md)
 - [Quadlet output](docs/quadlet.md)
 - [Roadmap](docs/roadmap.md)
+- [Non-goals and deferred scope](docs/non-goals.md)
 - [Reference](docs/reference.md)
+- [Development](docs/development.md)
 - [Annotated TOML reference](examples/reference.toml)
 
 ## Related work

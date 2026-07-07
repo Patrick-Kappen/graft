@@ -96,6 +96,22 @@ the user sets a command, that command becomes `Exec=`.
 This avoids default dependencies on `bashInteractive`, `coreutils`, or
 `sleep infinity`.
 
+## Optional container keys
+
+Graft renders optional Quadlet container keys only when the resolved JSON contains
+them:
+
+- `HostName=` from `config.container.hostname`
+- `User=` from `config.container.user`
+- `Group=` from `config.container.group`
+- `WorkingDir=` from `config.container.workingDir`
+- `EnvironmentFile=` from `config.container.environmentFile`
+- `PublishPort=` from `config.network.publish`
+- `Volume=` from `config.filesystem.volumes`
+
+Environment files, published ports, and volumes preserve user order. Environment
+variables are sorted by key.
+
 ## Environment variables
 
 Environment variables are rendered as sorted, quoted systemd assignments:

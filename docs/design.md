@@ -113,7 +113,9 @@ The CLI may only add defaults that belong to Graft semantics.
 | `runtime.command` | user command, or `/bin/graft-pause` if missing |
 | `deploy.target` | default `system`, unless user sets `user` |
 | `runtime.mode` | currently only `rootfs-store` |
-| `service.restart` | no default; include only if user sets it |
+| supported container fields | no defaults; include only if user sets them |
+| environment, publish, volumes | no defaults; preserve deterministic ordering rules |
+| `service.restart` and timing | no defaults; include only if user sets them |
 | `deploy.enable` | no default in JSON; modules render unless explicitly `false` |
 | autostart / `[Install]` | no default; future support must be explicit |
 
@@ -182,7 +184,8 @@ The resolved JSON is a Nix store artefact, not a committed file.
 ## Current boundary
 
 The current implementation focuses on the rootfs-store materialisation path.
-The TOML schema is broader than what the MVP renders today.
+The TOML schema is broader than what the MVP renders today, but the renderer now
+covers the common fields listed in [Reference](reference.md).
 
 Currently proven:
 
@@ -191,10 +194,13 @@ Currently proven:
 - Home Manager IFD materialisation
 - system/rootful Quadlet runtime
 - user/rootless Quadlet runtime
+- useful Quadlet rendering for container identity, working directory,
+  environment, environment files, published ports, volumes, and service timing
 - clean keep-alive shutdown
 
 Future work is tracked in [Roadmap](roadmap.md). Deliberate exclusions are
-tracked in [Non-goals and deferred scope](non-goals.md).
+tracked in [Non-goals and deferred scope](non-goals.md). Contributor workflow is
+tracked in [Development](development.md).
 
 ## Future CLI control plane
 
