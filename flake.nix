@@ -104,11 +104,13 @@
             assert lib.hasInfix "WorkingDir=/workspace" nixosRendered;
             assert lib.hasInfix "Environment=EMPTY=\nEnvironment=LOG_LEVEL=debug" nixosRendered;
             assert lib.hasInfix "EnvironmentFile=/etc/graft/system.env\nEnvironmentFile=/run/graft/shared.env" nixosRendered;
+            assert lib.hasInfix "PublishPort=127.0.0.1:18080:80\nPublishPort=18443:443/tcp" nixosRendered;
             assert !lib.hasInfix "HostName=" nixosPlainRendered;
             assert !lib.hasInfix "User=" nixosPlainRendered;
             assert !lib.hasInfix "WorkingDir=" nixosPlainRendered;
             assert !lib.hasInfix "Environment=" nixosPlainRendered;
             assert !lib.hasInfix "EnvironmentFile=" nixosPlainRendered;
+            assert !lib.hasInfix "PublishPort=" nixosPlainRendered;
             assert !(nixosEval.config.environment.etc ? "containers/systemd/user.container");
             pkgs.writeText "graft-nixos-module-eval" nixosRendered;
 
@@ -118,11 +120,13 @@
             assert lib.hasInfix "WorkingDir=/workspace" homeManagerRendered;
             assert lib.hasInfix "Environment=EMPTY=\nEnvironment=LOG_LEVEL=debug" homeManagerRendered;
             assert lib.hasInfix "EnvironmentFile=/etc/graft/user.env\nEnvironmentFile=/run/graft/shared.env" homeManagerRendered;
+            assert lib.hasInfix "PublishPort=127.0.0.1:28080:80\nPublishPort=28443:443/tcp" homeManagerRendered;
             assert !lib.hasInfix "HostName=" homeManagerPlainRendered;
             assert !lib.hasInfix "User=" homeManagerPlainRendered;
             assert !lib.hasInfix "WorkingDir=" homeManagerPlainRendered;
             assert !lib.hasInfix "Environment=" homeManagerPlainRendered;
             assert !lib.hasInfix "EnvironmentFile=" homeManagerPlainRendered;
+            assert !lib.hasInfix "PublishPort=" homeManagerPlainRendered;
             assert !(homeManagerEval.config.xdg.configFile ? "containers/systemd/system.container");
             pkgs.writeText "graft-home-manager-module-eval" homeManagerRendered;
         }

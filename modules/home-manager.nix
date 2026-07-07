@@ -89,6 +89,11 @@ let
         environmentFileLines = lib.concatMapStrings
           (file: "EnvironmentFile=${file}\n")
           environmentFile;
+        network = ctr.network or { };
+        publish = network.publish or [ ];
+        publishLines = lib.concatMapStrings
+          (port: "PublishPort=${port}\n")
+          publish;
         service = ctr.service or { };
         restart = service.restart or null;
       in
@@ -110,6 +115,7 @@ let
       ''
       + environmentLines
       + environmentFileLines
+      + publishLines
       + lib.optionalString (restart != null) ''
 
         [Service]
