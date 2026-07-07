@@ -60,6 +60,7 @@ Implemented today:
 - `deploy.target` defaults to `system`.
 - `deploy.enable = false` prevents rendering.
 - `config.container.hostname` is rendered as Quadlet `HostName=` when explicitly set.
+- `config.container.user` is rendered as Quadlet `User=` when explicitly set.
 - `config.runtime.mode` supports only `rootfs-store`.
 - `config.runtime.packages` are mapped to Nix packages.
 - `graft-pause` is always added to the package list.
@@ -67,17 +68,26 @@ Implemented today:
 - explicit `config.runtime.command` is preserved.
 - `config.service.restart` is rendered only when explicitly set.
 
-### Hostname validation
+### Container field validation
 
 `config.container.hostname` is treated as a literal value for Quadlet
 `HostName=`.
 
-Current validation:
+Current hostname validation:
 
 - must not be empty or whitespace-only
 - must not contain control characters
 - no template expansion is performed
 - no DNS/FQDN validation is performed yet
+
+`config.container.user` is treated as a literal value for Quadlet `User=`.
+
+Current user validation:
+
+- must not be empty or whitespace-only
+- must not contain control characters
+- no UID/GID syntax validation is performed yet
+- `config.container.group` is not rendered yet
 
 Not all fields from the annotated TOML reference are rendered yet. Fields that
 are parsed but not listed above should be treated as reserved/roadmap fields. See
