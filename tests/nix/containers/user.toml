@@ -17,6 +17,18 @@ environmentFile = [
 LOG_LEVEL = "debug"
 EMPTY = ""
 
+[[config.filesystem.volumes]]
+target = "/user-cache"
+
+[[config.filesystem.volumes]]
+source = "/tmp/graft-user-data"
+target = "/data"
+
+[[config.filesystem.volumes]]
+source = "/tmp/graft-user-config"
+target = "/config"
+mode = "ro"
+
 [config.network]
 publish = [
   "127.0.0.1:28080:80",
