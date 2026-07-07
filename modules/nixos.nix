@@ -78,6 +78,7 @@ let
         env = containerEnvs.${name};
         container = ctr.container or { };
         hostname = container.hostname or null;
+        user = container.user or null;
         service = ctr.service or { };
         restart = service.restart or null;
       in
@@ -90,6 +91,9 @@ let
       ''
       + lib.optionalString (hostname != null) ''
         HostName=${hostname}
+      ''
+      + lib.optionalString (user != null) ''
+        User=${user}
       ''
       + lib.optionalString (restart != null) ''
 

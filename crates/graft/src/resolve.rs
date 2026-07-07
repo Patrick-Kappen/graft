@@ -68,6 +68,9 @@ pub struct ResolvedContainerSettings {
     /// Optional hostname rendered as Quadlet `HostName=`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hostname: Option<String>,
+    /// Optional user rendered as Quadlet `User=`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user: Option<String>,
 }
 
 /// Resolved service settings.
@@ -123,12 +126,13 @@ fn resolve_container(config: &ContainerConfig) -> Result<Option<ResolvedContaine
         .as_ref()
         .and_then(|config| config.container.as_ref());
     let hostname = resolve_hostname(container)?;
+    let user = resolve_user(container)?;
 
-    if hostname.is_none() {
+    if hostname.is_none() && user.is_none() {
         return Ok(None);
     }
 
-    Ok(Some(ResolvedContainerSettings { hostname }))
+    Ok(Some(ResolvedContainerSettings { hostname, user }))
 }
 
 fn resolve_hostname(container: Option<&Container>) -> Result<Option<String>> {
@@ -148,6 +152,28 @@ fn validate_hostname(hostname: &str) -> Result<()> {
 
     if hostname.chars().any(char::is_control) {
         bail!("container hostname cannot contain control characters");
+    }
+
+    Ok(())
+}
+
+fn resolve_user(container: Option<&Container>) -> Result<Option<String>> {
+    let Some(user) = container.and_then(|container| container.user.as_ref()) else {
+        return Ok(None);
+    };
+
+    validate_user(user)?;
+
+    Ok(Some(user.clone()))
+}
+
+fn validate_user(user: &str) -> Result<()> {
+    if user.trim().is_empty() {
+        bail!("container user cannot be empty");
+    }
+
+    if user.chars().any(char::is_control) {
+        bail!("container user cannot contain control characters");
     }
 
     Ok(())
@@ -526,6 +552,7 @@ mod tests {
             resolved.container,
             Some(ResolvedContainerSettings {
                 hostname: Some("web.local".to_string()),
+                user: None,
             })
         );
 
@@ -549,6 +576,85 @@ mod tests {
     fn control_character_in_hostname_returns_error() {
         let config = container_config(Container {
             hostname: Some("web\nlocal".to_string()),
+            ..Container::default()
+        });
+
+        let result = resolve(&config);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn omitted_user_is_not_rendered_with_hostname() {
+        let config = container_config(Container {
+            hostname: Some("web.local".to_string()),
+            ..Container::default()
+        });
+
+        let resolved = resolve(&config).unwrap();
+        let container = resolved.container.unwrap();
+
+        assert_eq!(container.hostname, Some("web.local".to_string()));
+        assert_eq!(container.user, None);
+    }
+
+    #[test]
+    fn explicit_user_is_preserved() {
+        let config = container_config(Container {
+            user: Some("1000".to_string()),
+            ..Container::default()
+        });
+
+        let resolved = resolve(&config).unwrap();
+
+        assert_eq!(
+            resolved.container,
+            Some(ResolvedContainerSettings {
+                hostname: None,
+                user: Some("1000".to_string()),
+            })
+        );
+
+        let json = serde_json::to_value(&resolved).unwrap();
+        assert_eq!(json["container"]["user"], "1000");
+        assert_eq!(json["container"].get("hostname"), None);
+    }
+
+    #[test]
+    fn hostname_and_user_are_preserved_together() {
+        let config = container_config(Container {
+            hostname: Some("web.local".to_string()),
+            user: Some("1000".to_string()),
+            ..Container::default()
+        });
+
+        let resolved = resolve(&config).unwrap();
+
+        assert_eq!(
+            resolved.container,
+            Some(ResolvedContainerSettings {
+                hostname: Some("web.local".to_string()),
+                user: Some("1000".to_string()),
+            })
+        );
+    }
+
+    #[test]
+    fn empty_user_returns_error() {
+        let config = container_config(Container {
+            user: Some("  ".to_string()),
+            ..Container::default()
+        });
+
+        let result = resolve(&config);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn control_character_in_user_returns_error() {
+        let config = container_config(Container {
+            user: Some("1000\n".to_string()),
             ..Container::default()
         });
 
