@@ -79,6 +79,9 @@ pub struct ResolvedContainerSettings {
     /// Optional environment variables rendered as Quadlet `Environment=`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub environment: Option<BTreeMap<String, String>>,
+    /// Optional environment files rendered as Quadlet `EnvironmentFile=`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub environment_file: Option<Vec<String>>,
 }
 
 /// Resolved service settings.
@@ -137,8 +140,14 @@ fn resolve_container(config: &ContainerConfig) -> Result<Option<ResolvedContaine
     let user = resolve_user(container)?;
     let working_dir = resolve_working_dir(container)?;
     let environment = resolve_environment(container)?;
+    let environment_file = resolve_environment_file(container)?;
 
-    if hostname.is_none() && user.is_none() && working_dir.is_none() && environment.is_none() {
+    if hostname.is_none()
+        && user.is_none()
+        && working_dir.is_none()
+        && environment.is_none()
+        && environment_file.is_none()
+    {
         return Ok(None);
     }
 
@@ -147,6 +156,7 @@ fn resolve_container(config: &ContainerConfig) -> Result<Option<ResolvedContaine
         user,
         working_dir,
         environment,
+        environment_file,
     }))
 }
 
@@ -263,6 +273,36 @@ fn validate_environment_value(value: &str) -> Result<()> {
 
     if value.chars().any(char::is_whitespace) {
         bail!("container environment values cannot contain whitespace");
+    }
+
+    Ok(())
+}
+
+fn resolve_environment_file(container: Option<&Container>) -> Result<Option<Vec<String>>> {
+    let Some(environment_file) =
+        container.and_then(|container| container.environment_file.as_ref())
+    else {
+        return Ok(None);
+    };
+
+    if environment_file.is_empty() {
+        return Ok(None);
+    }
+
+    for entry in environment_file {
+        validate_environment_file_entry(entry)?;
+    }
+
+    Ok(Some(environment_file.clone()))
+}
+
+fn validate_environment_file_entry(entry: &str) -> Result<()> {
+    if entry.trim().is_empty() {
+        bail!("container environmentFile entries cannot be empty");
+    }
+
+    if entry.chars().any(char::is_control) {
+        bail!("container environmentFile entries cannot contain control characters");
     }
 
     Ok(())
@@ -646,6 +686,7 @@ mod tests {
                 user: None,
                 working_dir: None,
                 environment: None,
+                environment_file: None,
             })
         );
 
@@ -691,6 +732,7 @@ mod tests {
         assert_eq!(container.user, None);
         assert_eq!(container.working_dir, None);
         assert_eq!(container.environment, None);
+        assert_eq!(container.environment_file, None);
     }
 
     #[test]
@@ -709,6 +751,7 @@ mod tests {
                 user: Some("1000".to_string()),
                 working_dir: None,
                 environment: None,
+                environment_file: None,
             })
         );
 
@@ -735,6 +778,7 @@ mod tests {
                 user: Some("1000".to_string()),
                 working_dir: None,
                 environment: None,
+                environment_file: None,
             })
         );
     }
@@ -779,6 +823,7 @@ mod tests {
                 user: None,
                 working_dir: Some("/workspace".to_string()),
                 environment: None,
+                environment_file: None,
             })
         );
 
@@ -806,6 +851,7 @@ mod tests {
                 user: Some("1000".to_string()),
                 working_dir: Some("/workspace".to_string()),
                 environment: None,
+                environment_file: None,
             })
         );
     }
@@ -868,6 +914,7 @@ mod tests {
                     ("EMPTY".to_string(), String::new()),
                     ("LOG_LEVEL".to_string(), "debug".to_string()),
                 ])),
+                environment_file: None,
             })
         );
 
@@ -973,6 +1020,92 @@ mod tests {
                 "BAD".to_string(),
                 "line\nbreak".to_string(),
             )])),
+            ..Container::default()
+        });
+
+        let result = resolve(&config);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn empty_environment_file_is_omitted() {
+        let config = container_config(Container {
+            environment_file: Some(Vec::new()),
+            ..Container::default()
+        });
+
+        let resolved = resolve(&config).unwrap();
+
+        assert_eq!(resolved.container, None);
+    }
+
+    #[test]
+    fn explicit_environment_file_is_preserved() {
+        let config = container_config(Container {
+            environment_file: Some(vec![
+                "/etc/graft/app.env".to_string(),
+                "/run/graft/shared.env".to_string(),
+            ]),
+            ..Container::default()
+        });
+
+        let resolved = resolve(&config).unwrap();
+
+        assert_eq!(
+            resolved.container,
+            Some(ResolvedContainerSettings {
+                hostname: None,
+                user: None,
+                working_dir: None,
+                environment: None,
+                environment_file: Some(vec![
+                    "/etc/graft/app.env".to_string(),
+                    "/run/graft/shared.env".to_string(),
+                ]),
+            })
+        );
+
+        let json = serde_json::to_value(&resolved).unwrap();
+        assert_eq!(
+            json["container"]["environmentFile"][0],
+            "/etc/graft/app.env"
+        );
+        assert_eq!(
+            json["container"]["environmentFile"][1],
+            "/run/graft/shared.env"
+        );
+        assert_eq!(json["container"].get("environment"), None);
+    }
+
+    #[test]
+    fn empty_environment_file_entry_returns_error() {
+        let config = container_config(Container {
+            environment_file: Some(vec![String::new()]),
+            ..Container::default()
+        });
+
+        let result = resolve(&config);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn whitespace_environment_file_entry_returns_error() {
+        let config = container_config(Container {
+            environment_file: Some(vec!["  ".to_string()]),
+            ..Container::default()
+        });
+
+        let result = resolve(&config);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn control_character_in_environment_file_entry_returns_error() {
+        let config = container_config(Container {
+            environment_file: Some(vec!["/etc/graft/app\n.env".to_string()]),
             ..Container::default()
         });
 

@@ -85,6 +85,10 @@ let
         environmentLines = lib.concatMapStrings
           (key: "Environment=${key}=${environment.${key}}\n")
           environmentKeys;
+        environmentFile = container.environmentFile or [ ];
+        environmentFileLines = lib.concatMapStrings
+          (file: "EnvironmentFile=${file}\n")
+          environmentFile;
         service = ctr.service or { };
         restart = service.restart or null;
       in
@@ -105,6 +109,7 @@ let
         WorkingDir=${workingDir}
       ''
       + environmentLines
+      + environmentFileLines
       + lib.optionalString (restart != null) ''
 
       [Service]
