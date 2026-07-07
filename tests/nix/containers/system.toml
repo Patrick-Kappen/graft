@@ -5,6 +5,10 @@ name = "nix-check-system"
 hostname = "nix-check-system.local"
 user = "1000"
 workingDir = "/workspace"
+environmentFile = [
+  "/etc/graft/system.env",
+  "/run/graft/shared.env",
+]
 
 [config.container.environment]
 LOG_LEVEL = "debug"

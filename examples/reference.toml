@@ -30,6 +30,7 @@
 # entrypoint =
 # user =                         # literal Quadlet User; non-empty, no control characters; no UID/GID validation yet
 # workingDir =                   # literal Quadlet WorkingDir; non-empty, no control characters; no path existence check
+# environmentFile =              # literal Quadlet EnvironmentFile entries; non-empty, no control characters; user order preserved; files are not generated
 # stopSignal =
 # stopTimeout =
 

@@ -8,6 +8,10 @@ target = "user"
 hostname = "nix-check-user.local"
 user = "1000"
 workingDir = "/workspace"
+environmentFile = [
+  "/etc/graft/user.env",
+  "/run/graft/shared.env",
+]
 
 [config.container.environment]
 LOG_LEVEL = "debug"
