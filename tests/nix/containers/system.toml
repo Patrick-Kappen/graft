@@ -1,2 +1,5 @@
 version = 1
 name = "nix-check-system"
+
+[config.container]
+hostname = "nix-check-system.local"

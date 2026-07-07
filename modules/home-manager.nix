@@ -76,6 +76,8 @@ let
       let
         cmd = lib.escapeShellArgs ctr.runtime.command;
         env = containerEnvs.${name};
+        container = ctr.container or { };
+        hostname = container.hostname or null;
         service = ctr.service or { };
         restart = service.restart or null;
       in
@@ -85,6 +87,9 @@ let
         Rootfs=${env}:O
         Exec=${cmd}
         Volume=/nix/store:/nix/store:ro
+      ''
+      + lib.optionalString (hostname != null) ''
+        HostName=${hostname}
       ''
       + lib.optionalString (restart != null) ''
 

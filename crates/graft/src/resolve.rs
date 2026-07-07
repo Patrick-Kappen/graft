@@ -3,7 +3,7 @@
 use anyhow::{bail, Result};
 use serde::Serialize;
 
-use crate::config::schema::{ContainerConfig, DeployTarget, Runtime};
+use crate::config::schema::{Container, ContainerConfig, DeployTarget, Runtime};
 
 const SUPPORTED_VERSION: u32 = 1;
 const GRAFT_PAUSE_PACKAGE: &str = "graft-pause";
@@ -20,6 +20,9 @@ pub struct ResolvedContainer {
     pub deploy: ResolvedDeploy,
     /// Runtime settings used to build the rootfs and Quadlet `Exec=`.
     pub runtime: ResolvedRuntime,
+    /// Optional container settings rendered into Quadlet `[Container]`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub container: Option<ResolvedContainerSettings>,
     /// Optional systemd service settings.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub service: Option<ResolvedService>,
@@ -56,6 +59,15 @@ pub struct ResolvedRuntime {
     pub packages: Vec<String>,
     /// Command rendered as Quadlet `Exec=`.
     pub command: Vec<String>,
+}
+
+/// Resolved container settings.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolvedContainerSettings {
+    /// Optional hostname rendered as Quadlet `HostName=`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hostname: Option<String>,
 }
 
 /// Resolved service settings.
@@ -100,8 +112,45 @@ pub fn resolve(config: &ContainerConfig) -> Result<ResolvedContainer> {
             packages: resolve_packages(runtime)?,
             command: resolve_command(runtime)?,
         },
+        container: resolve_container(config)?,
         service: resolve_service(config)?,
     })
+}
+
+fn resolve_container(config: &ContainerConfig) -> Result<Option<ResolvedContainerSettings>> {
+    let container = config
+        .config
+        .as_ref()
+        .and_then(|config| config.container.as_ref());
+    let hostname = resolve_hostname(container)?;
+
+    if hostname.is_none() {
+        return Ok(None);
+    }
+
+    Ok(Some(ResolvedContainerSettings { hostname }))
+}
+
+fn resolve_hostname(container: Option<&Container>) -> Result<Option<String>> {
+    let Some(hostname) = container.and_then(|container| container.hostname.as_ref()) else {
+        return Ok(None);
+    };
+
+    validate_hostname(hostname)?;
+
+    Ok(Some(hostname.clone()))
+}
+
+fn validate_hostname(hostname: &str) -> Result<()> {
+    if hostname.trim().is_empty() {
+        bail!("container hostname cannot be empty");
+    }
+
+    if hostname.chars().any(char::is_control) {
+        bail!("container hostname cannot contain control characters");
+    }
+
+    Ok(())
 }
 
 fn validate_version(config: &ContainerConfig) -> Result<()> {
@@ -279,6 +328,18 @@ mod tests {
         }
     }
 
+    fn container_config(container: Container) -> ContainerConfig {
+        ContainerConfig {
+            version: Some(SUPPORTED_VERSION),
+            name: Some("dev".to_string()),
+            config: Some(Config {
+                container: Some(container),
+                ..Config::default()
+            }),
+            ..ContainerConfig::default()
+        }
+    }
+
     #[test]
     fn missing_version_returns_error() {
         let config = ContainerConfig {
@@ -447,6 +508,56 @@ mod tests {
     }
 
     #[test]
+    fn hostname_has_no_default() {
+        let resolved = resolve(&named_config()).unwrap();
+        assert_eq!(resolved.container, None);
+    }
+
+    #[test]
+    fn explicit_hostname_is_preserved() {
+        let config = container_config(Container {
+            hostname: Some("web.local".to_string()),
+            ..Container::default()
+        });
+
+        let resolved = resolve(&config).unwrap();
+
+        assert_eq!(
+            resolved.container,
+            Some(ResolvedContainerSettings {
+                hostname: Some("web.local".to_string()),
+            })
+        );
+
+        let json = serde_json::to_value(&resolved).unwrap();
+        assert_eq!(json["container"]["hostname"], "web.local");
+    }
+
+    #[test]
+    fn empty_hostname_returns_error() {
+        let config = container_config(Container {
+            hostname: Some("  ".to_string()),
+            ..Container::default()
+        });
+
+        let result = resolve(&config);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn control_character_in_hostname_returns_error() {
+        let config = container_config(Container {
+            hostname: Some("web\nlocal".to_string()),
+            ..Container::default()
+        });
+
+        let result = resolve(&config);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
     fn restart_has_no_default() {
         let resolved = resolve(&named_config()).unwrap();
         assert_eq!(resolved.service, None);
@@ -606,6 +717,7 @@ mod tests {
         let resolved = resolve(&named_config()).unwrap();
         let json = serde_json::to_value(&resolved).unwrap();
 
+        assert_eq!(json.get("container"), None);
         assert_eq!(json.get("service"), None);
         assert_eq!(json["deploy"].get("enable"), None);
     }

@@ -93,14 +93,20 @@
           };
 
           nixosRendered = nixosEval.config.environment.etc."containers/systemd/system.container".text;
+          nixosPlainRendered = nixosEval.config.environment.etc."containers/systemd/plain-system.container".text;
           homeManagerRendered = homeManagerEval.config.xdg.configFile."containers/systemd/user.container".text;
+          homeManagerPlainRendered = homeManagerEval.config.xdg.configFile."containers/systemd/plain-user.container".text;
         in
         {
           nixos-module-eval = assert lib.hasInfix "ContainerName=nix-check-system" nixosRendered;
+            assert lib.hasInfix "HostName=nix-check-system.local" nixosRendered;
+            assert !lib.hasInfix "HostName=" nixosPlainRendered;
             assert !(nixosEval.config.environment.etc ? "containers/systemd/user.container");
             pkgs.writeText "graft-nixos-module-eval" nixosRendered;
 
           home-manager-module-eval = assert lib.hasInfix "ContainerName=nix-check-user" homeManagerRendered;
+            assert lib.hasInfix "HostName=nix-check-user.local" homeManagerRendered;
+            assert !lib.hasInfix "HostName=" homeManagerPlainRendered;
             assert !(homeManagerEval.config.xdg.configFile ? "containers/systemd/system.container");
             pkgs.writeText "graft-home-manager-module-eval" homeManagerRendered;
         }

@@ -59,12 +59,25 @@ Implemented today:
 - `name` is required and must be a safe container name.
 - `deploy.target` defaults to `system`.
 - `deploy.enable = false` prevents rendering.
+- `config.container.hostname` is rendered as Quadlet `HostName=` when explicitly set.
 - `config.runtime.mode` supports only `rootfs-store`.
 - `config.runtime.packages` are mapped to Nix packages.
 - `graft-pause` is always added to the package list.
 - missing `config.runtime.command` becomes `['/bin/graft-pause']`.
 - explicit `config.runtime.command` is preserved.
 - `config.service.restart` is rendered only when explicitly set.
+
+### Hostname validation
+
+`config.container.hostname` is treated as a literal value for Quadlet
+`HostName=`.
+
+Current validation:
+
+- must not be empty or whitespace-only
+- must not contain control characters
+- no template expansion is performed
+- no DNS/FQDN validation is performed yet
 
 Not all fields from the annotated TOML reference are rendered yet. Fields that
 are parsed but not listed above should be treated as reserved/roadmap fields. See
