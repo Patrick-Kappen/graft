@@ -46,6 +46,7 @@ JSON:
 - `Exec=` comes from resolved `runtime.command`.
 - `Volume=/nix/store:/nix/store:ro` is always rendered for store symlinks.
 - Optional `[Service]` keys are rendered only when resolved JSON contains them.
+- Literal values escape `%` specifiers; generated command-line arguments also escape `$` variables.
 - `[Install]` is not rendered by default.
 
 ## Rootfs-store mapping
@@ -110,21 +111,24 @@ them:
 - `Volume=` from `config.filesystem.volumes`
 
 Environment files, published ports, and volumes preserve user order. Environment
-variables are sorted by key.
+variables are sorted by key. Literal `%` values are rendered as `%%`; literal `$`
+values that become generated command-line arguments are rendered as `$$`.
 
 ## Environment variables
 
 Environment variables are rendered as sorted, quoted systemd assignments:
 
 ```ini
+Environment="BRACED=pre$${HOME}post"
+Environment="DOLLAR=cost $$5"
 Environment="GREETING=hello world"
 Environment="PERCENT=100%%"
 Environment="QUOTED=say \"hi\""
 ```
 
-The whole `KEY=value` assignment is quoted. Double quotes, backslashes, and `%`
-specifier markers are escaped before rendering. Environment values are not a
-secret transport.
+The whole `KEY=value` assignment is quoted. Double quotes, backslashes, `%`
+specifier markers, and literal `$` characters are escaped before rendering.
+Environment values are not a secret transport.
 
 ## Service settings
 

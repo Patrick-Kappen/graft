@@ -94,8 +94,10 @@
 
           nixosRendered = nixosEval.config.environment.etc."containers/systemd/system.container".text;
           nixosPlainRendered = nixosEval.config.environment.etc."containers/systemd/plain-system.container".text;
+          nixosEscapeRendered = nixosEval.config.environment.etc."containers/systemd/escape-system.container".text;
           homeManagerRendered = homeManagerEval.config.xdg.configFile."containers/systemd/user.container".text;
           homeManagerPlainRendered = homeManagerEval.config.xdg.configFile."containers/systemd/plain-user.container".text;
+          homeManagerEscapeRendered = homeManagerEval.config.xdg.configFile."containers/systemd/escape-user.container".text;
           expectedEnvironmentLines = lib.concatStringsSep "\n" [
             ''Environment="EMPTY="''
             ''Environment="EQUALS=a=b"''
@@ -104,6 +106,11 @@
             ''Environment="PATHLIKE=C:\\Temp"''
             ''Environment="PERCENT=100%%"''
             ''Environment="QUOTED=say \"hi\""''
+          ];
+          expectedEscapedEnvironmentLines = lib.concatStringsSep "\n" [
+            "Environment=\"BRACED=pre$\${HOME}post\""
+            "Environment=\"DOLLAR=cost $$5\""
+            "Environment=\"PERCENT=100%%\""
           ];
         in
         {
@@ -117,6 +124,17 @@
             assert lib.hasInfix "Volume=/system-cache\nVolume=/tmp/graft-system-data:/data\nVolume=/tmp/graft-system-config:/config:ro" nixosRendered;
             assert lib.hasInfix "PublishPort=127.0.0.1:18080:80\nPublishPort=18443:443/tcp" nixosRendered;
             assert lib.hasInfix "\n[Service]\nRestartSec=10s\nTimeoutStartSec=2m\nTimeoutStopSec=30s" nixosRendered;
+            assert lib.hasInfix "ContainerName=escape-system" nixosEscapeRendered;
+            assert lib.hasInfix "HostName=escape%%system.local" nixosEscapeRendered;
+            assert lib.hasInfix "User=100%%0" nixosEscapeRendered;
+            assert lib.hasInfix "Group=100%%0" nixosEscapeRendered;
+            assert lib.hasInfix "WorkingDir=/work%%space/$$HOME" nixosEscapeRendered;
+            assert lib.hasInfix "Exec=/bin/echo 'pre$\${HOME}post' 100%% 'cost $$5'" nixosEscapeRendered;
+            assert lib.hasInfix expectedEscapedEnvironmentLines nixosEscapeRendered;
+            assert lib.hasInfix "EnvironmentFile=/etc/graft/$$USER-%%n.env" nixosEscapeRendered;
+            assert lib.hasInfix "Volume=/tmp/graft-$$USER-%%n:/data$$HOME-%%h:ro%%z" nixosEscapeRendered;
+            assert lib.hasInfix "PublishPort=127.0.0.1:18%%080:80" nixosEscapeRendered;
+            assert lib.hasInfix "\n[Service]\nRestartSec=10%%s" nixosEscapeRendered;
             assert !lib.hasInfix "HostName=" nixosPlainRendered;
             assert !lib.hasInfix "User=" nixosPlainRendered;
             assert !lib.hasInfix "Group=" nixosPlainRendered;
@@ -131,6 +149,7 @@
             assert !lib.hasInfix "TimeoutStartSec=" nixosPlainRendered;
             assert !lib.hasInfix "TimeoutStopSec=" nixosPlainRendered;
             assert !(nixosEval.config.environment.etc ? "containers/systemd/user.container");
+            assert !(nixosEval.config.environment.etc ? "containers/systemd/escape-user.container");
             pkgs.writeText "graft-nixos-module-eval" nixosRendered;
 
           home-manager-module-eval = assert lib.hasInfix "ContainerName=nix-check-user" homeManagerRendered;
@@ -143,6 +162,17 @@
             assert lib.hasInfix "Volume=/user-cache\nVolume=/tmp/graft-user-data:/data\nVolume=/tmp/graft-user-config:/config:ro" homeManagerRendered;
             assert lib.hasInfix "PublishPort=127.0.0.1:28080:80\nPublishPort=28443:443/tcp" homeManagerRendered;
             assert lib.hasInfix "\n[Service]\nRestartSec=10s\nTimeoutStartSec=2m\nTimeoutStopSec=30s" homeManagerRendered;
+            assert lib.hasInfix "ContainerName=escape-user" homeManagerEscapeRendered;
+            assert lib.hasInfix "HostName=escape%%user.local" homeManagerEscapeRendered;
+            assert lib.hasInfix "User=100%%0" homeManagerEscapeRendered;
+            assert lib.hasInfix "Group=100%%0" homeManagerEscapeRendered;
+            assert lib.hasInfix "WorkingDir=/work%%space/$$HOME" homeManagerEscapeRendered;
+            assert lib.hasInfix "Exec=/bin/echo 'pre$\${HOME}post' 100%% 'cost $$5'" homeManagerEscapeRendered;
+            assert lib.hasInfix expectedEscapedEnvironmentLines homeManagerEscapeRendered;
+            assert lib.hasInfix "EnvironmentFile=/etc/graft/$$USER-%%n.env" homeManagerEscapeRendered;
+            assert lib.hasInfix "Volume=/tmp/graft-$$USER-%%n:/data$$HOME-%%h:ro%%z" homeManagerEscapeRendered;
+            assert lib.hasInfix "PublishPort=127.0.0.1:28%%080:80" homeManagerEscapeRendered;
+            assert lib.hasInfix "\n[Service]\nRestartSec=10%%s" homeManagerEscapeRendered;
             assert !lib.hasInfix "HostName=" homeManagerPlainRendered;
             assert !lib.hasInfix "User=" homeManagerPlainRendered;
             assert !lib.hasInfix "Group=" homeManagerPlainRendered;
@@ -157,6 +187,7 @@
             assert !lib.hasInfix "TimeoutStartSec=" homeManagerPlainRendered;
             assert !lib.hasInfix "TimeoutStopSec=" homeManagerPlainRendered;
             assert !(homeManagerEval.config.xdg.configFile ? "containers/systemd/system.container");
+            assert !(homeManagerEval.config.xdg.configFile ? "containers/systemd/escape-system.container");
             pkgs.writeText "graft-home-manager-module-eval" homeManagerRendered;
         }
       );

@@ -75,6 +75,15 @@ Implemented today:
 - `config.service.restart` is rendered only when explicitly set.
 - `config.service.restartSec`, `timeoutStartSec`, and `timeoutStopSec` are rendered only when explicitly set.
 
+### Renderer escaping
+
+Rendered Quadlet text uses systemd-safe escaping while preserving literal TOML
+semantics. Literal `%` characters are written as `%%` so systemd does not treat
+them as specifiers. Values that Quadlet places in generated service command
+lines also write literal `$` as `$$` so systemd does not perform environment
+variable substitution. Quoted `Environment="KEY=value"` lines additionally
+escape double quotes and backslashes for systemd syntax.
+
 ### Container field validation
 
 `config.container.hostname` is treated as a literal value for Quadlet
@@ -122,8 +131,8 @@ only sets the process working directory inside the container.
 `config.container.environment` is rendered as quoted Quadlet `Environment=`
 assignments. Output is sorted by key for deterministic builds. The whole
 `KEY=value` assignment is double-quoted so values may contain spaces or `=`.
-Double quotes, backslashes, and `%` specifier markers are escaped for systemd
-syntax.
+Double quotes, backslashes, `%` specifier markers, and literal `$` characters
+are escaped for systemd syntax and command-line substitution.
 
 Current environment validation:
 

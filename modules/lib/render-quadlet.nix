@@ -1,12 +1,18 @@
 { lib }:
 
 let
-  escapeSystemdQuoted = value:
-    lib.replaceStrings [ "\\" "\"" "%" ] [ "\\\\" "\\\"" "%%" ] value;
+  escapeSystemdExecArg = value:
+    lib.replaceStrings [ "%" "$" ] [ "%%" "$$" ] (toString value);
+
+  escapeSystemdUnitValue = value:
+    lib.replaceStrings [ "%" ] [ "%%" ] (toString value);
+
+  escapeSystemdQuotedExecArg = value:
+    lib.replaceStrings [ "\\" "\"" "%" "$" ] [ "\\\\" "\\\"" "%%" "$$" ] (toString value);
 
   renderQuadletFile = { ctr, env }:
     let
-      cmd = lib.escapeShellArgs ctr.runtime.command;
+      cmd = escapeSystemdExecArg (lib.escapeShellArgs ctr.runtime.command);
       container = ctr.container or { };
       hostname = container.hostname or null;
       user = container.user or null;
@@ -17,11 +23,11 @@ let
       environmentLines = lib.concatMapStrings
         (key:
           let assignment = "${key}=${environment.${key}}";
-          in "Environment=\"${escapeSystemdQuoted assignment}\"\n")
+          in "Environment=\"${escapeSystemdQuotedExecArg assignment}\"\n")
         environmentKeys;
       environmentFile = container.environmentFile or [ ];
       environmentFileLines = lib.concatMapStrings
-        (file: "EnvironmentFile=${file}\n")
+        (file: "EnvironmentFile=${escapeSystemdExecArg file}\n")
         environmentFile;
       filesystem = ctr.filesystem or { };
       volumes = filesystem.volumes or [ ];
@@ -39,42 +45,42 @@ let
               else
                 "${source}:${target}:${mode}";
           in
-          "Volume=${mount}\n")
+          "Volume=${escapeSystemdExecArg mount}\n")
         volumes;
       network = ctr.network or { };
       publish = network.publish or [ ];
       publishLines = lib.concatMapStrings
-        (port: "PublishPort=${port}\n")
+        (port: "PublishPort=${escapeSystemdExecArg port}\n")
         publish;
       service = ctr.service or { };
       restart = service.restart or null;
       restartSec = service.restartSec or null;
       timeoutStartSec = service.timeoutStartSec or null;
       timeoutStopSec = service.timeoutStopSec or null;
-      serviceLines = lib.optionalString (restart != null) "Restart=${restart}\n"
-        + lib.optionalString (restartSec != null) "RestartSec=${restartSec}\n"
-        + lib.optionalString (timeoutStartSec != null) "TimeoutStartSec=${timeoutStartSec}\n"
-        + lib.optionalString (timeoutStopSec != null) "TimeoutStopSec=${timeoutStopSec}\n";
+      serviceLines = lib.optionalString (restart != null) "Restart=${escapeSystemdUnitValue restart}\n"
+        + lib.optionalString (restartSec != null) "RestartSec=${escapeSystemdUnitValue restartSec}\n"
+        + lib.optionalString (timeoutStartSec != null) "TimeoutStartSec=${escapeSystemdUnitValue timeoutStartSec}\n"
+        + lib.optionalString (timeoutStopSec != null) "TimeoutStopSec=${escapeSystemdUnitValue timeoutStopSec}\n";
       serviceSection = lib.optionalString (serviceLines != "") "\n[Service]\n${serviceLines}";
     in
     ''
       [Container]
-      ContainerName=${ctr.name}
-      Rootfs=${env}:O
+      ContainerName=${escapeSystemdExecArg ctr.name}
+      Rootfs=${escapeSystemdExecArg env}:O
       Exec=${cmd}
       Volume=/nix/store:/nix/store:ro
     ''
     + lib.optionalString (hostname != null) ''
-      HostName=${hostname}
+      HostName=${escapeSystemdExecArg hostname}
     ''
     + lib.optionalString (user != null) ''
-      User=${user}
+      User=${escapeSystemdExecArg user}
     ''
     + lib.optionalString (group != null) ''
-      Group=${group}
+      Group=${escapeSystemdExecArg group}
     ''
     + lib.optionalString (workingDir != null) ''
-      WorkingDir=${workingDir}
+      WorkingDir=${escapeSystemdExecArg workingDir}
     ''
     + environmentLines
     + environmentFileLines
