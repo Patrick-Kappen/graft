@@ -106,7 +106,7 @@
             assert lib.hasInfix "EnvironmentFile=/etc/graft/system.env\nEnvironmentFile=/run/graft/shared.env" nixosRendered;
             assert lib.hasInfix "Volume=/system-cache\nVolume=/tmp/graft-system-data:/data\nVolume=/tmp/graft-system-config:/config:ro" nixosRendered;
             assert lib.hasInfix "PublishPort=127.0.0.1:18080:80\nPublishPort=18443:443/tcp" nixosRendered;
-            assert lib.hasInfix "RestartSec=10s\nTimeoutStartSec=2m\nTimeoutStopSec=30s" nixosRendered;
+            assert lib.hasInfix "\n[Service]\nRestartSec=10s\nTimeoutStartSec=2m\nTimeoutStopSec=30s" nixosRendered;
             assert !lib.hasInfix "HostName=" nixosPlainRendered;
             assert !lib.hasInfix "User=" nixosPlainRendered;
             assert !lib.hasInfix "WorkingDir=" nixosPlainRendered;
