@@ -71,6 +71,9 @@ pub struct ResolvedContainerSettings {
     /// Optional user rendered as Quadlet `User=`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user: Option<String>,
+    /// Optional working directory rendered as Quadlet `WorkingDir=`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub working_dir: Option<String>,
 }
 
 /// Resolved service settings.
@@ -127,12 +130,17 @@ fn resolve_container(config: &ContainerConfig) -> Result<Option<ResolvedContaine
         .and_then(|config| config.container.as_ref());
     let hostname = resolve_hostname(container)?;
     let user = resolve_user(container)?;
+    let working_dir = resolve_working_dir(container)?;
 
-    if hostname.is_none() && user.is_none() {
+    if hostname.is_none() && user.is_none() && working_dir.is_none() {
         return Ok(None);
     }
 
-    Ok(Some(ResolvedContainerSettings { hostname, user }))
+    Ok(Some(ResolvedContainerSettings {
+        hostname,
+        user,
+        working_dir,
+    }))
 }
 
 fn resolve_hostname(container: Option<&Container>) -> Result<Option<String>> {
@@ -174,6 +182,28 @@ fn validate_user(user: &str) -> Result<()> {
 
     if user.chars().any(char::is_control) {
         bail!("container user cannot contain control characters");
+    }
+
+    Ok(())
+}
+
+fn resolve_working_dir(container: Option<&Container>) -> Result<Option<String>> {
+    let Some(working_dir) = container.and_then(|container| container.working_dir.as_ref()) else {
+        return Ok(None);
+    };
+
+    validate_working_dir(working_dir)?;
+
+    Ok(Some(working_dir.clone()))
+}
+
+fn validate_working_dir(working_dir: &str) -> Result<()> {
+    if working_dir.trim().is_empty() {
+        bail!("container workingDir cannot be empty");
+    }
+
+    if working_dir.chars().any(char::is_control) {
+        bail!("container workingDir cannot contain control characters");
     }
 
     Ok(())
@@ -553,6 +583,7 @@ mod tests {
             Some(ResolvedContainerSettings {
                 hostname: Some("web.local".to_string()),
                 user: None,
+                working_dir: None,
             })
         );
 
@@ -596,6 +627,7 @@ mod tests {
 
         assert_eq!(container.hostname, Some("web.local".to_string()));
         assert_eq!(container.user, None);
+        assert_eq!(container.working_dir, None);
     }
 
     #[test]
@@ -612,12 +644,14 @@ mod tests {
             Some(ResolvedContainerSettings {
                 hostname: None,
                 user: Some("1000".to_string()),
+                working_dir: None,
             })
         );
 
         let json = serde_json::to_value(&resolved).unwrap();
         assert_eq!(json["container"]["user"], "1000");
         assert_eq!(json["container"].get("hostname"), None);
+        assert_eq!(json["container"].get("workingDir"), None);
     }
 
     #[test]
@@ -635,6 +669,7 @@ mod tests {
             Some(ResolvedContainerSettings {
                 hostname: Some("web.local".to_string()),
                 user: Some("1000".to_string()),
+                working_dir: None,
             })
         );
     }
@@ -655,6 +690,75 @@ mod tests {
     fn control_character_in_user_returns_error() {
         let config = container_config(Container {
             user: Some("1000\n".to_string()),
+            ..Container::default()
+        });
+
+        let result = resolve(&config);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn explicit_working_dir_is_preserved() {
+        let config = container_config(Container {
+            working_dir: Some("/workspace".to_string()),
+            ..Container::default()
+        });
+
+        let resolved = resolve(&config).unwrap();
+
+        assert_eq!(
+            resolved.container,
+            Some(ResolvedContainerSettings {
+                hostname: None,
+                user: None,
+                working_dir: Some("/workspace".to_string()),
+            })
+        );
+
+        let json = serde_json::to_value(&resolved).unwrap();
+        assert_eq!(json["container"]["workingDir"], "/workspace");
+        assert_eq!(json["container"].get("hostname"), None);
+        assert_eq!(json["container"].get("user"), None);
+    }
+
+    #[test]
+    fn hostname_user_and_working_dir_are_preserved_together() {
+        let config = container_config(Container {
+            hostname: Some("web.local".to_string()),
+            user: Some("1000".to_string()),
+            working_dir: Some("/workspace".to_string()),
+            ..Container::default()
+        });
+
+        let resolved = resolve(&config).unwrap();
+
+        assert_eq!(
+            resolved.container,
+            Some(ResolvedContainerSettings {
+                hostname: Some("web.local".to_string()),
+                user: Some("1000".to_string()),
+                working_dir: Some("/workspace".to_string()),
+            })
+        );
+    }
+
+    #[test]
+    fn empty_working_dir_returns_error() {
+        let config = container_config(Container {
+            working_dir: Some("  ".to_string()),
+            ..Container::default()
+        });
+
+        let result = resolve(&config);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn control_character_in_working_dir_returns_error() {
+        let config = container_config(Container {
+            working_dir: Some("/work\nspace".to_string()),
             ..Container::default()
         });
 

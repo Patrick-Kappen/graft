@@ -29,7 +29,7 @@
 # hostname =                     # literal Quadlet HostName; non-empty, no control characters; no template expansion yet
 # entrypoint =
 # user =                         # literal Quadlet User; non-empty, no control characters; no UID/GID validation yet
-# workingDir =
+# workingDir =                   # literal Quadlet WorkingDir; non-empty, no control characters; no path existence check
 # stopSignal =
 # stopTimeout =
 

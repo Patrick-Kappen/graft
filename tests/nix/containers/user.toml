@@ -7,3 +7,4 @@ target = "user"
 [config.container]
 hostname = "nix-check-user.local"
 user = "1000"
+workingDir = "/workspace"

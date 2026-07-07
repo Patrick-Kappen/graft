@@ -79,6 +79,7 @@ let
         container = ctr.container or { };
         hostname = container.hostname or null;
         user = container.user or null;
+        workingDir = container.workingDir or null;
         service = ctr.service or { };
         restart = service.restart or null;
       in
@@ -94,6 +95,9 @@ let
       ''
       + lib.optionalString (user != null) ''
         User=${user}
+      ''
+      + lib.optionalString (workingDir != null) ''
+        WorkingDir=${workingDir}
       ''
       + lib.optionalString (restart != null) ''
 
