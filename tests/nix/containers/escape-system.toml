@@ -1,0 +1,28 @@
+version = 1
+name = "escape-system"
+
+[config.runtime]
+command = ["/bin/echo", "pre${HOME}post", "100%", "cost $5"]
+
+[config.container]
+hostname = "escape%system.local"
+user = "100%0"
+group = "100%0"
+workingDir = "/work%space/$HOME"
+environmentFile = ["/etc/graft/$USER-%n.env"]
+
+[config.container.environment]
+BRACED = "pre${HOME}post"
+DOLLAR = "cost $5"
+PERCENT = "100%"
+
+[[config.filesystem.volumes]]
+source = "/tmp/graft-$USER-%n"
+target = "/data$HOME-%h"
+mode = "ro%z"
+
+[config.network]
+publish = ["127.0.0.1:18%080:80"]
+
+[config.service]
+restartSec = "10%s"

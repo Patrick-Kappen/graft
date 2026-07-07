@@ -78,7 +78,7 @@ For broad syntaxes, prefer line-safe passthrough:
 
 - reject empty or whitespace-only values when the field is present
 - reject control characters
-- render mechanically
+- render mechanically with shared renderer escaping for systemd syntax
 - do not add a parser, allowlist, or policy without a dedicated issue
 
 Current examples:
