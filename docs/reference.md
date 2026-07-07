@@ -61,6 +61,7 @@ Implemented today:
 - `deploy.enable = false` prevents rendering.
 - `config.container.hostname` is rendered as Quadlet `HostName=` when explicitly set.
 - `config.container.user` is rendered as Quadlet `User=` when explicitly set.
+- `config.container.group` is rendered as Quadlet `Group=` when explicitly set.
 - `config.container.workingDir` is rendered as Quadlet `WorkingDir=` when explicitly set.
 - `config.container.environment` is rendered as sorted Quadlet `Environment=KEY=value` lines when explicitly set.
 - `config.container.environmentFile` is rendered as ordered Quadlet `EnvironmentFile=` lines when explicitly set.
@@ -92,8 +93,17 @@ Current user validation:
 
 - must not be empty or whitespace-only
 - must not contain control characters
-- no UID/GID syntax validation is performed yet
-- `config.container.group` is not rendered yet
+- no UID syntax validation is performed yet
+
+`config.container.group` is treated as a literal value for Quadlet `Group=`.
+It can be configured independently from `config.container.user`.
+
+Current group validation:
+
+- must not be empty or whitespace-only
+- must not contain control characters
+- no GID syntax validation is performed yet
+- `GroupAdd=`, supplemental groups, UID/GID maps, user namespaces, and security hardening defaults are not rendered
 
 `config.container.workingDir` is treated as a literal value for Quadlet
 `WorkingDir=`.
