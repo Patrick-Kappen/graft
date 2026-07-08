@@ -337,6 +337,9 @@ nix develop .#ci -c bash -lc '
 ```bash
 nix develop .#ci -c actionlint
 nix develop .#ci -c zizmor --no-progress --color never --min-confidence high .github/workflows/*.yml .github/actions/setup-nix/action.yml
+nix develop .#ci -c bash -lc 'git ls-files "*.nix" -z | xargs -0 nixfmt --check'
+nix develop .#ci -c statix check .
+nix develop .#ci -c deadnix --fail .
 nix develop .#ci -c mdbook build
 nix build .#packages.x86_64-linux.default
 nix build \
