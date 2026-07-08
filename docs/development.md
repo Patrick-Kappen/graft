@@ -127,14 +127,9 @@ Local unit/module tests prove evaluation and rendering. Runtime-sensitive
 features should also be validated after merge through a real
 NixOS → Quadlet → Podman path.
 
-For privileged local runtime tests, use the dedicated tmux socket/session:
-
-```bash
-tmux -S /tmp/AI-tests.sock attach -t AI-tests
-```
-
-Create a new window per test. The user enters sudo passwords there; do not pass
-or log sudo passwords through the agent session.
+Run privileged runtime checks on a local test machine where the operator can
+approve privilege escalation directly. Do not require maintainer-specific
+sessions, sockets, or other local-only workflow details in the public manual.
 
 Runtime test output should check the generated unit text and the Podman runtime
 state where possible.
