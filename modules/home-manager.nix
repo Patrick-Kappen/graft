@@ -1,4 +1,9 @@
-{ config, lib, pkgs, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}:
 
 let
   cfg = config.programs.graft;
@@ -35,13 +40,12 @@ in
       }
     ];
 
-    xdg.configFile = lib.mapAttrs'
-      (name: _:
-        lib.nameValuePair
-          "containers/systemd/${lib.removeSuffix ".toml" name}.container"
-          { text = materialised.quadletFiles.${name}; }
-      )
-      materialised.containers;
+    xdg.configFile = lib.mapAttrs' (
+      name: _:
+      lib.nameValuePair "containers/systemd/${lib.removeSuffix ".toml" name}.container" {
+        text = materialised.quadletFiles.${name};
+      }
+    ) materialised.containers;
 
   };
 }

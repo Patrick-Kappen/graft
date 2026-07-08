@@ -3,9 +3,13 @@
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
 
-  outputs = { self, nixpkgs, ... }:
+  outputs =
+    { self, nixpkgs, ... }:
     let
-      systems = [ "x86_64-linux" "aarch64-linux" ];
+      systems = [
+        "x86_64-linux"
+        "aarch64-linux"
+      ];
       forAllSystems = nixpkgs.lib.genAttrs systems;
     in
     {
@@ -18,9 +22,12 @@
         programs.graft.package = lib.mkDefault self.packages.${pkgs.stdenv.hostPlatform.system}.default;
       };
 
-      packages = forAllSystems (system:
-        let pkgs = nixpkgs.legacyPackages.${system};
-        in {
+      packages = forAllSystems (
+        system:
+        let
+          pkgs = nixpkgs.legacyPackages.${system};
+        in
+        {
           default = pkgs.rustPlatform.buildRustPackage {
             pname = "graft";
             version = "0.2.0-alpha.1";
@@ -38,29 +45,36 @@
         }
       );
 
-      checks = forAllSystems (system:
+      checks = forAllSystems (
+        system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
-          lib = pkgs.lib;
+          inherit (pkgs) lib;
 
           moduleTestOptions = { lib, ... }: {
-            options.assertions = lib.mkOption {
-              type = lib.types.listOf lib.types.anything;
-              default = [ ];
-            };
+            options = {
+              assertions = lib.mkOption {
+                type = lib.types.listOf lib.types.anything;
+                default = [ ];
+              };
 
-            options.environment.etc = lib.mkOption {
-              type = lib.types.attrsOf (lib.types.submodule {
-                options.text = lib.mkOption { type = lib.types.str; };
-              });
-              default = { };
-            };
+              environment.etc = lib.mkOption {
+                type = lib.types.attrsOf (
+                  lib.types.submodule {
+                    options.text = lib.mkOption { type = lib.types.str; };
+                  }
+                );
+                default = { };
+              };
 
-            options.xdg.configFile = lib.mkOption {
-              type = lib.types.attrsOf (lib.types.submodule {
-                options.text = lib.mkOption { type = lib.types.str; };
-              });
-              default = { };
+              xdg.configFile = lib.mkOption {
+                type = lib.types.attrsOf (
+                  lib.types.submodule {
+                    options.text = lib.mkOption { type = lib.types.str; };
+                  }
+                );
+                default = { };
+              };
             };
           };
 
@@ -93,11 +107,16 @@
           };
 
           nixosRendered = nixosEval.config.environment.etc."containers/systemd/system.container".text;
-          nixosPlainRendered = nixosEval.config.environment.etc."containers/systemd/plain-system.container".text;
-          nixosEscapeRendered = nixosEval.config.environment.etc."containers/systemd/escape-system.container".text;
-          homeManagerRendered = homeManagerEval.config.xdg.configFile."containers/systemd/user.container".text;
-          homeManagerPlainRendered = homeManagerEval.config.xdg.configFile."containers/systemd/plain-user.container".text;
-          homeManagerEscapeRendered = homeManagerEval.config.xdg.configFile."containers/systemd/escape-user.container".text;
+          nixosPlainRendered =
+            nixosEval.config.environment.etc."containers/systemd/plain-system.container".text;
+          nixosEscapeRendered =
+            nixosEval.config.environment.etc."containers/systemd/escape-system.container".text;
+          homeManagerRendered =
+            homeManagerEval.config.xdg.configFile."containers/systemd/user.container".text;
+          homeManagerPlainRendered =
+            homeManagerEval.config.xdg.configFile."containers/systemd/plain-user.container".text;
+          homeManagerEscapeRendered =
+            homeManagerEval.config.xdg.configFile."containers/systemd/escape-user.container".text;
           expectedEnvironmentLines = lib.concatStringsSep "\n" [
             ''Environment="EMPTY="''
             ''Environment="EQUALS=a=b"''
@@ -112,20 +131,20 @@
             "Environment=\"DOLLAR=cost $$5\""
             "Environment=\"PERCENT=100%%\""
           ];
-          assertHasInfixes = content: infixes:
-            lib.all
-              (infix:
-                lib.assertMsg
-                  (lib.hasInfix infix content)
-                  "expected rendered output to contain ${builtins.toJSON infix}")
-              infixes;
-          assertNoInfixes = content: infixes:
-            lib.all
-              (infix:
-                lib.assertMsg
-                  (!(lib.hasInfix infix content))
-                  "expected rendered output not to contain ${builtins.toJSON infix}")
-              infixes;
+          assertHasInfixes =
+            content: infixes:
+            lib.all (
+              infix:
+              lib.assertMsg (lib.hasInfix infix content) "expected rendered output to contain ${builtins.toJSON infix}"
+            ) infixes;
+          assertNoInfixes =
+            content: infixes:
+            lib.all (
+              infix:
+              lib.assertMsg (
+                !(lib.hasInfix infix content)
+              ) "expected rendered output not to contain ${builtins.toJSON infix}"
+            ) infixes;
           commonRenderedInfixes = [
             "User=1000"
             "Group=1000"
@@ -156,12 +175,13 @@
             "TimeoutStopSec="
           ];
           renderAssertions =
-            { rendered
-            , plainRendered
-            , escapeRendered
-            , renderedInfixes
-            , escapeInfixes
-            , plainMissingInfixes
+            {
+              rendered,
+              plainRendered,
+              escapeRendered,
+              renderedInfixes,
+              escapeInfixes,
+              plainMissingInfixes,
             }:
             assertHasInfixes rendered (commonRenderedInfixes ++ renderedInfixes)
             && assertHasInfixes escapeRendered (commonEscapedInfixes ++ escapeInfixes)
@@ -224,9 +244,12 @@
         }
       );
 
-      devShells = forAllSystems (system:
-        let pkgs = nixpkgs.legacyPackages.${system};
-        in rec {
+      devShells = forAllSystems (
+        system:
+        let
+          pkgs = nixpkgs.legacyPackages.${system};
+        in
+        rec {
           ci = pkgs.mkShell {
             packages = with pkgs; [
               actionlint
@@ -234,11 +257,14 @@
               cargo-audit
               cargo-deny
               clippy
+              deadnix
               git
               gitleaks
               mdbook
+              nixfmt
               rustc
               rustfmt
+              statix
               zizmor
             ];
           };

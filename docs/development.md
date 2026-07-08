@@ -178,6 +178,9 @@ nix develop .#ci -c zizmor --no-progress --color never --min-confidence high .gi
 For Nix/module/docs changes:
 
 ```bash
+nix develop .#ci -c bash -lc 'git ls-files "*.nix" -z | xargs -0 nixfmt --check'
+nix develop .#ci -c statix check .
+nix develop .#ci -c deadnix --fail .
 nix build \
   .#checks.x86_64-linux.nixos-module-eval \
   .#checks.x86_64-linux.home-manager-module-eval \
