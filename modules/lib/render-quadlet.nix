@@ -19,7 +19,7 @@ let
       group = container.group or null;
       workingDir = container.workingDir or null;
       environment = container.environment or { };
-      environmentKeys = lib.sort builtins.lessThan (builtins.attrNames environment);
+      environmentKeys = builtins.attrNames environment;
       environmentLines = lib.concatMapStrings
         (key:
           let assignment = "${key}=${environment.${key}}";
