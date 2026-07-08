@@ -461,6 +461,10 @@ fn validate_volume_part(name: &str, value: &str) -> Result<()> {
         bail!("filesystem volume {name} cannot contain control characters");
     }
 
+    if value.contains(':') {
+        bail!("filesystem volume {name} cannot contain ':'");
+    }
+
     Ok(())
 }
 
@@ -1766,6 +1770,63 @@ mod tests {
         let result = resolve(&config);
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn colon_in_volume_target_returns_error() {
+        let config = filesystem_config(Filesystem {
+            volumes: Some(vec![FilesystemVolume {
+                source: None,
+                target: "/data:logs".to_string(),
+                mode: None,
+            }]),
+            ..Filesystem::default()
+        });
+
+        let error = resolve(&config).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "filesystem volume target cannot contain ':'"
+        );
+    }
+
+    #[test]
+    fn colon_in_volume_source_returns_error() {
+        let config = filesystem_config(Filesystem {
+            volumes: Some(vec![FilesystemVolume {
+                source: Some("/host:data".to_string()),
+                target: "/data".to_string(),
+                mode: None,
+            }]),
+            ..Filesystem::default()
+        });
+
+        let error = resolve(&config).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "filesystem volume source cannot contain ':'"
+        );
+    }
+
+    #[test]
+    fn colon_in_volume_mode_returns_error() {
+        let config = filesystem_config(Filesystem {
+            volumes: Some(vec![FilesystemVolume {
+                source: Some("/host/data".to_string()),
+                target: "/data".to_string(),
+                mode: Some("ro:z".to_string()),
+            }]),
+            ..Filesystem::default()
+        });
+
+        let error = resolve(&config).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "filesystem volume mode cannot contain ':'"
+        );
     }
 
     #[test]

@@ -41,9 +41,9 @@
 # KEY =                          # quoted Quadlet Environment="KEY=value"; sorted; key non-empty/no whitespace/no '='; value no control chars; quotes/backslashes/%/$ escaped
 
 # [[config.filesystem.volumes]]
-# source =                        # optional literal Quadlet Volume source; non-empty, no control characters; no existence check
-# target =                        # required literal Quadlet Volume target; non-empty, no control characters; no existence check
-# mode =                          # optional literal Quadlet Volume mode/options; requires source; non-empty, no control characters; no allowlist yet
+# source =                        # optional literal Quadlet Volume source; non-empty, no control characters, no ':'; no existence check
+# target =                        # required literal Quadlet Volume target; non-empty, no control characters, no ':'; no existence check
+# mode =                          # optional literal Quadlet Volume mode/options; requires source; non-empty, no control characters, no ':'; no allowlist yet
 
 # [config.network]
 # mode =
