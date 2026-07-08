@@ -15,14 +15,8 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - name: Install Nix
-        uses: cachix/install-nix-action@v31
-        with:
-          extra_nix_config: |
-            experimental-features = nix-command flakes
+      - name: Setup Nix
+        uses: ./.github/actions/setup-nix
 
       - name: Workflow lint
         run: nix develop .#ci -c actionlint
@@ -32,14 +26,8 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - name: Install Nix
-        uses: cachix/install-nix-action@v31
-        with:
-          extra_nix_config: |
-            experimental-features = nix-command flakes
+      - name: Setup Nix
+        uses: ./.github/actions/setup-nix
 
       - name: Rust checks
         run: |
@@ -56,14 +44,8 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - name: Install Nix
-        uses: cachix/install-nix-action@v31
-        with:
-          extra_nix_config: |
-            experimental-features = nix-command flakes
+      - name: Setup Nix
+        uses: ./.github/actions/setup-nix
 
       - name: Security checks
         run: nix develop .#ci -c bash -lc 'cd crates/graft && cargo-audit audit'
@@ -73,14 +55,8 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - name: Install Nix
-        uses: cachix/install-nix-action@v31
-        with:
-          extra_nix_config: |
-            experimental-features = nix-command flakes
+      - name: Setup Nix
+        uses: ./.github/actions/setup-nix
 
       - name: Docs checks
         run: nix develop .#ci -c mdbook build
@@ -90,14 +66,8 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - name: Install Nix
-        uses: cachix/install-nix-action@v31
-        with:
-          extra_nix_config: |
-            experimental-features = nix-command flakes
+      - name: Setup Nix
+        uses: ./.github/actions/setup-nix
 
       - name: Nix checks
         run: |
