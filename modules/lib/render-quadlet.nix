@@ -4,9 +4,6 @@ let
   escapeSystemdExecArg = value:
     lib.replaceStrings [ "%" "$" ] [ "%%" "$$" ] (toString value);
 
-  escapeSystemdUnitValue = value:
-    lib.replaceStrings [ "%" ] [ "%%" ] (toString value);
-
   escapeSystemdQuotedExecArg = value:
     lib.replaceStrings [ "\\" "\"" "%" "$" ] [ "\\\\" "\\\"" "%%" "$$" ] (toString value);
 
@@ -60,10 +57,10 @@ let
       restartSec = service.restartSec or null;
       timeoutStartSec = service.timeoutStartSec or null;
       timeoutStopSec = service.timeoutStopSec or null;
-      serviceLines = lib.optionalString (restart != null) "Restart=${escapeSystemdUnitValue restart}\n"
-        + lib.optionalString (restartSec != null) "RestartSec=${escapeSystemdUnitValue restartSec}\n"
-        + lib.optionalString (timeoutStartSec != null) "TimeoutStartSec=${escapeSystemdUnitValue timeoutStartSec}\n"
-        + lib.optionalString (timeoutStopSec != null) "TimeoutStopSec=${escapeSystemdUnitValue timeoutStopSec}\n";
+      serviceLines = lib.optionalString (restart != null) "Restart=${toString restart}\n"
+        + lib.optionalString (restartSec != null) "RestartSec=${toString restartSec}\n"
+        + lib.optionalString (timeoutStartSec != null) "TimeoutStartSec=${toString timeoutStartSec}\n"
+        + lib.optionalString (timeoutStopSec != null) "TimeoutStopSec=${toString timeoutStopSec}\n";
       serviceSection = lib.optionalString (serviceLines != "") "\n[Service]\n${serviceLines}";
     in
     ''

@@ -46,7 +46,7 @@ JSON:
 - `Exec=` comes from resolved `runtime.command`.
 - `Volume=/nix/store:/nix/store:ro` is always rendered for store symlinks.
 - Optional `[Service]` keys are rendered only when resolved JSON contains them.
-- Literal values escape `%` specifiers; generated command-line arguments also escape `$` variables.
+- `[Container]` values that become generated command-line arguments escape `%` specifiers and `$` variables.
 - `[Install]` is not rendered by default.
 
 ## Rootfs-store mapping
@@ -111,8 +111,8 @@ them:
 - `Volume=` from `config.filesystem.volumes`
 
 Environment files, published ports, and volumes preserve user order. Environment
-variables are sorted by key. Literal `%` values are rendered as `%%`; literal `$`
-values that become generated command-line arguments are rendered as `$$`.
+variables are sorted by key. Container values render literal `%` as `%%` and
+literal `$` as `$$` when they become generated command-line arguments.
 
 ## Environment variables
 
@@ -136,7 +136,8 @@ Service settings have no Graft defaults.
 
 A `[Service]` section is rendered only when at least one supported service field
 is explicitly set. Supported fields currently include `Restart=`, `RestartSec=`,
-`TimeoutStartSec=`, and `TimeoutStopSec=`.
+`TimeoutStartSec=`, and `TimeoutStopSec=`. Service values are copied verbatim
+into the generated unit and are not `%`-escaped by Graft.
 
 Example:
 
