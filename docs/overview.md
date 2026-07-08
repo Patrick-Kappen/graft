@@ -94,6 +94,10 @@ resolved = builtins.fromJSON (builtins.readFile resolvedJson);
 
 The JSON is a Nix store artefact, not a file to commit.
 
+Module-eval checks for this path should be built explicitly, for example with
+`nix build .#checks.x86_64-linux.nixos-module-eval`. Because they use IFD,
+`nix flake check` may omit them and must not be the only CI or release gate.
+
 Cache behaviour:
 
 ```text

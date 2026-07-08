@@ -146,7 +146,14 @@ nix develop .#ci -c bash -lc 'cd crates/graft && cargo clippy --all-targets -- -
 For Nix/module/docs changes:
 
 ```bash
+nix build \
+  .#checks.x86_64-linux.nixos-module-eval \
+  .#checks.x86_64-linux.home-manager-module-eval \
+  --print-out-paths
 nix flake check
 nix develop .#ci -c mdbook build
 git diff --check
 ```
+
+The module-eval checks use IFD, so build them explicitly. `nix flake check`
+may omit them and must not be the only Nix module gate.

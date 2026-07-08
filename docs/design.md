@@ -73,6 +73,10 @@ The CLI owns business logic:
 
 The CLI does not write JSON files into the repository.
 
+Checks that evaluate this IFD path should be built explicitly, for example with
+`nix build .#checks.x86_64-linux.nixos-module-eval`. `nix flake check` may omit
+IFD-backed checks, so CI and release gates must not rely on it alone.
+
 ## `graft-pause`
 
 `graft-pause` is a minimal keep-alive binary shipped by the same Rust crate as
