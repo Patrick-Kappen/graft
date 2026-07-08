@@ -191,15 +191,27 @@ fn resolve_container(config: &ContainerConfig) -> Result<Option<ResolvedContaine
         .config
         .as_ref()
         .and_then(|config| config.container.as_ref());
-    let hostname = resolve_hostname(container)?;
-    let user = resolve_user(container)?;
-    let group = resolve_group(container)?;
+    let hostname = resolve_literal(
+        container.and_then(|container| container.hostname.as_deref()),
+        |hostname| validate_non_empty_no_control("container hostname", hostname),
+    )?;
+    let user = resolve_literal(
+        container.and_then(|container| container.user.as_deref()),
+        |user| validate_non_empty_no_control("container user", user),
+    )?;
+    let group = resolve_literal(
+        container.and_then(|container| container.group.as_deref()),
+        |group| validate_non_empty_no_control("container group", group),
+    )?;
 
     if group.is_some() && user.is_none() {
         bail!("container group requires container user");
     }
 
-    let working_dir = resolve_working_dir(container)?;
+    let working_dir = resolve_literal(
+        container.and_then(|container| container.working_dir.as_deref()),
+        |working_dir| validate_non_empty_no_control("container workingDir", working_dir),
+    )?;
     let environment = resolve_environment(container)?;
     let environment_file = resolve_environment_file(container)?;
 
@@ -223,14 +235,17 @@ fn resolve_container(config: &ContainerConfig) -> Result<Option<ResolvedContaine
     }))
 }
 
-fn resolve_hostname(container: Option<&Container>) -> Result<Option<String>> {
-    let Some(hostname) = container.and_then(|container| container.hostname.as_ref()) else {
+fn resolve_literal<F>(value: Option<&str>, validate: F) -> Result<Option<String>>
+where
+    F: FnOnce(&str) -> Result<()>,
+{
+    let Some(value) = value else {
         return Ok(None);
     };
 
-    validate_hostname(hostname)?;
+    validate(value)?;
 
-    Ok(Some(hostname.clone()))
+    Ok(Some(value.to_owned()))
 }
 
 fn validate_not_empty_or_whitespace(field_name: &str, value: &str) -> Result<()> {
@@ -254,52 +269,6 @@ fn validate_non_empty_no_control(field_name: &str, value: &str) -> Result<()> {
     validate_no_control_characters(field_name, value)
 }
 
-fn validate_hostname(hostname: &str) -> Result<()> {
-    validate_non_empty_no_control("container hostname", hostname)
-}
-
-fn resolve_user(container: Option<&Container>) -> Result<Option<String>> {
-    let Some(user) = container.and_then(|container| container.user.as_ref()) else {
-        return Ok(None);
-    };
-
-    validate_user(user)?;
-
-    Ok(Some(user.clone()))
-}
-
-fn validate_user(user: &str) -> Result<()> {
-    validate_non_empty_no_control("container user", user)
-}
-
-fn resolve_group(container: Option<&Container>) -> Result<Option<String>> {
-    let Some(group) = container.and_then(|container| container.group.as_ref()) else {
-        return Ok(None);
-    };
-
-    validate_group(group)?;
-
-    Ok(Some(group.clone()))
-}
-
-fn validate_group(group: &str) -> Result<()> {
-    validate_non_empty_no_control("container group", group)
-}
-
-fn resolve_working_dir(container: Option<&Container>) -> Result<Option<String>> {
-    let Some(working_dir) = container.and_then(|container| container.working_dir.as_ref()) else {
-        return Ok(None);
-    };
-
-    validate_working_dir(working_dir)?;
-
-    Ok(Some(working_dir.clone()))
-}
-
-fn validate_working_dir(working_dir: &str) -> Result<()> {
-    validate_non_empty_no_control("container workingDir", working_dir)
-}
-
 fn resolve_environment(container: Option<&Container>) -> Result<Option<BTreeMap<String, String>>> {
     let Some(environment) = container.and_then(|container| container.environment.as_ref()) else {
         return Ok(None);
@@ -313,7 +282,7 @@ fn resolve_environment(container: Option<&Container>) -> Result<Option<BTreeMap<
 
     for (key, value) in environment {
         validate_environment_key(key)?;
-        validate_environment_value(value)?;
+        validate_no_control_characters("container environment values", value)?;
         resolved.insert(key.clone(), value.clone());
     }
 
@@ -334,10 +303,6 @@ fn validate_environment_key(key: &str) -> Result<()> {
     Ok(())
 }
 
-fn validate_environment_value(value: &str) -> Result<()> {
-    validate_no_control_characters("container environment values", value)
-}
-
 fn resolve_environment_file(container: Option<&Container>) -> Result<Option<Vec<String>>> {
     let Some(environment_file) =
         container.and_then(|container| container.environment_file.as_ref())
@@ -350,14 +315,10 @@ fn resolve_environment_file(container: Option<&Container>) -> Result<Option<Vec<
     }
 
     for entry in environment_file {
-        validate_environment_file_entry(entry)?;
+        validate_non_empty_no_control("container environmentFile entries", entry)?;
     }
 
     Ok(Some(environment_file.clone()))
-}
-
-fn validate_environment_file_entry(entry: &str) -> Result<()> {
-    validate_non_empty_no_control("container environmentFile entries", entry)
 }
 
 fn resolve_filesystem(config: &ContainerConfig) -> Result<Option<ResolvedFilesystem>> {
@@ -451,14 +412,10 @@ fn resolve_publish(network: Option<&Network>) -> Result<Option<Vec<String>>> {
     }
 
     for entry in publish {
-        validate_publish_entry(entry)?;
+        validate_non_empty_no_control("network publish entries", entry)?;
     }
 
     Ok(Some(publish.clone()))
-}
-
-fn validate_publish_entry(entry: &str) -> Result<()> {
-    validate_non_empty_no_control("network publish entries", entry)
 }
 
 fn validate_version(config: &ContainerConfig) -> Result<()> {
@@ -606,13 +563,10 @@ fn resolve_service(config: &ContainerConfig) -> Result<Option<ResolvedService>> 
 }
 
 fn resolve_restart_policy(service: Option<&Service>) -> Result<Option<String>> {
-    let Some(restart) = service.and_then(|service| service.restart.as_ref()) else {
-        return Ok(None);
-    };
-
-    validate_restart_policy(restart)?;
-
-    Ok(Some(restart.clone()))
+    resolve_literal(
+        service.and_then(|service| service.restart.as_deref()),
+        validate_restart_policy,
+    )
 }
 
 fn validate_restart_policy(restart: &str) -> Result<()> {
@@ -629,18 +583,10 @@ fn validate_restart_policy(restart: &str) -> Result<()> {
 }
 
 fn resolve_service_timing(value: Option<&str>, field_name: &str) -> Result<Option<String>> {
-    let Some(value) = value else {
-        return Ok(None);
-    };
-
-    validate_service_timing(value, field_name)?;
-
-    Ok(Some(value.to_string()))
-}
-
-fn validate_service_timing(value: &str, field_name: &str) -> Result<()> {
-    let field_name = format!("service {field_name}");
-    validate_non_empty_no_control(&field_name, value)
+    resolve_literal(value, |value| {
+        let field_name = format!("service {field_name}");
+        validate_non_empty_no_control(&field_name, value)
+    })
 }
 
 fn push_unique(packages: &mut Vec<String>, package: &str) {
