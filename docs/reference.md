@@ -165,11 +165,14 @@ Current filesystem volume validation:
 - `target` is required by the TOML schema
 - `target` must not be empty or whitespace-only
 - `target` must not contain control characters
+- `target` must not contain `:` because Graft assembles colon-separated `Volume=` text
 - optional `source`, when present, must not be empty or whitespace-only
 - optional `source`, when present, must not contain control characters
+- optional `source`, when present, must not contain `:` because Graft assembles colon-separated `Volume=` text
 - optional `mode`, when present, requires `source`
 - optional `mode`, when present, must not be empty or whitespace-only
 - optional `mode`, when present, must not contain control characters
+- optional `mode`, when present, must not contain `:` because Graft assembles colon-separated `Volume=` text
 - no path existence validation is performed
 - no mode allowlist is applied yet
 - no Quadlet `.volume` units are generated
