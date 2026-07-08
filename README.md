@@ -312,6 +312,7 @@ nix develop .#ci -c bash -lc '
   cargo test
   cargo clippy --all-targets -- -D warnings -D clippy::pedantic
   cargo-audit audit
+  cargo deny check --config ../../deny.toml
 '
 ```
 

@@ -232,6 +232,7 @@
               actionlint
               cargo
               cargo-audit
+              cargo-deny
               clippy
               git
               gitleaks
