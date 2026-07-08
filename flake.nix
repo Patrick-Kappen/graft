@@ -137,7 +137,7 @@
             "User=100%%0"
             "Group=100%%0"
             "WorkingDir=/work%%space/$$HOME"
-            "Exec=/bin/echo 'pre$\${HOME}post' 100%% 'cost $$5'"
+            "Exec=\"/bin/echo\" \"pre$\${HOME}post\" \"100%%\" \"cost $$5\" \"foo\\\\.bar\" \"C:\\\\Temp\" \"say \\\"hi\\\"\""
             expectedEscapedEnvironmentLines
             "EnvironmentFile=/etc/graft/$$USER-%%n.env"
             "Volume=/tmp/graft-$$USER-%%n:/data$$HOME-%%h:ro%%z"
