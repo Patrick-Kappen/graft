@@ -143,6 +143,13 @@ nix develop .#ci -c bash -lc 'cd crates/graft && cargo fmt --check && cargo test
 nix develop .#ci -c bash -lc 'cd crates/graft && cargo clippy --all-targets -- -D warnings -D clippy::pedantic'
 ```
 
+For dependency security and policy checks:
+
+```bash
+nix develop .#ci -c bash -lc 'cd crates/graft && cargo-audit audit'
+nix develop .#ci -c cargo deny --manifest-path crates/graft/Cargo.toml check --config deny.toml
+```
+
 For secret scanning, copy tracked files to a temporary directory so ignored local
 files stay out of scope:
 

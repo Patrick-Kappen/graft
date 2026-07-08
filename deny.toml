@@ -1,0 +1,32 @@
+# Cargo dependency policy for Graft.
+# Keep this file small and explicit; discuss license or source policy changes
+# before widening the allow lists.
+
+[advisories]
+# RustSec advisories must fail unless a dedicated issue documents an ignore.
+ignore = []
+
+[licenses]
+# Current dependency graph uses permissive Rust ecosystem licenses only.
+allow = [
+  "Apache-2.0",
+  "MIT",
+  "Unicode-3.0",
+]
+confidence-threshold = 0.8
+
+[bans]
+# Keep the dependency graph simple and intentional.
+multiple-versions = "deny"
+wildcards = "deny"
+allow = []
+deny = []
+skip = []
+skip-tree = []
+
+[sources]
+# All dependencies must come from crates.io unless explicitly discussed.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

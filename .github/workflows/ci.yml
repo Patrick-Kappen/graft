@@ -65,6 +65,8 @@ jobs:
           cargo-audit audit
           cd ../..
 
+          cargo deny --manifest-path crates/graft/Cargo.toml check --config deny.toml
+
           scan_root=$(mktemp -d)
           cleanup() {
             rm -rf "${scan_root}"
