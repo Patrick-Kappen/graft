@@ -395,14 +395,14 @@ fn resolve_volumes(
 }
 
 fn resolve_volume(volume: &FilesystemVolume) -> Result<ResolvedFilesystemVolume> {
-    validate_volume_target(&volume.target)?;
+    validate_volume_part("target", &volume.target)?;
 
     if let Some(source) = volume.source.as_deref() {
-        validate_volume_source(source)?;
+        validate_volume_part("source", source)?;
     }
 
     if let Some(mode) = volume.mode.as_deref() {
-        validate_volume_mode(mode)?;
+        validate_volume_part("mode", mode)?;
     }
 
     if volume.source.is_none() && volume.mode.is_some() {
@@ -414,18 +414,6 @@ fn resolve_volume(volume: &FilesystemVolume) -> Result<ResolvedFilesystemVolume>
         target: volume.target.clone(),
         mode: volume.mode.clone(),
     })
-}
-
-fn validate_volume_target(target: &str) -> Result<()> {
-    validate_volume_part("target", target)
-}
-
-fn validate_volume_source(source: &str) -> Result<()> {
-    validate_volume_part("source", source)
-}
-
-fn validate_volume_mode(mode: &str) -> Result<()> {
-    validate_volume_part("mode", mode)
 }
 
 fn validate_volume_part(name: &str, value: &str) -> Result<()> {
