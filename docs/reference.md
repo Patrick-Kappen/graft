@@ -10,11 +10,13 @@ parse-only today and do not yet affect Quadlet output.
 ## NixOS module
 
 ```nix
+{ inputs, pkgs, ... }:
 {
   imports = [ inputs.graft.nixosModules.graft ];
 
   services.graft = {
     enable = true;
+    package = inputs.graft.packages.${pkgs.stdenv.hostPlatform.system}.default;
     configRoot = ./containers;
   };
 }
@@ -23,7 +25,7 @@ parse-only today and do not yet affect Quadlet output.
 | Option | Type | Default | Description |
 |---|---|---|---|
 | `services.graft.enable` | bool | `false` | Enable system/rootful Graft containers. |
-| `services.graft.package` | package or null | flake package | Package providing `graft` and `graft-pause`. |
+| `services.graft.package` | package or null | `null` | Package providing `graft` and `graft-pause`; required when `configRoot` is set. |
 | `services.graft.configRoot` | path or null | `null` | Directory containing `*.toml` container definitions. |
 
 The NixOS module renders only resolved containers with `target = "system"` and
@@ -32,11 +34,13 @@ places files under `/etc/containers/systemd/`.
 ## Home Manager module
 
 ```nix
+{ inputs, pkgs, ... }:
 {
   imports = [ inputs.graft.homeManagerModules.graft ];
 
   programs.graft = {
     enable = true;
+    package = inputs.graft.packages.${pkgs.stdenv.hostPlatform.system}.default;
     configRoot = ./containers;
   };
 }
@@ -45,7 +49,7 @@ places files under `/etc/containers/systemd/`.
 | Option | Type | Default | Description |
 |---|---|---|---|
 | `programs.graft.enable` | bool | `false` | Enable user/rootless Graft containers. |
-| `programs.graft.package` | package or null | flake package | Package providing `graft` and `graft-pause`. |
+| `programs.graft.package` | package or null | `null` | Package providing `graft` and `graft-pause`; required when `configRoot` is set. |
 | `programs.graft.configRoot` | path or null | `null` | Directory containing `*.toml` container definitions. |
 
 The Home Manager module renders only resolved containers with `target = "user"`
@@ -64,7 +68,7 @@ Implemented today:
 - `config.container.group` is rendered as Quadlet `Group=` when explicitly set together with `config.container.user`.
 - `config.container.workingDir` is rendered as Quadlet `WorkingDir=` when explicitly set.
 - `config.container.environment` is rendered as sorted, quoted Quadlet `Environment="KEY=value"` lines when explicitly set.
-- `config.container.environmentFile` is rendered as ordered Quadlet `EnvironmentFile=` lines when explicitly set.
+- `config.container.environmentFile` is rendered as ordered, quoted Quadlet `EnvironmentFile="..."` lines when explicitly set.
 - `config.filesystem.volumes` is rendered as ordered Quadlet `Volume=` lines when explicitly set.
 - `config.network.publish` is rendered as ordered Quadlet `PublishPort=` lines when explicitly set.
 - `config.runtime.mode` supports only `rootfs-store`.
@@ -78,13 +82,15 @@ Implemented today:
 ### Renderer escaping
 
 Rendered `[Container]` values use systemd-safe escaping while preserving
-literal TOML semantics. Literal `%` characters are written as `%%` so systemd
-does not treat them as specifiers after Quadlet places them in generated service
-command lines. Values that become generated command-line arguments also write
-literal `$` as `$$` so systemd does not perform environment variable
-substitution. Quoted `Environment="KEY=value"` lines additionally escape double
-quotes and backslashes for systemd syntax. `[Service]` values are rendered
-verbatim because Quadlet copies them into the generated unit service section.
+literal TOML semantics. Command argv and `EnvironmentFile=` entries are
+rendered as quoted systemd arguments, escaping double quotes and backslashes.
+Literal `%` characters are written as `%%` so systemd does not treat them as
+specifiers after Quadlet places them in generated service command lines. Values
+that become generated command-line arguments also write literal `$` as `$$` so
+systemd does not perform environment variable substitution. Quoted
+`Environment="KEY=value"` lines also escape double quotes and backslashes for
+systemd syntax. `[Service]` values are rendered verbatim because Quadlet copies
+them into the generated unit service section.
 
 ### Container field validation
 
@@ -150,7 +156,8 @@ Current environment validation:
 - no environment file generation or host environment passthrough is performed
 
 `config.container.environmentFile` is treated as literal Quadlet
-`EnvironmentFile=` entries. User order is preserved.
+`EnvironmentFile=` entries. Entries are rendered as quoted systemd arguments so
+paths may contain spaces or backslashes. User order is preserved.
 
 Current environment file validation:
 

@@ -58,7 +58,7 @@ With no command set, Graft adds a tiny keep-alive process:
 [Container]
 ContainerName=node-dev
 Rootfs=/nix/store/...-graft-node-dev-env:O
-Exec=/bin/graft-pause
+Exec="/bin/graft-pause"
 Volume=/nix/store:/nix/store:ro
 ```
 
@@ -126,12 +126,13 @@ Add Graft as a flake input:
 Import the module and point it at a directory of TOML files:
 
 ```nix
-{ inputs, ... }:
+{ inputs, pkgs, ... }:
 {
   imports = [ inputs.graft.nixosModules.graft ];
 
   services.graft = {
     enable = true;
+    package = inputs.graft.packages.${pkgs.stdenv.hostPlatform.system}.default;
     configRoot = ./containers;
   };
 }
@@ -157,12 +158,13 @@ auto-start unless that behaviour is explicitly modelled in a future release.
 ## Quickstart: Home Manager user containers
 
 ```nix
-{ inputs, ... }:
+{ inputs, pkgs, ... }:
 {
   imports = [ inputs.graft.homeManagerModules.graft ];
 
   programs.graft = {
     enable = true;
+    package = inputs.graft.packages.${pkgs.stdenv.hostPlatform.system}.default;
     configRoot = ./containers;
   };
 }
@@ -242,12 +244,12 @@ restart = "on-failure"
 ## Current behaviour
 
 - `version = 1` is required.
-- Missing command → `Exec=/bin/graft-pause`.
+- Missing command → `Exec="/bin/graft-pause"`.
 - User command → preserved exactly.
 - Packages → `graft-pause` plus user packages, deduplicated.
 - Deploy target → defaults to `system`.
 - Container fields → `HostName=`, `User=`, `Group=`, and `WorkingDir=` render when explicitly configured.
-- Environment → sorted, quoted `Environment="KEY=value"` lines; environment files preserve user order.
+- Environment → sorted, quoted `Environment="KEY=value"` lines; quoted environment files preserve user order.
 - Filesystem/network → ordered `Volume=` and `PublishPort=` lines.
 - Service timing → `Restart=`, `RestartSec=`, `TimeoutStartSec=`, and `TimeoutStopSec=` render only when explicitly configured.
 - Autostart → not rendered by default.

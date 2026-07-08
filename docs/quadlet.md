@@ -66,7 +66,7 @@ Example without a user command:
 [Container]
 ContainerName=node-dev
 Rootfs=/nix/store/xyz-graft-node-dev-env:O
-Exec=/bin/graft-pause
+Exec="/bin/graft-pause"
 Volume=/nix/store:/nix/store:ro
 ```
 
@@ -76,7 +76,7 @@ Example with a user command:
 [Container]
 ContainerName=web
 Rootfs=/nix/store/xyz-graft-web-env:O
-Exec=node server.js
+Exec="node" "server.js"
 Volume=/nix/store:/nix/store:ro
 ```
 
@@ -88,8 +88,8 @@ Volume=/nix/store:/nix/store:ro
 packages = ["graft-pause", ...user packages]
 ```
 
-`Exec=/bin/graft-pause` is used only when the user does not set a command. If
-the user sets a command, that command becomes `Exec=`.
+`Exec="/bin/graft-pause"` is used only when the user does not set a command. If
+the user sets a command, that command becomes quoted `Exec=` argv.
 
 `graft-pause` exits cleanly on `SIGTERM` and `SIGINT`, so `systemctl stop` and
 `systemctl --user stop` can finish without a SIGKILL timeout.
@@ -111,7 +111,8 @@ them:
 - `Volume=` from `config.filesystem.volumes`
 
 Environment files, published ports, and volumes preserve user order. Environment
-variables are sorted by key. Container values render literal `%` as `%%` and
+variables are sorted by key. Environment files and command argv are quoted for
+systemd argument parsing. Container values render literal `%` as `%%` and
 literal `$` as `$$` when they become generated command-line arguments.
 
 ## Environment variables

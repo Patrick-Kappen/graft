@@ -138,7 +138,7 @@ A TOML without a command resolves to a Quadlet file like:
 [Container]
 ContainerName=node-dev
 Rootfs=/nix/store/xyz-graft-node-dev-env:O
-Exec=/bin/graft-pause
+Exec="/bin/graft-pause"
 Volume=/nix/store:/nix/store:ro
 ```
 
@@ -150,7 +150,7 @@ User=1000
 Group=1000
 WorkingDir=/workspace
 Environment="GREETING=hello world"
-EnvironmentFile=/run/graft/node-dev.env
+EnvironmentFile="/run/graft/node-dev.env"
 PublishPort=127.0.0.1:8080:8080
 Volume=/home/me/project:/workspace
 
