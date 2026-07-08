@@ -168,6 +168,13 @@ nix develop .#ci -c bash -lc '
 '
 ```
 
+For workflow changes:
+
+```bash
+nix develop .#ci -c actionlint
+nix develop .#ci -c zizmor --no-progress --color never --min-confidence high .github/workflows/*.yml .github/actions/setup-nix/action.yml
+```
+
 For Nix/module/docs changes:
 
 ```bash

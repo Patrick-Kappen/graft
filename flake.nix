@@ -239,6 +239,7 @@
               mdbook
               rustc
               rustfmt
+              zizmor
             ];
           };
 
