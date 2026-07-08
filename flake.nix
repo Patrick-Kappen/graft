@@ -139,7 +139,7 @@
             "WorkingDir=/work%%space/$$HOME"
             "Exec=\"/bin/echo\" \"pre$\${HOME}post\" \"100%%\" \"cost $$5\" \"foo\\\\.bar\" \"C:\\\\Temp\" \"say \\\"hi\\\"\""
             expectedEscapedEnvironmentLines
-            "EnvironmentFile=/etc/graft/$$USER-%%n.env"
+            "EnvironmentFile=\"/etc/graft/$$USER-%%n.env\"\nEnvironmentFile=\"/etc/graft/my config.env\"\nEnvironmentFile=\"/etc/graft/env\\\\prod.env\""
             "Volume=/tmp/graft-$$USER-%%n:/data$$HOME-%%h:ro%%z"
             "\n[Service]\nRestartSec=10%%s"
           ];
@@ -176,7 +176,7 @@
               renderedInfixes = [
                 "ContainerName=nix-check-system"
                 "HostName=nix-check-system.local"
-                "EnvironmentFile=/etc/graft/system.env\nEnvironmentFile=/run/graft/shared.env"
+                "EnvironmentFile=\"/etc/graft/system.env\"\nEnvironmentFile=\"/run/graft/shared.env\""
                 "Volume=/system-cache\nVolume=/tmp/graft-system-data:/data\nVolume=/tmp/graft-system-config:/config:ro"
                 "PublishPort=127.0.0.1:18080:80\nPublishPort=18443:443/tcp"
               ];
@@ -203,7 +203,7 @@
               renderedInfixes = [
                 "ContainerName=nix-check-user"
                 "HostName=nix-check-user.local"
-                "EnvironmentFile=/etc/graft/user.env\nEnvironmentFile=/run/graft/shared.env"
+                "EnvironmentFile=\"/etc/graft/user.env\"\nEnvironmentFile=\"/run/graft/shared.env\""
                 "Volume=/user-cache\nVolume=/tmp/graft-user-data:/data\nVolume=/tmp/graft-user-config:/config:ro"
                 "PublishPort=127.0.0.1:28080:80\nPublishPort=28443:443/tcp"
               ];
