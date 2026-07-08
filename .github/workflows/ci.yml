@@ -57,7 +57,23 @@ jobs:
         uses: ./.github/actions/setup-nix
 
       - name: Security checks
-        run: nix develop .#ci -c bash -lc 'cd crates/graft && cargo-audit audit'
+        run: |
+          nix develop .#ci -c bash <<'EOF'
+          set -euo pipefail
+
+          cd crates/graft
+          cargo-audit audit
+          cd ../..
+
+          scan_root=$(mktemp -d)
+          cleanup() {
+            rm -rf "${scan_root}"
+          }
+          trap cleanup EXIT
+
+          git ls-files -z | tar --null --files-from=- -cf - | tar -xf - -C "${scan_root}"
+          gitleaks dir --no-banner --no-color --redact "${scan_root}"
+          EOF
 
   docs:
     name: docs

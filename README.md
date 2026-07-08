@@ -315,6 +315,24 @@ nix develop .#ci -c bash -lc '
 '
 ```
 
+Secret scanning copies tracked files to a temporary directory so ignored local
+files stay out of scope:
+
+```bash
+nix develop .#ci -c bash -lc '
+  set -euo pipefail
+
+  scan_root=$(mktemp -d)
+  cleanup() {
+    rm -rf "${scan_root}"
+  }
+  trap cleanup EXIT
+
+  git ls-files -z | tar --null --files-from=- -cf - | tar -xf - -C "${scan_root}"
+  gitleaks dir --no-banner --no-color --redact "${scan_root}"
+'
+```
+
 ```bash
 nix develop .#ci -c actionlint
 nix develop .#ci -c mdbook build
