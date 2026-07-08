@@ -2,7 +2,7 @@ version = 1
 name = "escape-system"
 
 [config.runtime]
-command = ["/bin/echo", "pre${HOME}post", "100%", "cost $5"]
+command = ["/bin/echo", "pre${HOME}post", "100%", "cost $5", "foo\\.bar", "C:\\Temp", "say \"hi\""]
 
 [config.container]
 hostname = "escape%system.local"

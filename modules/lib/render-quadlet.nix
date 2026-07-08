@@ -10,9 +10,12 @@ let
   escapeSystemdQuotedExecArg = value:
     lib.replaceStrings [ "\\" "\"" "%" "$" ] [ "\\\\" "\\\"" "%%" "$$" ] (toString value);
 
+  quoteSystemdExecArg = value:
+    "\"${escapeSystemdQuotedExecArg value}\"";
+
   renderQuadletFile = { ctr, env }:
     let
-      cmd = escapeSystemdExecArg (lib.escapeShellArgs ctr.runtime.command);
+      cmd = lib.concatStringsSep " " (map quoteSystemdExecArg ctr.runtime.command);
       container = ctr.container or { };
       hostname = container.hostname or null;
       user = container.user or null;
