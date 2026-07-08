@@ -8,7 +8,7 @@
 # -----------------------------------------------------------------------------
 # Current primary schema
 # See docs/reference.md for the fields rendered today.
-# Rendered container values that become generated command-line arguments escape systemd % specifiers and $ variables.
+# Rendered command argv and environment-file entries are quoted for systemd parsing; generated command-line arguments escape systemd % specifiers and $ variables.
 # -----------------------------------------------------------------------------
 
 # version =
@@ -24,7 +24,7 @@
 # [config.runtime]
 # mode =
 # packages =
-# command =
+# command =                      # rendered as quoted Quadlet Exec argv; entries non-empty, no control characters
 
 # [config.container]
 # name =
@@ -33,7 +33,7 @@
 # user =                         # literal Quadlet User; non-empty, no control characters; no UID validation yet
 # group =                        # literal Quadlet Group; requires user; non-empty, no control characters; no GID validation yet
 # workingDir =                   # literal Quadlet WorkingDir; non-empty, no control characters; no path existence check
-# environmentFile =              # literal Quadlet EnvironmentFile entries; non-empty, no control characters; user order preserved; files are not generated
+# environmentFile =              # quoted literal Quadlet EnvironmentFile entries; non-empty, no control characters; user order preserved; files are not generated
 # stopSignal =
 # stopTimeout =
 

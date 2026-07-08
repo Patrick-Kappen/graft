@@ -5,12 +5,15 @@
 #
 # Then import this module (or inline it) in your Home Manager configuration.
 
-{ inputs, ... }:
+{ inputs, pkgs, ... }:
 {
   imports = [ inputs.graft.homeManagerModules.graft ];
 
   programs.graft = {
     enable = true;
+
+    # Package providing the graft CLI and graft-pause binary.
+    package = inputs.graft.packages.${pkgs.stdenv.hostPlatform.system}.default;
 
     # Directory containing your .toml container definitions.
     # Place it wherever makes sense in your repo.

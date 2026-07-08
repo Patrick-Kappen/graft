@@ -155,7 +155,7 @@ Graft uses a rootfs from the Nix store, not container images.
 [Container]
 ContainerName=node-dev
 Rootfs=/nix/store/...-graft-node-dev-env:O
-Exec=/bin/graft-pause
+Exec="/bin/graft-pause"
 Volume=/nix/store:/nix/store:ro
 ```
 
