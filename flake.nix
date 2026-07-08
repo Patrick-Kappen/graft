@@ -112,80 +112,112 @@
             "Environment=\"DOLLAR=cost $$5\""
             "Environment=\"PERCENT=100%%\""
           ];
+          assertHasInfixes = content: infixes:
+            lib.all
+              (infix:
+                lib.assertMsg
+                  (lib.hasInfix infix content)
+                  "expected rendered output to contain ${builtins.toJSON infix}")
+              infixes;
+          assertNoInfixes = content: infixes:
+            lib.all
+              (infix:
+                lib.assertMsg
+                  (!(lib.hasInfix infix content))
+                  "expected rendered output not to contain ${builtins.toJSON infix}")
+              infixes;
+          commonRenderedInfixes = [
+            "User=1000"
+            "Group=1000"
+            "WorkingDir=/workspace"
+            expectedEnvironmentLines
+            "\n[Service]\nRestartSec=10s\nTimeoutStartSec=2m\nTimeoutStopSec=30s"
+          ];
+          commonEscapedInfixes = [
+            "User=100%%0"
+            "Group=100%%0"
+            "WorkingDir=/work%%space/$$HOME"
+            "Exec=/bin/echo 'pre$\${HOME}post' 100%% 'cost $$5'"
+            expectedEscapedEnvironmentLines
+            "EnvironmentFile=/etc/graft/$$USER-%%n.env"
+            "Volume=/tmp/graft-$$USER-%%n:/data$$HOME-%%h:ro%%z"
+            "\n[Service]\nRestartSec=10%%s"
+          ];
+          commonPlainMissingInfixes = [
+            "HostName="
+            "User="
+            "Group="
+            "WorkingDir="
+            "Environment="
+            "EnvironmentFile="
+            "PublishPort="
+            "RestartSec="
+            "TimeoutStartSec="
+            "TimeoutStopSec="
+          ];
+          renderAssertions =
+            { rendered
+            , plainRendered
+            , escapeRendered
+            , renderedInfixes
+            , escapeInfixes
+            , plainMissingInfixes
+            }:
+            assertHasInfixes rendered (commonRenderedInfixes ++ renderedInfixes)
+            && assertHasInfixes escapeRendered (commonEscapedInfixes ++ escapeInfixes)
+            && assertNoInfixes plainRendered (commonPlainMissingInfixes ++ plainMissingInfixes);
         in
         {
-          nixos-module-eval = assert lib.hasInfix "ContainerName=nix-check-system" nixosRendered;
-            assert lib.hasInfix "HostName=nix-check-system.local" nixosRendered;
-            assert lib.hasInfix "User=1000" nixosRendered;
-            assert lib.hasInfix "Group=1000" nixosRendered;
-            assert lib.hasInfix "WorkingDir=/workspace" nixosRendered;
-            assert lib.hasInfix expectedEnvironmentLines nixosRendered;
-            assert lib.hasInfix "EnvironmentFile=/etc/graft/system.env\nEnvironmentFile=/run/graft/shared.env" nixosRendered;
-            assert lib.hasInfix "Volume=/system-cache\nVolume=/tmp/graft-system-data:/data\nVolume=/tmp/graft-system-config:/config:ro" nixosRendered;
-            assert lib.hasInfix "PublishPort=127.0.0.1:18080:80\nPublishPort=18443:443/tcp" nixosRendered;
-            assert lib.hasInfix "\n[Service]\nRestartSec=10s\nTimeoutStartSec=2m\nTimeoutStopSec=30s" nixosRendered;
-            assert lib.hasInfix "ContainerName=escape-system" nixosEscapeRendered;
-            assert lib.hasInfix "HostName=escape%%system.local" nixosEscapeRendered;
-            assert lib.hasInfix "User=100%%0" nixosEscapeRendered;
-            assert lib.hasInfix "Group=100%%0" nixosEscapeRendered;
-            assert lib.hasInfix "WorkingDir=/work%%space/$$HOME" nixosEscapeRendered;
-            assert lib.hasInfix "Exec=/bin/echo 'pre$\${HOME}post' 100%% 'cost $$5'" nixosEscapeRendered;
-            assert lib.hasInfix expectedEscapedEnvironmentLines nixosEscapeRendered;
-            assert lib.hasInfix "EnvironmentFile=/etc/graft/$$USER-%%n.env" nixosEscapeRendered;
-            assert lib.hasInfix "Volume=/tmp/graft-$$USER-%%n:/data$$HOME-%%h:ro%%z" nixosEscapeRendered;
-            assert lib.hasInfix "PublishPort=127.0.0.1:18%%080:80" nixosEscapeRendered;
-            assert lib.hasInfix "\n[Service]\nRestartSec=10%%s" nixosEscapeRendered;
-            assert !lib.hasInfix "HostName=" nixosPlainRendered;
-            assert !lib.hasInfix "User=" nixosPlainRendered;
-            assert !lib.hasInfix "Group=" nixosPlainRendered;
-            assert !lib.hasInfix "WorkingDir=" nixosPlainRendered;
-            assert !lib.hasInfix "Environment=" nixosPlainRendered;
-            assert !lib.hasInfix "EnvironmentFile=" nixosPlainRendered;
-            assert !lib.hasInfix "Volume=/system-cache" nixosPlainRendered;
-            assert !lib.hasInfix "Volume=/tmp/graft-system-data:/data" nixosPlainRendered;
-            assert !lib.hasInfix "Volume=/tmp/graft-system-config:/config:ro" nixosPlainRendered;
-            assert !lib.hasInfix "PublishPort=" nixosPlainRendered;
-            assert !lib.hasInfix "RestartSec=" nixosPlainRendered;
-            assert !lib.hasInfix "TimeoutStartSec=" nixosPlainRendered;
-            assert !lib.hasInfix "TimeoutStopSec=" nixosPlainRendered;
+          nixos-module-eval =
+            assert renderAssertions {
+              rendered = nixosRendered;
+              plainRendered = nixosPlainRendered;
+              escapeRendered = nixosEscapeRendered;
+              renderedInfixes = [
+                "ContainerName=nix-check-system"
+                "HostName=nix-check-system.local"
+                "EnvironmentFile=/etc/graft/system.env\nEnvironmentFile=/run/graft/shared.env"
+                "Volume=/system-cache\nVolume=/tmp/graft-system-data:/data\nVolume=/tmp/graft-system-config:/config:ro"
+                "PublishPort=127.0.0.1:18080:80\nPublishPort=18443:443/tcp"
+              ];
+              escapeInfixes = [
+                "ContainerName=escape-system"
+                "HostName=escape%%system.local"
+                "PublishPort=127.0.0.1:18%%080:80"
+              ];
+              plainMissingInfixes = [
+                "Volume=/system-cache"
+                "Volume=/tmp/graft-system-data:/data"
+                "Volume=/tmp/graft-system-config:/config:ro"
+              ];
+            };
             assert !(nixosEval.config.environment.etc ? "containers/systemd/user.container");
             assert !(nixosEval.config.environment.etc ? "containers/systemd/escape-user.container");
             pkgs.writeText "graft-nixos-module-eval" nixosRendered;
 
-          home-manager-module-eval = assert lib.hasInfix "ContainerName=nix-check-user" homeManagerRendered;
-            assert lib.hasInfix "HostName=nix-check-user.local" homeManagerRendered;
-            assert lib.hasInfix "User=1000" homeManagerRendered;
-            assert lib.hasInfix "Group=1000" homeManagerRendered;
-            assert lib.hasInfix "WorkingDir=/workspace" homeManagerRendered;
-            assert lib.hasInfix expectedEnvironmentLines homeManagerRendered;
-            assert lib.hasInfix "EnvironmentFile=/etc/graft/user.env\nEnvironmentFile=/run/graft/shared.env" homeManagerRendered;
-            assert lib.hasInfix "Volume=/user-cache\nVolume=/tmp/graft-user-data:/data\nVolume=/tmp/graft-user-config:/config:ro" homeManagerRendered;
-            assert lib.hasInfix "PublishPort=127.0.0.1:28080:80\nPublishPort=28443:443/tcp" homeManagerRendered;
-            assert lib.hasInfix "\n[Service]\nRestartSec=10s\nTimeoutStartSec=2m\nTimeoutStopSec=30s" homeManagerRendered;
-            assert lib.hasInfix "ContainerName=escape-user" homeManagerEscapeRendered;
-            assert lib.hasInfix "HostName=escape%%user.local" homeManagerEscapeRendered;
-            assert lib.hasInfix "User=100%%0" homeManagerEscapeRendered;
-            assert lib.hasInfix "Group=100%%0" homeManagerEscapeRendered;
-            assert lib.hasInfix "WorkingDir=/work%%space/$$HOME" homeManagerEscapeRendered;
-            assert lib.hasInfix "Exec=/bin/echo 'pre$\${HOME}post' 100%% 'cost $$5'" homeManagerEscapeRendered;
-            assert lib.hasInfix expectedEscapedEnvironmentLines homeManagerEscapeRendered;
-            assert lib.hasInfix "EnvironmentFile=/etc/graft/$$USER-%%n.env" homeManagerEscapeRendered;
-            assert lib.hasInfix "Volume=/tmp/graft-$$USER-%%n:/data$$HOME-%%h:ro%%z" homeManagerEscapeRendered;
-            assert lib.hasInfix "PublishPort=127.0.0.1:28%%080:80" homeManagerEscapeRendered;
-            assert lib.hasInfix "\n[Service]\nRestartSec=10%%s" homeManagerEscapeRendered;
-            assert !lib.hasInfix "HostName=" homeManagerPlainRendered;
-            assert !lib.hasInfix "User=" homeManagerPlainRendered;
-            assert !lib.hasInfix "Group=" homeManagerPlainRendered;
-            assert !lib.hasInfix "WorkingDir=" homeManagerPlainRendered;
-            assert !lib.hasInfix "Environment=" homeManagerPlainRendered;
-            assert !lib.hasInfix "EnvironmentFile=" homeManagerPlainRendered;
-            assert !lib.hasInfix "Volume=/user-cache" homeManagerPlainRendered;
-            assert !lib.hasInfix "Volume=/tmp/graft-user-data:/data" homeManagerPlainRendered;
-            assert !lib.hasInfix "Volume=/tmp/graft-user-config:/config:ro" homeManagerPlainRendered;
-            assert !lib.hasInfix "PublishPort=" homeManagerPlainRendered;
-            assert !lib.hasInfix "RestartSec=" homeManagerPlainRendered;
-            assert !lib.hasInfix "TimeoutStartSec=" homeManagerPlainRendered;
-            assert !lib.hasInfix "TimeoutStopSec=" homeManagerPlainRendered;
+          home-manager-module-eval =
+            assert renderAssertions {
+              rendered = homeManagerRendered;
+              plainRendered = homeManagerPlainRendered;
+              escapeRendered = homeManagerEscapeRendered;
+              renderedInfixes = [
+                "ContainerName=nix-check-user"
+                "HostName=nix-check-user.local"
+                "EnvironmentFile=/etc/graft/user.env\nEnvironmentFile=/run/graft/shared.env"
+                "Volume=/user-cache\nVolume=/tmp/graft-user-data:/data\nVolume=/tmp/graft-user-config:/config:ro"
+                "PublishPort=127.0.0.1:28080:80\nPublishPort=28443:443/tcp"
+              ];
+              escapeInfixes = [
+                "ContainerName=escape-user"
+                "HostName=escape%%user.local"
+                "PublishPort=127.0.0.1:28%%080:80"
+              ];
+              plainMissingInfixes = [
+                "Volume=/user-cache"
+                "Volume=/tmp/graft-user-data:/data"
+                "Volume=/tmp/graft-user-config:/config:ro"
+              ];
+            };
             assert !(homeManagerEval.config.xdg.configFile ? "containers/systemd/system.container");
             assert !(homeManagerEval.config.xdg.configFile ? "containers/systemd/escape-system.container");
             pkgs.writeText "graft-home-manager-module-eval" homeManagerRendered;
