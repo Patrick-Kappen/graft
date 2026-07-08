@@ -12,7 +12,7 @@ hostname = "escape%user.local"
 user = "100%0"
 group = "100%0"
 workingDir = "/work%space/$HOME"
-environmentFile = ["/etc/graft/$USER-%n.env"]
+environmentFile = ["/etc/graft/$USER-%n.env", "/etc/graft/my config.env", "/etc/graft/env\\prod.env"]
 
 [config.container.environment]
 BRACED = "pre${HOME}post"

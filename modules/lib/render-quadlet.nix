@@ -30,7 +30,7 @@ let
         environmentKeys;
       environmentFile = container.environmentFile or [ ];
       environmentFileLines = lib.concatMapStrings
-        (file: "EnvironmentFile=${escapeSystemdExecArg file}\n")
+        (file: "EnvironmentFile=${quoteSystemdExecArg file}\n")
         environmentFile;
       filesystem = ctr.filesystem or { };
       volumes = filesystem.volumes or [ ];
