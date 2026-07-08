@@ -233,6 +233,7 @@
               cargo
               cargo-audit
               clippy
+              gitleaks
               mdbook
               rustc
               rustfmt

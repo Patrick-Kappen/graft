@@ -143,6 +143,24 @@ nix develop .#ci -c bash -lc 'cd crates/graft && cargo fmt --check && cargo test
 nix develop .#ci -c bash -lc 'cd crates/graft && cargo clippy --all-targets -- -D warnings -D clippy::pedantic'
 ```
 
+For secret scanning, copy tracked files to a temporary directory so ignored local
+files stay out of scope:
+
+```bash
+nix develop .#ci -c bash -lc '
+  set -euo pipefail
+
+  scan_root=$(mktemp -d)
+  cleanup() {
+    rm -rf "${scan_root}"
+  }
+  trap cleanup EXIT
+
+  git ls-files -z | tar --null --files-from=- -cf - | tar -xf - -C "${scan_root}"
+  gitleaks dir --no-banner --no-color --redact "${scan_root}"
+'
+```
+
 For Nix/module/docs changes:
 
 ```bash
