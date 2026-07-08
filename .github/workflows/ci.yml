@@ -15,6 +15,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
       - name: Setup Nix
         uses: ./.github/actions/setup-nix
 
@@ -26,6 +29,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
       - name: Setup Nix
         uses: ./.github/actions/setup-nix
 
@@ -44,6 +50,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
       - name: Setup Nix
         uses: ./.github/actions/setup-nix
 
@@ -55,6 +64,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
       - name: Setup Nix
         uses: ./.github/actions/setup-nix
 
@@ -66,6 +78,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
       - name: Setup Nix
         uses: ./.github/actions/setup-nix
 
