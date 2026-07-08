@@ -317,5 +317,12 @@ nix develop .#ci -c bash -lc '
 nix develop .#ci -c actionlint
 nix develop .#ci -c mdbook build
 nix build .#packages.x86_64-linux.default
+nix build \
+  .#checks.x86_64-linux.nixos-module-eval \
+  .#checks.x86_64-linux.home-manager-module-eval \
+  --print-out-paths
 nix flake check
 ```
+
+The module-eval checks use IFD, so build them explicitly. Do not rely on
+`nix flake check` as the only Nix module gate.

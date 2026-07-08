@@ -43,4 +43,8 @@ jobs:
       - name: Nix checks
         run: |
           nix build .#packages.x86_64-linux.default
+          nix build \
+            .#checks.x86_64-linux.nixos-module-eval \
+            .#checks.x86_64-linux.home-manager-module-eval \
+            --print-out-paths
           nix flake check
