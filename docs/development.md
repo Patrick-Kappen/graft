@@ -7,13 +7,13 @@ contributors and release preparation.
 
 For every issue:
 
-1. read the issue, recent changelog entries, and learnings
+1. read the issue and related docs or code
 2. confirm scope before editing
 3. use one branch per issue
 4. keep changes focused
 5. update tests and docs with the code
 6. run the relevant checks
-7. record exactly one changelog line and one learning after approval
+7. note follow-up work in the issue or pull request
 
 Keep implementation decisions aligned with the main architecture:
 
