@@ -101,7 +101,7 @@ Examples:
 - volume rendering: `target`, `source:target`, `source:target:mode`
 - invalid volume rendering: `mode` without `source`
 - service rendering: restart-only, timing-only, restart plus timing
-- container identity: user-only, group-only, user plus group, neither
+- container identity: user-only, invalid group-only, user plus group, neither
 
 Prefer small resolver tests for semantic combinations and module-eval assertions
 for generated Quadlet text.

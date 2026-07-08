@@ -194,6 +194,11 @@ fn resolve_container(config: &ContainerConfig) -> Result<Option<ResolvedContaine
     let hostname = resolve_hostname(container)?;
     let user = resolve_user(container)?;
     let group = resolve_group(container)?;
+
+    if group.is_some() && user.is_none() {
+        bail!("container group requires container user");
+    }
+
     let working_dir = resolve_working_dir(container)?;
     let environment = resolve_environment(container)?;
     let environment_file = resolve_environment_file(container)?;
@@ -1101,31 +1106,15 @@ mod tests {
     }
 
     #[test]
-    fn explicit_group_is_preserved() {
+    fn group_without_user_returns_error() {
         let config = container_config(Container {
             group: Some("1000".to_string()),
             ..Container::default()
         });
 
-        let resolved = resolve(&config).unwrap();
+        let error = resolve(&config).unwrap_err();
 
-        assert_eq!(
-            resolved.container,
-            Some(ResolvedContainerSettings {
-                hostname: None,
-                user: None,
-                group: Some("1000".to_string()),
-                working_dir: None,
-                environment: None,
-                environment_file: None,
-            })
-        );
-
-        let json = serde_json::to_value(&resolved).unwrap();
-        assert_eq!(json["container"]["group"], "1000");
-        assert_eq!(json["container"].get("hostname"), None);
-        assert_eq!(json["container"].get("user"), None);
-        assert_eq!(json["container"].get("workingDir"), None);
+        assert_eq!(error.to_string(), "container group requires container user");
     }
 
     #[test]
