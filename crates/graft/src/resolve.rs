@@ -233,16 +233,29 @@ fn resolve_hostname(container: Option<&Container>) -> Result<Option<String>> {
     Ok(Some(hostname.clone()))
 }
 
-fn validate_hostname(hostname: &str) -> Result<()> {
-    if hostname.trim().is_empty() {
-        bail!("container hostname cannot be empty");
-    }
-
-    if hostname.chars().any(char::is_control) {
-        bail!("container hostname cannot contain control characters");
+fn validate_not_empty_or_whitespace(field_name: &str, value: &str) -> Result<()> {
+    if value.trim().is_empty() {
+        bail!("{field_name} cannot be empty");
     }
 
     Ok(())
+}
+
+fn validate_no_control_characters(field_name: &str, value: &str) -> Result<()> {
+    if value.chars().any(char::is_control) {
+        bail!("{field_name} cannot contain control characters");
+    }
+
+    Ok(())
+}
+
+fn validate_non_empty_no_control(field_name: &str, value: &str) -> Result<()> {
+    validate_not_empty_or_whitespace(field_name, value)?;
+    validate_no_control_characters(field_name, value)
+}
+
+fn validate_hostname(hostname: &str) -> Result<()> {
+    validate_non_empty_no_control("container hostname", hostname)
 }
 
 fn resolve_user(container: Option<&Container>) -> Result<Option<String>> {
@@ -256,15 +269,7 @@ fn resolve_user(container: Option<&Container>) -> Result<Option<String>> {
 }
 
 fn validate_user(user: &str) -> Result<()> {
-    if user.trim().is_empty() {
-        bail!("container user cannot be empty");
-    }
-
-    if user.chars().any(char::is_control) {
-        bail!("container user cannot contain control characters");
-    }
-
-    Ok(())
+    validate_non_empty_no_control("container user", user)
 }
 
 fn resolve_group(container: Option<&Container>) -> Result<Option<String>> {
@@ -278,15 +283,7 @@ fn resolve_group(container: Option<&Container>) -> Result<Option<String>> {
 }
 
 fn validate_group(group: &str) -> Result<()> {
-    if group.trim().is_empty() {
-        bail!("container group cannot be empty");
-    }
-
-    if group.chars().any(char::is_control) {
-        bail!("container group cannot contain control characters");
-    }
-
-    Ok(())
+    validate_non_empty_no_control("container group", group)
 }
 
 fn resolve_working_dir(container: Option<&Container>) -> Result<Option<String>> {
@@ -300,15 +297,7 @@ fn resolve_working_dir(container: Option<&Container>) -> Result<Option<String>> 
 }
 
 fn validate_working_dir(working_dir: &str) -> Result<()> {
-    if working_dir.trim().is_empty() {
-        bail!("container workingDir cannot be empty");
-    }
-
-    if working_dir.chars().any(char::is_control) {
-        bail!("container workingDir cannot contain control characters");
-    }
-
-    Ok(())
+    validate_non_empty_no_control("container workingDir", working_dir)
 }
 
 fn resolve_environment(container: Option<&Container>) -> Result<Option<BTreeMap<String, String>>> {
@@ -332,13 +321,7 @@ fn resolve_environment(container: Option<&Container>) -> Result<Option<BTreeMap<
 }
 
 fn validate_environment_key(key: &str) -> Result<()> {
-    if key.trim().is_empty() {
-        bail!("container environment keys cannot be empty");
-    }
-
-    if key.chars().any(char::is_control) {
-        bail!("container environment keys cannot contain control characters");
-    }
+    validate_non_empty_no_control("container environment keys", key)?;
 
     if key.chars().any(char::is_whitespace) {
         bail!("container environment keys cannot contain whitespace");
@@ -352,11 +335,7 @@ fn validate_environment_key(key: &str) -> Result<()> {
 }
 
 fn validate_environment_value(value: &str) -> Result<()> {
-    if value.chars().any(char::is_control) {
-        bail!("container environment values cannot contain control characters");
-    }
-
-    Ok(())
+    validate_no_control_characters("container environment values", value)
 }
 
 fn resolve_environment_file(container: Option<&Container>) -> Result<Option<Vec<String>>> {
@@ -378,15 +357,7 @@ fn resolve_environment_file(container: Option<&Container>) -> Result<Option<Vec<
 }
 
 fn validate_environment_file_entry(entry: &str) -> Result<()> {
-    if entry.trim().is_empty() {
-        bail!("container environmentFile entries cannot be empty");
-    }
-
-    if entry.chars().any(char::is_control) {
-        bail!("container environmentFile entries cannot contain control characters");
-    }
-
-    Ok(())
+    validate_non_empty_no_control("container environmentFile entries", entry)
 }
 
 fn resolve_filesystem(config: &ContainerConfig) -> Result<Option<ResolvedFilesystem>> {
@@ -458,13 +429,8 @@ fn validate_volume_mode(mode: &str) -> Result<()> {
 }
 
 fn validate_volume_part(name: &str, value: &str) -> Result<()> {
-    if value.trim().is_empty() {
-        bail!("filesystem volume {name} cannot be empty");
-    }
-
-    if value.chars().any(char::is_control) {
-        bail!("filesystem volume {name} cannot contain control characters");
-    }
+    let field_name = format!("filesystem volume {name}");
+    validate_non_empty_no_control(&field_name, value)?;
 
     if value.contains(':') {
         bail!("filesystem volume {name} cannot contain ':'");
@@ -504,15 +470,7 @@ fn resolve_publish(network: Option<&Network>) -> Result<Option<Vec<String>>> {
 }
 
 fn validate_publish_entry(entry: &str) -> Result<()> {
-    if entry.trim().is_empty() {
-        bail!("network publish entries cannot be empty");
-    }
-
-    if entry.chars().any(char::is_control) {
-        bail!("network publish entries cannot contain control characters");
-    }
-
-    Ok(())
+    validate_non_empty_no_control("network publish entries", entry)
 }
 
 fn validate_version(config: &ContainerConfig) -> Result<()> {
@@ -528,9 +486,7 @@ fn resolve_name(config: &ContainerConfig) -> Result<String> {
         bail!("container name is required");
     };
 
-    if name.trim().is_empty() {
-        bail!("container name cannot be empty");
-    }
+    validate_not_empty_or_whitespace("container name", name)?;
 
     if !is_safe_container_name(name) {
         bail!("container name contains unsupported characters");
@@ -672,9 +628,7 @@ fn resolve_restart_policy(service: Option<&Service>) -> Result<Option<String>> {
 }
 
 fn validate_restart_policy(restart: &str) -> Result<()> {
-    if restart.chars().any(char::is_control) {
-        bail!("restart policy cannot contain control characters");
-    }
+    validate_no_control_characters("restart policy", restart)?;
 
     if matches!(
         restart,
@@ -697,15 +651,8 @@ fn resolve_service_timing(value: Option<&str>, field_name: &str) -> Result<Optio
 }
 
 fn validate_service_timing(value: &str, field_name: &str) -> Result<()> {
-    if value.trim().is_empty() {
-        bail!("service {field_name} cannot be empty");
-    }
-
-    if value.chars().any(char::is_control) {
-        bail!("service {field_name} cannot contain control characters");
-    }
-
-    Ok(())
+    let field_name = format!("service {field_name}");
+    validate_non_empty_no_control(&field_name, value)
 }
 
 fn push_unique(packages: &mut Vec<String>, package: &str) {
