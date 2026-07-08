@@ -1,12 +1,9 @@
 name: Setup Nix
-description: Checkout the repository and install Nix with flake support.
+description: Install Nix with flake support.
 
 runs:
   using: composite
   steps:
-    - name: Checkout
-      uses: actions/checkout@v5
-
     - name: Install Nix
       uses: cachix/install-nix-action@v31
       with:
