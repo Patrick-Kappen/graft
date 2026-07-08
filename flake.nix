@@ -141,7 +141,7 @@
             expectedEscapedEnvironmentLines
             "EnvironmentFile=\"/etc/graft/$$USER-%%n.env\"\nEnvironmentFile=\"/etc/graft/my config.env\"\nEnvironmentFile=\"/etc/graft/env\\\\prod.env\""
             "Volume=/tmp/graft-$$USER-%%n:/data$$HOME-%%h:ro%%z"
-            "\n[Service]\nRestartSec=10%%s"
+            "\n[Service]\nRestartSec=15s"
           ];
           commonPlainMissingInfixes = [
             "HostName="

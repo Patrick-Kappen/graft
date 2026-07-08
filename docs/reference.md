@@ -77,12 +77,14 @@ Implemented today:
 
 ### Renderer escaping
 
-Rendered Quadlet text uses systemd-safe escaping while preserving literal TOML
-semantics. Literal `%` characters are written as `%%` so systemd does not treat
-them as specifiers. Values that Quadlet places in generated service command
-lines also write literal `$` as `$$` so systemd does not perform environment
-variable substitution. Quoted `Environment="KEY=value"` lines additionally
-escape double quotes and backslashes for systemd syntax.
+Rendered `[Container]` values use systemd-safe escaping while preserving
+literal TOML semantics. Literal `%` characters are written as `%%` so systemd
+does not treat them as specifiers after Quadlet places them in generated service
+command lines. Values that become generated command-line arguments also write
+literal `$` as `$$` so systemd does not perform environment variable
+substitution. Quoted `Environment="KEY=value"` lines additionally escape double
+quotes and backslashes for systemd syntax. `[Service]` values are rendered
+verbatim because Quadlet copies them into the generated unit service section.
 
 ### Container field validation
 
@@ -194,7 +196,8 @@ Current published port validation:
 
 `config.service.restartSec`, `timeoutStartSec`, and `timeoutStopSec` are treated
 as literal systemd service timing values. A `[Service]` section is rendered when
-at least one supported service field is set.
+at least one supported service field is set. Service values are rendered
+verbatim and are not `%`-escaped by Graft.
 
 Current service timing validation:
 

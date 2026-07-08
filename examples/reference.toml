@@ -8,7 +8,7 @@
 # -----------------------------------------------------------------------------
 # Current primary schema
 # See docs/reference.md for the fields rendered today.
-# Rendered literal Quadlet values escape systemd % specifiers; generated command-line arguments also escape $.
+# Rendered container values that become generated command-line arguments escape systemd % specifiers and $ variables.
 # -----------------------------------------------------------------------------
 
 # version =

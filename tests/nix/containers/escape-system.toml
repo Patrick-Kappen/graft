@@ -25,4 +25,4 @@ mode = "ro%z"
 publish = ["127.0.0.1:18%080:80"]
 
 [config.service]
-restartSec = "10%s"
+restartSec = "15s"
