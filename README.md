@@ -337,7 +337,7 @@ nix develop .#ci -c bash -lc '
 '
 ```
 
-Generate Rust coverage locally:
+Generate Rust coverage locally and enforce the 80% line threshold:
 
 ```bash
 nix develop .#ci -c bash -lc '
@@ -346,7 +346,7 @@ nix develop .#ci -c bash -lc '
   mkdir -p target/coverage
   export LLVM_COV="$(command -v llvm-cov)"
   export LLVM_PROFDATA="$(command -v llvm-profdata)"
-  cargo llvm-cov --lcov --output-path target/coverage/lcov.info
+  cargo llvm-cov --workspace --all-features --fail-under-lines 80 --lcov --output-path target/coverage/lcov.info
 '
 ```
 
