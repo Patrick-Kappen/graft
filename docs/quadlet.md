@@ -51,7 +51,8 @@ JSON:
 
 ## Rootfs-store mapping
 
-Graft uses a rootfs from the Nix store, not images.
+The current `rootfs-store` mode uses a rootfs from the Nix store, not images.
+Later artifact backend decisions are described in [Long-term vision](vision.md).
 
 | Quadlet option | Source |
 | --- | --- |

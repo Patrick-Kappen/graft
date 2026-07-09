@@ -149,7 +149,9 @@ That is CLI logic.
 
 ## Rootfs and Quadlet
 
-Graft uses a rootfs from the Nix store, not container images.
+The current `rootfs-store` mode uses a rootfs from the Nix store, not container
+images. Later artifact backend decisions are described in
+[Long-term vision](vision.md).
 
 ```ini
 [Container]
@@ -218,7 +220,8 @@ graft up
 graft down
 ```
 
-No `graft shell` command is planned.
+No `graft shell` command is planned. That does not decide a later
+interactive-workspace access contract; see [Long-term vision](vision.md).
 
 Runtime operations must remain separate from pure TOML-to-JSON resolution so Nix
 evaluation stays deterministic and side-effect free.

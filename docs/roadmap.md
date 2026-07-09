@@ -1,7 +1,9 @@
 # Graft — Roadmap
 
-This document describes the intended direction for Graft. It is not a promise of
-exact command names or implementation order, except where noted.
+This document describes the active implementation direction for Graft. It is
+not a promise of exact command names or implementation order, except where
+noted. The broader product endgame is recorded in [Long-term vision](vision.md)
+and does not change this roadmap's current delivery priority.
 
 ## Current MVP
 
@@ -25,7 +27,7 @@ The MVP intentionally does not cover the full TOML schema yet.
 ## Direction
 
 Graft should become a Nix-native container workflow for both local development
-and multi-host deployment:
+and explicit multi-host deployment:
 
 ```text
 repo TOML + host TOML
@@ -40,7 +42,10 @@ local dev or server deploy
 ```
 
 The same Graft language should describe a local dev container, a user/rootless
-workspace, and a system/rootful service on a server.
+workspace, and a system/rootful service on a server. This roadmap first treats
+those as independently materialised workloads on explicit targets. A later
+workload graph that deliberately spreads components across local, remote, and
+temporary placements is direction only; see [Long-term vision](vision.md).
 
 ## Devenv workflow
 

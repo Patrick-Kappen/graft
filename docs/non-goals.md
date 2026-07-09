@@ -56,15 +56,22 @@ Deferred topics include:
   container definition
 - dedicated security hardening defaults such as `userns=auto`, limited UIDs,
   workdir-only writes, resource limits, and secrets support
+- OCI and other artifact backends beyond the current `rootfs-store` path
+- repository-defined workload graphs that span local, remote, and temporary
+  placements
+- interactive workspace access, IDE attachment, TUI, and optional web control
+  surfaces
 
-The agreed future lifecycle command names remain:
+These are deferred rather than permanently rejected; see
+[Long-term vision](vision.md). The agreed future lifecycle command names remain:
 
 ```text
 graft up
 graft down
 ```
 
-No `graft shell` command is planned.
+No `graft shell` command is planned. That command decision does not define the
+later interactive-workspace access contract; see [Long-term vision](vision.md).
 
 ## Literal passthrough policy
 
@@ -105,5 +112,8 @@ Related tracking issues:
 - [#12: Design context-aware template variables for repo branch worktree and agent](https://github.com/Patrick-Kappen/graft/issues/12)
 - [#13: Backlog: reduce Nix module rendering complexity](https://github.com/Patrick-Kappen/graft/issues/13)
 - [#27: Design Git-aware copied workspace workflow](https://github.com/Patrick-Kappen/graft/issues/27)
+- [#150: Decide Graft scope for image, build, kube, and artifact Quadlet units](https://github.com/Patrick-Kappen/graft/issues/150)
+- [#159: Design deterministic parent, child, and multi-source config merging](https://github.com/Patrick-Kappen/graft/issues/159)
+- [#161: Design multi-host build, deployment, and remote lifecycle control](https://github.com/Patrick-Kappen/graft/issues/161)
 - [#100: Add graft lint for TOML diagnostics](https://github.com/Patrick-Kappen/graft/issues/100)
 - [#101: Add graft doctor for local environment diagnostics](https://github.com/Patrick-Kappen/graft/issues/101)
