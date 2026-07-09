@@ -95,7 +95,7 @@ systemctl --user start node-dev.service
 
 - **TOML is user intent** not Nix boilerplate, not Quadlet boilerplate.
 - **Packages come from Nix** declare package names in TOML and rebuild.
-- **No image pull/build step** containers use `Rootfs=` from the Nix store.
+- **Current rootfs-store backend** uses `Rootfs=` from the Nix store with no OCI image pull/build step.
 - **NixOS and Home Manager** system/rootful and user/rootless containers.
 - **Everything is a service** output is Quadlet `.container` files for systemd.
 - **Minimal defaults** no default `bash`, `coreutils`, restart policy, or autostart.
