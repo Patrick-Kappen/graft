@@ -138,6 +138,22 @@ Import the module and point it at a directory of TOML files:
 }
 ```
 
+Use `configRoots` for additional shared or host-specific directories:
+
+```nix
+{ config, inputs, pkgs, ... }:
+{
+  services.graft = {
+    enable = true;
+    package = inputs.graft.packages.${pkgs.stdenv.hostPlatform.system}.default;
+    configRoots = [
+      ./containers/common
+      ./hosts/${config.networking.hostName}/containers
+    ];
+  };
+}
+```
+
 Create `containers/test.toml`:
 
 ```toml
@@ -169,6 +185,9 @@ auto-start unless that behaviour is explicitly modelled in a future release.
   };
 }
 ```
+
+`programs.graft.configRoots` accepts additional directories with the same
+ordering and collision rules as the NixOS module.
 
 Create `containers/dev.toml`:
 

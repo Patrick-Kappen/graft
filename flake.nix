@@ -87,6 +87,7 @@
                 services.graft = {
                   enable = true;
                   configRoot = ./tests/nix/containers;
+                  configRoots = [ ./tests/nix/containers-extra ];
                 };
               }
             ];
@@ -101,6 +102,7 @@
                 programs.graft = {
                   enable = true;
                   configRoot = ./tests/nix/containers;
+                  configRoots = [ ./tests/nix/containers-extra ];
                 };
               }
             ];
@@ -111,12 +113,16 @@
             nixosEval.config.environment.etc."containers/systemd/plain-system.container".text;
           nixosEscapeRendered =
             nixosEval.config.environment.etc."containers/systemd/escape-system.container".text;
+          nixosHostRendered =
+            nixosEval.config.environment.etc."containers/systemd/host-system.container".text;
           homeManagerRendered =
             homeManagerEval.config.xdg.configFile."containers/systemd/user.container".text;
           homeManagerPlainRendered =
             homeManagerEval.config.xdg.configFile."containers/systemd/plain-user.container".text;
           homeManagerEscapeRendered =
             homeManagerEval.config.xdg.configFile."containers/systemd/escape-user.container".text;
+          homeManagerHostRendered =
+            homeManagerEval.config.xdg.configFile."containers/systemd/host-user.container".text;
           expectedEnvironmentLines = lib.concatStringsSep "\n" [
             ''Environment="EMPTY="''
             ''Environment="EQUALS=a=b"''
@@ -186,6 +192,53 @@
             assertHasInfixes rendered (commonRenderedInfixes ++ renderedInfixes)
             && assertHasInfixes escapeRendered (commonEscapedInfixes ++ escapeInfixes)
             && assertNoInfixes plainRendered (commonPlainMissingInfixes ++ plainMissingInfixes);
+          evalNixosWithRoots =
+            extraRoots:
+            lib.evalModules {
+              specialArgs = { inherit pkgs; };
+              modules = [
+                moduleTestOptions
+                self.nixosModules.graft
+                {
+                  services.graft = {
+                    enable = true;
+                    configRoot = ./tests/nix/containers;
+                    configRoots = extraRoots;
+                  };
+                }
+              ];
+            };
+          evalHomeManagerWithRoots =
+            extraRoots:
+            lib.evalModules {
+              specialArgs = { inherit pkgs; };
+              modules = [
+                moduleTestOptions
+                self.homeManagerModules.graft
+                {
+                  programs.graft = {
+                    enable = true;
+                    configRoot = ./tests/nix/containers;
+                    configRoots = extraRoots;
+                  };
+                }
+              ];
+            };
+          duplicateFilenameNixosEval = evalNixosWithRoots [ ./tests/nix/duplicate-filename ];
+          duplicateNameNixosEval = evalNixosWithRoots [ ./tests/nix/duplicate-name ];
+          duplicateFilenameHomeManagerEval = evalHomeManagerWithRoots [ ./tests/nix/duplicate-filename ];
+          duplicateNameHomeManagerEval = evalHomeManagerWithRoots [ ./tests/nix/duplicate-name ];
+          duplicateFilenameNixosFails =
+            !(builtins.tryEval (builtins.deepSeq duplicateFilenameNixosEval.config.environment.etc true))
+            .success;
+          duplicateNameNixosFails =
+            !(builtins.tryEval (builtins.deepSeq duplicateNameNixosEval.config.environment.etc true)).success;
+          duplicateFilenameHomeManagerFails =
+            !(builtins.tryEval (builtins.deepSeq duplicateFilenameHomeManagerEval.config.xdg.configFile true))
+            .success;
+          duplicateNameHomeManagerFails =
+            !(builtins.tryEval (builtins.deepSeq duplicateNameHomeManagerEval.config.xdg.configFile true))
+            .success;
         in
         {
           nixos-module-eval =
@@ -211,8 +264,15 @@
                 "Volume=/tmp/graft-system-config:/config:ro"
               ];
             };
+            assert assertHasInfixes nixosHostRendered [
+              "ContainerName=nix-check-host-system"
+              "HostName=host-system.local"
+            ];
             assert !(nixosEval.config.environment.etc ? "containers/systemd/user.container");
             assert !(nixosEval.config.environment.etc ? "containers/systemd/escape-user.container");
+            assert !(nixosEval.config.environment.etc ? "containers/systemd/host-user.container");
+            assert duplicateFilenameNixosFails;
+            assert duplicateNameNixosFails;
             pkgs.writeText "graft-nixos-module-eval" nixosRendered;
 
           home-manager-module-eval =
@@ -238,8 +298,15 @@
                 "Volume=/tmp/graft-user-config:/config:ro"
               ];
             };
+            assert assertHasInfixes homeManagerHostRendered [
+              "ContainerName=nix-check-host-user"
+              "HostName=host-user.local"
+            ];
             assert !(homeManagerEval.config.xdg.configFile ? "containers/systemd/system.container");
             assert !(homeManagerEval.config.xdg.configFile ? "containers/systemd/escape-system.container");
+            assert !(homeManagerEval.config.xdg.configFile ? "containers/systemd/host-system.container");
+            assert duplicateFilenameHomeManagerFails;
+            assert duplicateNameHomeManagerFails;
             pkgs.writeText "graft-home-manager-module-eval" homeManagerRendered;
         }
       );

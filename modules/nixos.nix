@@ -30,13 +30,19 @@ in
       default = null;
       description = "Directory containing .toml container definitions.";
     };
+
+    configRoots = lib.mkOption {
+      type = lib.types.listOf lib.types.path;
+      default = [ ];
+      description = "Additional directories containing .toml container definitions, in order.";
+    };
   };
 
   config = lib.mkIf cfg.enable {
     assertions = [
       {
-        assertion = cfg.configRoot == null || cfg.package != null;
-        message = "services.graft.package must be set when services.graft.configRoot is set.";
+        assertion = (cfg.configRoot == null && cfg.configRoots == [ ]) || cfg.package != null;
+        message = "services.graft.package must be set when services.graft.configRoot or services.graft.configRoots is set.";
       }
     ];
 

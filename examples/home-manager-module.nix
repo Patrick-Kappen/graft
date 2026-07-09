@@ -18,5 +18,12 @@
     # Directory containing your .toml container definitions.
     # Place it wherever makes sense in your repo.
     configRoot = ./containers;
+
+    # Optional additional roots, for shared plus host-specific containers.
+    # Duplicate TOML filenames or duplicate container names fail evaluation.
+    # configRoots = [
+    #   ./containers/common
+    #   ./hosts/my-host/containers
+    # ];
   };
 }
