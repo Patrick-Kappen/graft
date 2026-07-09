@@ -117,10 +117,13 @@ materialisers: they read resolved JSON, build a rootfs, and render Quadlet.
 
 ## A real workload shape
 
-Graft is not only for tiny examples. A useful rootless job can be described as
-a small TOML file: pick a Nix package as the entrypoint, mount a state directory,
-mount any read-only inputs, and let a normal systemd user timer trigger the
-generated service.
+Graft has crossed the line from renderer experiment to real server workload:
+this shape is already running as a rootless job generated from TOML,
+materialised by Nix, picked up by Quadlet, and triggered by systemd.
+
+A useful rootless job can be described as a small TOML file: pick a Nix package
+as the entrypoint, mount a state directory, mount any read-only inputs, and let a
+normal systemd user timer trigger the generated service.
 
 ```toml
 version = 1
