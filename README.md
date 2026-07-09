@@ -329,7 +329,9 @@ nix develop .#ci -c bash -lc '
   set -euo pipefail
   cd crates/graft
   cargo fmt --check
-  cargo test
+  mkdir -p target/nextest
+  cargo nextest run --profile ci
+  cargo test --doc
   cargo clippy --all-targets -- -D warnings -D clippy::pedantic
   cargo machete
   cargo-audit audit
@@ -349,6 +351,9 @@ nix develop .#ci -c bash -lc '
   cargo llvm-cov --workspace --all-features --fail-under-lines 80 --lcov --output-path target/coverage/lcov.info
 '
 ```
+
+The nextest run writes JUnit test results to
+`crates/graft/target/nextest/ci/junit.xml` for Codecov uploads.
 
 Secret scanning copies tracked files to a temporary directory so ignored local
 files stay out of scope:
