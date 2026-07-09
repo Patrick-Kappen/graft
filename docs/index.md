@@ -8,7 +8,11 @@ TOML-driven Podman Quadlet containers, built from the Nix store.
 
 Graft turns small TOML files into rootfs-based Podman Quadlet services for NixOS
 and Home Manager. You describe container intent; Graft resolves the runtime
-details; Nix materialises the rootfs and Quadlet output.
+details; Nix materialises the rootfs and Quadlet output; systemd runs the result
+like any other service.
+
+Use the GitHub README as the repository landing page, then use this manual for
+deeper design, reference, and contributor details.
 
 ## Start here
 

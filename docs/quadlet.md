@@ -196,6 +196,11 @@ systemctl --user start <name>.service
 systemctl --user stop <name>.service
 ```
 
+A user timer may also trigger a generated user service. If that service must run
+without an active login session, enable systemd user linger in host
+configuration or with `loginctl enable-linger <user>`; Graft TOML does not carry
+host login policy.
+
 Stopping a service removes the runtime container when Podman runs it with
 `--rm`. The Quadlet file remains, so the service can be started again later.
 
