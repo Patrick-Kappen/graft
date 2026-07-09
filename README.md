@@ -334,6 +334,8 @@ nix develop .#ci -c bash -lc '
   cargo test --doc
   cargo clippy --all-targets -- -D warnings -D clippy::pedantic
   cargo machete
+  NO_COLOR=1 cargo modules orphans --lib
+  NO_COLOR=1 cargo modules orphans --bin graft-pause
   cargo-audit audit
   cargo deny check --config ../../deny.toml
 '

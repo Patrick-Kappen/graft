@@ -50,6 +50,8 @@ jobs:
             cargo test --doc
             cargo clippy --all-targets -- -D warnings -D clippy::pedantic
             cargo machete
+            NO_COLOR=1 cargo modules orphans --lib
+            NO_COLOR=1 cargo modules orphans --bin graft-pause
           '
 
       - name: Upload test results

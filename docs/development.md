@@ -134,6 +134,26 @@ sessions, sockets, or other local-only workflow details in the public manual.
 Runtime test output should check the generated unit text and the Podman runtime
 state where possible.
 
+## Dead-code and module-boundary hygiene
+
+The baseline already has several hard gates for unused or dead code:
+
+- Rust warnings, including compiler dead-code warnings, via clippy with
+  `-D warnings -D clippy::pedantic`
+- unused Rust dependencies via `cargo machete`
+- orphaned Rust source files via `cargo modules orphans` for the library and
+  standalone `graft-pause` binary
+- unused Nix code via `deadnix --fail`
+- missing Rust test coverage via `cargo llvm-cov --fail-under-lines 80`
+
+Do not add unstable or noisy hygiene gates without a focused design issue.
+`cargo-udeps` currently requires nightly-only rustc flags in this environment,
+so track it as an advisory/local-only candidate in #96 and the later local
+quality workflow in #23. Treat `tokei`/`scc` output as refactor signals, not CI
+thresholds; `resolve.rs` splitting is tracked in #97. Public API usage remains a
+manual visibility review until a low-noise tool path is proven; track that in
+issue #98.
+
 ## Standard checks
 
 For Rust changes:
@@ -142,6 +162,7 @@ For Rust changes:
 nix develop .#ci -c bash -lc 'cd crates/graft && cargo fmt --check && mkdir -p target/nextest && cargo nextest run --profile ci && cargo test --doc'
 nix develop .#ci -c bash -lc 'cd crates/graft && cargo clippy --all-targets -- -D warnings -D clippy::pedantic'
 nix develop .#ci -c bash -lc 'cd crates/graft && cargo machete'
+nix develop .#ci -c bash -lc 'cd crates/graft && NO_COLOR=1 cargo modules orphans --lib && NO_COLOR=1 cargo modules orphans --bin graft-pause'
 ```
 
 The nextest run writes JUnit test results to
