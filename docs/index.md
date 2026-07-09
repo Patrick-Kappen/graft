@@ -17,10 +17,12 @@ deeper design, reference, and contributor details.
 ## Start here
 
 - [Overview](overview.md) explains the current architecture and data flow.
+- [Long-term vision](vision.md) records the endgame without changing the active
+  implementation roadmap.
 - [Design](design.md) documents the boundaries between TOML, CLI, Nix modules,
   and Quadlet output.
 - [Quadlet output](quadlet.md) describes the generated `.container` files.
-- [Roadmap](roadmap.md) describes the longer-term direction.
+- [Roadmap](roadmap.md) describes the active implementation direction.
 - [Non-goals and deferred scope](non-goals.md) lists deliberate exclusions.
 - [Reference](reference.md) links to the annotated TOML reference and current
   module options.

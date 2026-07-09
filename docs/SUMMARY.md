@@ -2,6 +2,7 @@
 
 - [Graft](index.md)
 - [Overview](overview.md)
+- [Long-term vision](vision.md)
 - [Design](design.md)
 - [Quadlet output](quadlet.md)
 - [Roadmap](roadmap.md)

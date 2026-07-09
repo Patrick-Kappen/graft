@@ -18,6 +18,7 @@
 
 <p>
   <a href="docs/overview.md">Overview</a> ·
+  <a href="docs/vision.md">Vision</a> ·
   <a href="docs/design.md">Design</a> ·
   <a href="docs/quadlet.md">Quadlet</a> ·
   <a href="docs/roadmap.md">Roadmap</a> ·
@@ -36,13 +37,16 @@ NixOS and Home Manager. You describe container intent; Graft resolves the
 runtime details; Nix materialises the rootfs and Quadlet output; systemd runs
 the result like any other service.
 
-No container images. No Dockerfiles. No ad-hoc package installs. No hand-written
+Today, `rootfs-store` containers need no OCI image or Dockerfile: Nix builds the
+rootfs from declared packages. No ad-hoc package installs. No hand-written
 Quadlet boilerplate.
 
 > Status: early MVP. The current `rootfs-store` flow works for NixOS system
 > containers and Home Manager user containers, with useful Quadlet rendering for
-> common container fields. The broader roadmap is still evolving; see
-> [Roadmap](docs/roadmap.md) and [Non-goals](docs/non-goals.md).
+> common container fields. The active implementation roadmap remains focused on
+> completing that foundation; see [Roadmap](docs/roadmap.md) and
+> [Non-goals](docs/non-goals.md). For the longer-term portable workload vision,
+> see [Vision](docs/vision.md).
 
 ## A tiny container
 
@@ -321,8 +325,8 @@ restart = "on-failure"
 
 ## Roadmap
 
-Graft currently focuses on the `rootfs-store` Quadlet path. The longer-term
-vision includes:
+Graft currently focuses on the `rootfs-store` Quadlet path. The active roadmap
+includes:
 
 - project-local dev environments
 - `graft up` / `graft down` lifecycle commands
@@ -332,11 +336,14 @@ vision includes:
 - stronger isolation and security hardening
 - broader Quadlet coverage
 
-See [Roadmap](docs/roadmap.md).
+See [Roadmap](docs/roadmap.md). The later goal of portable environments with
+explicit local, remote, and temporary placement is described separately in
+[Vision](docs/vision.md); it is not current functionality.
 
 ## Documentation
 
 - [Overview](docs/overview.md)
+- [Long-term vision](docs/vision.md)
 - [Design](docs/design.md)
 - [Quadlet output](docs/quadlet.md)
 - [Roadmap](docs/roadmap.md)
