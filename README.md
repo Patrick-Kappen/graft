@@ -33,10 +33,11 @@ TOML-driven Podman Quadlet containers, built from the Nix store.
 
 Graft turns small TOML files into rootfs-based Podman Quadlet services for
 NixOS and Home Manager. You describe container intent; Graft resolves the
-runtime details; Nix materialises the rootfs and Quadlet output.
+runtime details; Nix materialises the rootfs and Quadlet output; systemd runs
+the result like any other service.
 
-No container images. No ad-hoc package installs. No hand-written Quadlet
-boilerplate.
+No container images. No Dockerfiles. No ad-hoc package installs. No hand-written
+Quadlet boilerplate.
 
 > Status: early MVP. The current `rootfs-store` flow works for NixOS system
 > containers and Home Manager user containers, with useful Quadlet rendering for
@@ -113,6 +114,40 @@ systemd service
 
 The CLI owns defaults and dependency resolution. The Nix modules are dumb
 materialisers: they read resolved JSON, build a rootfs, and render Quadlet.
+
+## A real workload shape
+
+Graft is not only for tiny examples. A useful rootless job can be described as
+a small TOML file: pick a Nix package as the entrypoint, mount a state directory,
+mount any read-only inputs, and let a normal systemd user timer trigger the
+generated service.
+
+```toml
+version = 1
+name = "session-indexer"
+
+[deploy]
+target = "user"
+
+[config.runtime]
+packages = ["session-indexer", "coreutils"]
+command = ["session-indexer"]
+
+[[config.filesystem.volumes]]
+source = "/home/me/.local/share/session-index"
+target = "/data"
+
+[[config.filesystem.volumes]]
+source = "/home/me/sessions"
+target = "/sessions"
+mode = "ro"
+```
+
+That becomes a rootfs from the Nix store, a Quadlet `.container` file, and a
+regular user service. The timer, secrets, and user linger policy stay in host
+configuration; the TOML remains container intent. This is the shape Graft is
+built for: small declarative workloads without images or mutable package
+installation.
 
 ## Quickstart: NixOS system containers
 
@@ -320,78 +355,9 @@ Graft is its own design, but it is informed by ideas from:
 Graft is not a fork or wrapper around these projects; it combines similar ideas
 around a TOML → Nix → Quadlet workflow.
 
-## Development checks
+## Contributing
 
-Run from the repository root:
-
-```bash
-nix develop .#ci -c bash -lc '
-  set -euo pipefail
-  cd crates/graft
-  cargo fmt --check
-  mkdir -p target/nextest
-  cargo nextest run --profile ci
-  cargo test --doc
-  cargo clippy --all-targets -- -D warnings -D clippy::pedantic
-  cargo machete
-  NO_COLOR=1 cargo modules orphans --lib
-  NO_COLOR=1 cargo modules orphans --bin graft-pause
-  cargo-audit audit
-  cargo deny check --config ../../deny.toml
-'
-```
-
-Generate Rust coverage locally and enforce the 80% line threshold:
-
-```bash
-nix develop .#ci -c bash -lc '
-  set -euo pipefail
-  cd crates/graft
-  mkdir -p target/coverage
-  export LLVM_COV="$(command -v llvm-cov)"
-  export LLVM_PROFDATA="$(command -v llvm-profdata)"
-  cargo llvm-cov --workspace --all-features --fail-under-lines 80 --lcov --output-path target/coverage/lcov.info
-'
-```
-
-The nextest run writes JUnit test results to
-`crates/graft/target/nextest/ci/junit.xml` for Codecov uploads.
-
-Secret scanning copies tracked files to a temporary directory so ignored local
-files stay out of scope:
-
-```bash
-nix develop .#ci -c bash -lc '
-  set -euo pipefail
-
-  scan_root=$(mktemp -d)
-  cleanup() {
-    rm -rf "${scan_root}"
-  }
-  trap cleanup EXIT
-
-  git ls-files -z | tar --null --files-from=- -cf - | tar -xf - -C "${scan_root}"
-  gitleaks dir --no-banner --no-color --redact "${scan_root}"
-'
-```
-
-```bash
-nix develop .#ci -c actionlint
-nix develop .#ci -c zizmor --no-progress --color never --min-confidence high .github/workflows/*.yml .github/actions/setup-nix/action.yml
-nix develop .#ci -c bash -lc 'git ls-files "*.nix" -z | xargs -0 nixfmt --check'
-nix develop .#ci -c bash -lc 'git ls-files "*.toml" -z | xargs -0 taplo format --check'
-nix develop .#ci -c bash -lc 'git ls-files "*.toml" -z | xargs -0 taplo lint --no-schema'
-nix develop .#ci -c bash -lc 'git ls-files "*.md" -z | xargs -0 markdownlint-cli2 --config .markdownlint.jsonc'
-nix develop .#ci -c statix check .
-nix develop .#ci -c deadnix --fail .
-nix develop .#ci -c mdbook build
-nix build .#packages.x86_64-linux.default
-nix build \
-  .#checks.x86_64-linux.nixos-module-eval \
-  .#checks.x86_64-linux.home-manager-module-eval \
-  --print-out-paths
-nix flake check
-```
-
-The module-eval checks use IFD, so build them explicitly. Do not rely on
-`nix flake check` as the only Nix module gate.
+Contributor workflow, local check commands, release notes, and renderer
+checklists live in [Development](docs/development.md). The short version: keep
+TOML intent, CLI resolution, Nix materialisation, and Quadlet output in separate
+layers.

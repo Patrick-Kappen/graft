@@ -51,6 +51,9 @@ Deferred topics include:
 - named instances and dynamic hostname strategy
 - promote and diff workflows
 - CLI runtime control beyond the agreed future command direction
+- local TOML linting and host-aware doctor diagnostics
+- host login policy in TOML, such as enabling systemd user linger from a
+  container definition
 - dedicated security hardening defaults such as `userns=auto`, limited UIDs,
   workdir-only writes, resource limits, and secrets support
 
@@ -102,3 +105,5 @@ Related tracking issues:
 - [#12: Design context-aware template variables for repo branch worktree and agent](https://github.com/Patrick-Kappen/graft/issues/12)
 - [#13: Backlog: reduce Nix module rendering complexity](https://github.com/Patrick-Kappen/graft/issues/13)
 - [#27: Design Git-aware copied workspace workflow](https://github.com/Patrick-Kappen/graft/issues/27)
+- [#100: Add graft lint for TOML diagnostics](https://github.com/Patrick-Kappen/graft/issues/100)
+- [#101: Add graft doctor for local environment diagnostics](https://github.com/Patrick-Kappen/graft/issues/101)

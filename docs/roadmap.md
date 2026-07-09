@@ -73,11 +73,19 @@ Graft workflows, while keeping build-time resolution deterministic.
 Likely responsibilities:
 
 - resolve and inspect TOML configs
+- lint TOML intent before rebuilds
+- run host-aware diagnostics through a future `graft doctor` command
+- inspect generated Quadlet, systemd, and Podman state
 - start and stop containers through systemd
 - show status and logs
 - coordinate local development flows
 - coordinate deployment flows
 - expose diff/promote workflows
+
+`graft lint` should stay mostly pure and TOML-focused. `graft doctor` may check
+local host state such as user linger, generated units, mounted paths, and Podman
+state, but it should report diagnostics rather than mutate host policy
+implicitly.
 
 Implementation detail: runtime operations should stay separate from pure
 TOML-to-JSON resolution so Nix evaluation stays deterministic and side-effect
