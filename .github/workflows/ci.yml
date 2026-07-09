@@ -45,6 +45,7 @@ jobs:
             cargo fmt --check
             cargo test
             cargo clippy --all-targets -- -D warnings -D clippy::pedantic
+            cargo machete
           '
 
   security:

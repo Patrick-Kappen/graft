@@ -256,6 +256,7 @@
               cargo
               cargo-audit
               cargo-deny
+              cargo-machete
               clippy
               deadnix
               git
