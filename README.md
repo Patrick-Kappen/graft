@@ -6,6 +6,7 @@
 
 <p>
   <a href="https://github.com/Patrick-Kappen/graft/actions/workflows/ci.yml"><img src="https://github.com/Patrick-Kappen/graft/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://codecov.io/gh/Patrick-Kappen/graft"><img src="https://codecov.io/gh/Patrick-Kappen/graft/branch/main/graph/badge.svg" alt="Codecov"></a>
   <a href="https://github.com/Patrick-Kappen/graft/actions/workflows/pages.yml"><img src="https://github.com/Patrick-Kappen/graft/actions/workflows/pages.yml/badge.svg" alt="Pages"></a>
   <img src="https://img.shields.io/badge/Nix-flake-blue?logo=nixos" alt="Nix flake">
   <img src="https://img.shields.io/badge/Rust-CLI-orange?logo=rust" alt="Rust">
@@ -333,6 +334,19 @@ nix develop .#ci -c bash -lc '
   cargo machete
   cargo-audit audit
   cargo deny check --config ../../deny.toml
+'
+```
+
+Generate Rust coverage locally:
+
+```bash
+nix develop .#ci -c bash -lc '
+  set -euo pipefail
+  cd crates/graft
+  mkdir -p target/coverage
+  export LLVM_COV="$(command -v llvm-cov)"
+  export LLVM_PROFDATA="$(command -v llvm-profdata)"
+  cargo llvm-cov --lcov --output-path target/coverage/lcov.info
 '
 ```
 

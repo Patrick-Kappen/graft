@@ -48,6 +48,39 @@ jobs:
             cargo machete
           '
 
+  coverage:
+    name: coverage
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - name: Setup Nix
+        uses: ./.github/actions/setup-nix
+
+      - name: Rust coverage
+        run: |
+          nix develop .#ci -c bash <<'EOF'
+          set -euo pipefail
+          cd crates/graft
+          mkdir -p target/coverage
+          export LLVM_COV="$(command -v llvm-cov)"
+          export LLVM_PROFDATA="$(command -v llvm-profdata)"
+          cargo llvm-cov --lcov --output-path target/coverage/lcov.info
+          EOF
+
+      - name: Upload coverage
+        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: true
+          disable_search: true
+          files: crates/graft/target/coverage/lcov.info
+          flags: rust
+          slug: Patrick-Kappen/graft
+
   security:
     name: security
     runs-on: ubuntu-latest
@@ -133,6 +166,7 @@ jobs:
     needs:
       - workflow_lint
       - rust
+      - coverage
       - security
       - docs
       - nix
@@ -143,6 +177,7 @@ jobs:
         run: |
           test '${{ needs.workflow_lint.result }}' = 'success'
           test '${{ needs.rust.result }}' = 'success'
+          test '${{ needs.coverage.result }}' = 'success'
           test '${{ needs.security.result }}' = 'success'
           test '${{ needs.docs.result }}' = 'success'
           test '${{ needs.nix.result }}' = 'success'

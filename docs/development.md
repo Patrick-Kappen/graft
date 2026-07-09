@@ -144,6 +144,19 @@ nix develop .#ci -c bash -lc 'cd crates/graft && cargo clippy --all-targets -- -
 nix develop .#ci -c bash -lc 'cd crates/graft && cargo machete'
 ```
 
+Generate Rust coverage locally:
+
+```bash
+nix develop .#ci -c bash -lc '
+  set -euo pipefail
+  cd crates/graft
+  mkdir -p target/coverage
+  export LLVM_COV="$(command -v llvm-cov)"
+  export LLVM_PROFDATA="$(command -v llvm-profdata)"
+  cargo llvm-cov --lcov --output-path target/coverage/lcov.info
+'
+```
+
 For dependency security and policy checks:
 
 ```bash

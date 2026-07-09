@@ -323,11 +323,13 @@
               cargo
               cargo-audit
               cargo-deny
+              cargo-llvm-cov
               cargo-machete
               clippy
               deadnix
               git
               gitleaks
+              llvmPackages.llvm
               markdownlint-cli2
               mdbook
               nixfmt
