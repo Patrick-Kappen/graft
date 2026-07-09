@@ -358,6 +358,9 @@ nix develop .#ci -c bash -lc '
 nix develop .#ci -c actionlint
 nix develop .#ci -c zizmor --no-progress --color never --min-confidence high .github/workflows/*.yml .github/actions/setup-nix/action.yml
 nix develop .#ci -c bash -lc 'git ls-files "*.nix" -z | xargs -0 nixfmt --check'
+nix develop .#ci -c bash -lc 'git ls-files "*.toml" -z | xargs -0 taplo format --check'
+nix develop .#ci -c bash -lc 'git ls-files "*.toml" -z | xargs -0 taplo lint --no-schema'
+nix develop .#ci -c bash -lc 'git ls-files "*.md" -z | xargs -0 markdownlint-cli2 --config .markdownlint.jsonc'
 nix develop .#ci -c statix check .
 nix develop .#ci -c deadnix --fail .
 nix develop .#ci -c mdbook build

@@ -1,0 +1,8 @@
+{
+  // Long URLs, commands, badges, and table rows are common in the public docs.
+  "MD013": false,
+  // The README and mdBook landing page intentionally use HTML for badges and images.
+  "MD033": false,
+  // The README starts with centered project branding before its first Markdown heading.
+  "MD041": false
+}

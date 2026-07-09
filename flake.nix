@@ -328,11 +328,13 @@
               deadnix
               git
               gitleaks
+              markdownlint-cli2
               mdbook
               nixfmt
               rustc
               rustfmt
               statix
+              taplo
               zizmor
             ];
           };

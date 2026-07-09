@@ -27,7 +27,7 @@ parse-only today and do not yet affect Quadlet output.
 ```
 
 | Option | Type | Default | Description |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `services.graft.enable` | bool | `false` | Enable system/rootful Graft containers. |
 | `services.graft.package` | package or null | `null` | Package providing `graft` and `graft-pause`; required when `configRoot` or `configRoots` is set. |
 | `services.graft.configRoot` | path or null | `null` | Directory containing `*.toml` container definitions. |
@@ -62,7 +62,7 @@ within the same target fail evaluation.
 ```
 
 | Option | Type | Default | Description |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `programs.graft.enable` | bool | `false` | Enable user/rootless Graft containers. |
 | `programs.graft.package` | package or null | `null` | Package providing `graft` and `graft-pause`; required when `configRoot` or `configRoots` is set. |
 | `programs.graft.configRoot` | path or null | `null` | Directory containing `*.toml` container definitions. |

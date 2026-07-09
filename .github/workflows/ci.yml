@@ -92,7 +92,14 @@ jobs:
         uses: ./.github/actions/setup-nix
 
       - name: Docs checks
-        run: nix develop .#ci -c mdbook build
+        run: |
+          nix develop .#ci -c bash -lc '
+            set -euo pipefail
+            git ls-files "*.toml" -z | xargs -0 taplo format --check
+            git ls-files "*.toml" -z | xargs -0 taplo lint --no-schema
+            git ls-files "*.md" -z | xargs -0 markdownlint-cli2 --config .markdownlint.jsonc
+            mdbook build
+          '
 
   nix:
     name: nix
