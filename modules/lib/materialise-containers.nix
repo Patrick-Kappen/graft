@@ -9,20 +9,48 @@
 let
   quadletRenderer = import ./render-quadlet.nix { inherit lib; };
 
-  tomlFiles = lib.optionalAttrs (cfg.configRoot != null) (
-    lib.filterAttrs (name: type: type == "regular" && lib.hasSuffix ".toml" name) (
-      builtins.readDir cfg.configRoot
-    )
+  configuredRoots = lib.optional (cfg.configRoot != null) cfg.configRoot ++ cfg.configRoots;
+
+  duplicates =
+    values:
+    lib.unique (
+      lib.filter (value: (lib.length (lib.filter (candidate: candidate == value) values)) > 1) values
+    );
+
+  tomlEntriesForRoot =
+    root:
+    map
+      (name: {
+        inherit name root;
+        path = root + "/${name}";
+      })
+      (
+        builtins.attrNames (
+          lib.filterAttrs (name: type: type == "regular" && lib.hasSuffix ".toml" name) (
+            builtins.readDir root
+          )
+        )
+      );
+
+  tomlEntries = lib.concatMap tomlEntriesForRoot configuredRoots;
+  duplicateTomlNames = duplicates (map (entry: entry.name) tomlEntries);
+  checkedTomlEntries =
+    if duplicateTomlNames == [ ] then
+      tomlEntries
+    else
+      throw "${optionName}: duplicate container TOML filename(s): ${lib.concatStringsSep ", " duplicateTomlNames}";
+
+  tomlFiles = builtins.listToAttrs (
+    map (entry: lib.nameValuePair entry.name entry) checkedTomlEntries
   );
 
   resolveToml =
-    name: _:
+    name: entry:
     let
       containerName = lib.removeSuffix ".toml" name;
-      tomlFile = cfg.configRoot + "/${name}";
     in
     pkgs.runCommand "graft-resolve-${containerName}" { } ''
-      ${lib.getExe' cfg.package "graft"} ${tomlFile} > $out
+      ${lib.getExe' cfg.package "graft"} ${entry.path} > $out
     '';
 
   resolvedJsonFiles = lib.mapAttrs resolveToml tomlFiles;
@@ -31,9 +59,16 @@ let
     _: resolvedJson: builtins.fromJSON (builtins.readFile resolvedJson)
   ) resolvedJsonFiles;
 
-  containers = lib.filterAttrs (
+  targetContainers = lib.filterAttrs (
     _: ctr: (ctr.deploy.enable or true) && ctr.deploy.target == target
   ) resolvedContainers;
+
+  duplicateContainerNames = duplicates (map (ctr: ctr.name) (builtins.attrValues targetContainers));
+  containers =
+    if duplicateContainerNames == [ ] then
+      targetContainers
+    else
+      throw "${optionName}: duplicate container name(s) for target '${target}': ${lib.concatStringsSep ", " duplicateContainerNames}";
 
   packageFor =
     containerName: package:

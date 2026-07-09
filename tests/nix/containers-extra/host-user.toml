@@ -1,0 +1,8 @@
+version = 1
+name = "nix-check-host-user"
+
+[deploy]
+target = "user"
+
+[config.container]
+hostname = "host-user.local"

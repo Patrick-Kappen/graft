@@ -1,0 +1,5 @@
+version = 1
+name = "nix-check-user"
+
+[deploy]
+target = "user"
