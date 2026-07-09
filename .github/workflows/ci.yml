@@ -67,7 +67,7 @@ jobs:
           mkdir -p target/coverage
           export LLVM_COV="$(command -v llvm-cov)"
           export LLVM_PROFDATA="$(command -v llvm-profdata)"
-          cargo llvm-cov --lcov --output-path target/coverage/lcov.info
+          cargo llvm-cov --workspace --all-features --fail-under-lines 80 --lcov --output-path target/coverage/lcov.info
           EOF
 
       - name: Upload coverage
