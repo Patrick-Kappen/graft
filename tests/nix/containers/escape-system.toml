@@ -2,14 +2,26 @@ version = 1
 name = "escape-system"
 
 [config.runtime]
-command = ["/bin/echo", "pre${HOME}post", "100%", "cost $5", "foo\\.bar", "C:\\Temp", "say \"hi\""]
+command = [
+  "/bin/echo",
+  "pre${HOME}post",
+  "100%",
+  "cost $5",
+  "foo\\.bar",
+  "C:\\Temp",
+  "say \"hi\"",
+]
 
 [config.container]
 hostname = "escape%system.local"
 user = "100%0"
 group = "100%0"
 workingDir = "/work%space/$HOME"
-environmentFile = ["/etc/graft/$USER-%n.env", "/etc/graft/my config.env", "/etc/graft/env\\prod.env"]
+environmentFile = [
+  "/etc/graft/$USER-%n.env",
+  "/etc/graft/my config.env",
+  "/etc/graft/env\\prod.env",
+]
 
 [config.container.environment]
 BRACED = "pre${HOME}post"

@@ -180,6 +180,9 @@ For Nix/module/docs changes:
 
 ```bash
 nix develop .#ci -c bash -lc 'git ls-files "*.nix" -z | xargs -0 nixfmt --check'
+nix develop .#ci -c bash -lc 'git ls-files "*.toml" -z | xargs -0 taplo format --check'
+nix develop .#ci -c bash -lc 'git ls-files "*.toml" -z | xargs -0 taplo lint --no-schema'
+nix develop .#ci -c bash -lc 'git ls-files "*.md" -z | xargs -0 markdownlint-cli2 --config .markdownlint.jsonc'
 nix develop .#ci -c statix check .
 nix develop .#ci -c deadnix --fail .
 nix build \

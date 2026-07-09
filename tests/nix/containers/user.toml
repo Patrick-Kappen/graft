@@ -9,10 +9,7 @@ hostname = "nix-check-user.local"
 user = "1000"
 group = "1000"
 workingDir = "/workspace"
-environmentFile = [
-  "/etc/graft/user.env",
-  "/run/graft/shared.env",
-]
+environmentFile = ["/etc/graft/user.env", "/run/graft/shared.env"]
 
 [config.container.environment]
 LOG_LEVEL = "debug"
@@ -36,10 +33,7 @@ target = "/config"
 mode = "ro"
 
 [config.network]
-publish = [
-  "127.0.0.1:28080:80",
-  "28443:443/tcp",
-]
+publish = ["127.0.0.1:28080:80", "28443:443/tcp"]
 
 [config.service]
 restartSec = "10s"

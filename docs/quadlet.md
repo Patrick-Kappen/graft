@@ -13,7 +13,7 @@ TOML → CLI resolved JSON → NixOS/Home Manager module → .container
 ## File locations
 
 | Resolved target | Scope | Path |
-|---|---|---|
+| --- | --- | --- |
 | `system` | system/rootful | `/etc/containers/systemd/` |
 | `user` | user/rootless | `~/.config/containers/systemd/` |
 
@@ -54,7 +54,7 @@ JSON:
 Graft uses a rootfs from the Nix store, not images.
 
 | Quadlet option | Source |
-|---|---|
+| --- | --- |
 | `ContainerName=` | resolved `name` |
 | `Rootfs=<path>:O` | rootfs built from resolved `runtime.packages` |
 | `Exec=` | resolved `runtime.command` |

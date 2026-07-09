@@ -110,7 +110,7 @@ There is no default `bashInteractive`, no default `coreutils`, and no default
 The CLI may only add defaults that belong to Graft semantics.
 
 | Field | Rule |
-|---|---|
+| --- | --- |
 | `version` | required; currently only `1` is supported |
 | `name` | required; must be safe for container and unit output |
 | `runtime.packages` | always `graft-pause` + user packages |
