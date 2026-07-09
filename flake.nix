@@ -325,6 +325,7 @@
               cargo-deny
               cargo-llvm-cov
               cargo-machete
+              cargo-nextest
               clippy
               deadnix
               git

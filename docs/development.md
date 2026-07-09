@@ -139,10 +139,13 @@ state where possible.
 For Rust changes:
 
 ```bash
-nix develop .#ci -c bash -lc 'cd crates/graft && cargo fmt --check && cargo test'
+nix develop .#ci -c bash -lc 'cd crates/graft && cargo fmt --check && mkdir -p target/nextest && cargo nextest run --profile ci && cargo test --doc'
 nix develop .#ci -c bash -lc 'cd crates/graft && cargo clippy --all-targets -- -D warnings -D clippy::pedantic'
 nix develop .#ci -c bash -lc 'cd crates/graft && cargo machete'
 ```
+
+The nextest run writes JUnit test results to
+`crates/graft/target/nextest/ci/junit.xml` for Codecov uploads.
 
 Generate Rust coverage locally and enforce the 80% line threshold:
 
