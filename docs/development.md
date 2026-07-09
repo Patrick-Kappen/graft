@@ -141,6 +141,7 @@ For Rust changes:
 ```bash
 nix develop .#ci -c bash -lc 'cd crates/graft && cargo fmt --check && cargo test'
 nix develop .#ci -c bash -lc 'cd crates/graft && cargo clippy --all-targets -- -D warnings -D clippy::pedantic'
+nix develop .#ci -c bash -lc 'cd crates/graft && cargo machete'
 ```
 
 For dependency security and policy checks:
