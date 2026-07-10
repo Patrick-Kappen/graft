@@ -6,6 +6,7 @@
 - [Home Manager quickstart](quickstart/home-manager.md)
 - [Long-term vision](vision.md)
 - [Design](design.md)
+- [Workload lifecycle semantics](lifecycle.md)
 - [Quadlet output](quadlet.md)
 - [Roadmap](roadmap.md)
 - [Non-goals and deferred scope](non-goals.md)

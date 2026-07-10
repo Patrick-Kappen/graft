@@ -191,7 +191,10 @@ rootless overlay support such as `fuse-overlayfs`.
 
 ## Lifecycle
 
-Generated containers are normal systemd services.
+Generated containers are normal systemd services. The typed distinction between
+long-running services, repeatable finite jobs, and retained setup jobs is an
+approved design in [Workload lifecycle semantics](lifecycle.md), but remains
+unimplemented until [#131](https://github.com/Patrick-Kappen/graft/issues/131).
 
 System container:
 
