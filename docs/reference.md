@@ -4,12 +4,21 @@ Complete runnable onboarding paths:
 [NixOS system-container quickstart](quickstart/nixos.md) and
 [Home Manager user-container quickstart](quickstart/home-manager.md).
 
-The annotated TOML schema lives in
+The machine-readable schema for current supported intent is tracked at
+`crates/graft/schema/graft-v1.schema.json`. Taplo associates it with runnable
+quickstarts and Nix fixtures through `.taplo.toml`, so editors and CI diagnose
+unknown fields, wrong basic types, unsupported enums, and missing required
+fields before Graft runs.
+
+The broader annotated roadmap reference lives in
 [`examples/reference.toml`](https://github.com/Patrick-Kappen/graft/blob/main/examples/reference.toml).
+It is intentionally not schema-validated as a runnable workload: many fields are
+parse-only today and do not yet affect Quadlet output.
 
 This page summarises the currently implemented module options and resolver
-behaviour. The TOML schema is broader than the MVP renderer; many fields are
-parse-only today and do not yet affect Quadlet output.
+behaviour. Passing the machine-readable schema means a field is current
+supported intent; it does not promise host prerequisites, path existence, or
+all semantic cross-field validation.
 
 ## NixOS module
 

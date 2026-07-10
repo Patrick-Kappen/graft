@@ -4,25 +4,40 @@
 //! parse successfully and can be merged with a base layer later.
 //! Validation of required fields (e.g. `home.source` when `home.mode =
 //! "persistent"`) happens at use-time, not at parse-time.
+//!
+//! The generated JSON Schema describes complete, currently supported workload
+//! definitions. Schema-only skips intentionally hide reserved parser fields.
 
+use schemars::JsonSchema;
 use serde::Deserialize;
 use std::collections::HashMap;
 
 /// Top-level container configuration.
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Default, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[schemars(
+    title = "Graft container configuration v1",
+    description = "Supported Graft TOML workload intent for schema version 1.",
+    extend("$id" = "https://raw.githubusercontent.com/Patrick-Kappen/graft/main/crates/graft/schema/graft-v1.schema.json")
+)]
 pub struct ContainerConfig {
     /// Schema version. Must be `1`.
+    #[schemars(required, range(min = 1, max = 1))]
     pub version: Option<u32>,
-    /// Container / unit name.
+    /// Container and Podman identity. Keep it equal to the TOML filename stem
+    /// until the final unit identity contract is implemented.
+    #[schemars(required, regex(pattern = r"^[A-Za-z0-9][A-Za-z0-9._-]*$"))]
     pub name: Option<String>,
     /// Parent graph nodes to inherit from.
+    #[schemars(skip)]
     pub parents: Option<GraphRefs>,
     /// Child graph nodes that inherit from this node.
+    #[schemars(skip)]
     pub children: Option<GraphRefs>,
     /// Module deployment settings.
     pub deploy: Option<Deploy>,
     /// Validation behaviour.
+    #[schemars(skip)]
     pub validation: Option<Validation>,
     /// Container runtime and platform configuration.
     pub config: Option<Config>,
@@ -38,7 +53,7 @@ pub struct GraphRefs {
 }
 
 /// Module deployment settings (`[deploy]`).
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Default, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct Deploy {
     /// Whether the NixOS / HM module should render this container.
@@ -48,10 +63,12 @@ pub struct Deploy {
 }
 
 /// Deploy scope.
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum DeployTarget {
+    /// NixOS system manager and rootful Podman.
     System,
+    /// Home Manager user manager and rootless Podman.
     User,
 }
 
@@ -72,38 +89,56 @@ pub enum ValidationLevel {
 }
 
 /// All container configuration (`[config]`).
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Default, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct Config {
+    /// Runtime packages and process.
     pub runtime: Option<Runtime>,
+    /// Supported Quadlet container settings.
     pub container: Option<Container>,
+    /// Supported filesystem volume settings.
     pub filesystem: Option<Filesystem>,
+    /// Supported published-port settings.
     pub network: Option<Network>,
     /// Extra Quadlet `.network` units (`[[config.networks]]`).
+    #[schemars(skip)]
     pub networks: Option<Vec<NetworkUnit>>,
     /// Extra Quadlet `.volume` units (`[[config.volumes]]`).
+    #[schemars(skip)]
     pub volumes: Option<Vec<VolumeUnit>>,
+    #[schemars(skip)]
     pub security: Option<Security>,
+    #[schemars(skip)]
     pub resources: Option<Resources>,
+    #[schemars(skip)]
     pub secrets: Option<Vec<Secret>>,
+    #[schemars(skip)]
     pub workspace: Option<Workspace>,
+    #[schemars(skip)]
     pub home: Option<Home>,
+    #[schemars(skip)]
     pub attach: Option<Attach>,
+    /// Supported systemd service settings.
     pub service: Option<Service>,
+    #[schemars(skip)]
     pub quadlet: Option<Quadlet>,
 }
 
 /// Runtime configuration (`[config.runtime]`).
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Default, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct Runtime {
     /// Only `"rootfs-store"` is supported today.
+    #[schemars(regex(pattern = r"^rootfs-store$"))]
     pub mode: Option<String>,
     /// Nix packages realised onto the container PATH.
+    #[schemars(inner(length(min = 1)))]
     pub packages: Option<Vec<String>>,
-    /// The process to run inside the container.
+    /// The non-empty process argument vector to run inside the container.
+    #[schemars(length(min = 1), inner(length(min = 1)))]
     pub command: Option<Vec<String>>,
     /// Package mutations applied after the graph merge (module-only).
+    #[schemars(skip)]
     pub package_ops: Option<PackageOps>,
 }
 
@@ -125,40 +160,77 @@ pub struct PackageReplace {
 }
 
 /// Container settings (`[config.container]`).
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Default, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct Container {
+    #[schemars(skip)]
     pub name: Option<String>,
+    /// Literal Quadlet `HostName=` value.
+    #[schemars(length(min = 1))]
     pub hostname: Option<String>,
+    #[schemars(skip)]
     pub pod: Option<String>,
+    #[schemars(skip)]
     pub entrypoint: Option<Vec<String>>,
+    #[schemars(skip)]
     pub stop_signal: Option<String>,
+    #[schemars(skip)]
     pub stop_timeout: Option<u32>,
+    /// Existing process working directory inside the container.
+    #[schemars(length(min = 1))]
     pub working_dir: Option<String>,
+    /// Literal Quadlet `User=` value.
+    #[schemars(length(min = 1))]
     pub user: Option<String>,
+    /// Literal Quadlet `Group=` value; requires `user` during resolution.
+    #[schemars(length(min = 1))]
     pub group: Option<String>,
+    #[schemars(skip)]
     pub timezone: Option<String>,
+    #[schemars(skip)]
     pub notify: Option<String>,
+    #[schemars(skip)]
     pub run_init: Option<bool>,
+    #[schemars(skip)]
     pub annotations: Option<HashMap<String, String>>,
+    /// Environment assignments rendered in sorted key order.
     pub environment: Option<HashMap<String, String>>,
+    /// Ordered literal Quadlet `EnvironmentFile=` paths.
+    #[schemars(inner(length(min = 1)))]
     pub environment_file: Option<Vec<String>>,
+    #[schemars(skip)]
     pub environment_host: Option<bool>,
+    #[schemars(skip)]
     pub podman_args: Option<Vec<String>>,
+    #[schemars(skip)]
     pub global_args: Option<Vec<String>>,
+    #[schemars(skip)]
     pub ip: Option<String>,
+    #[schemars(skip)]
     pub ip6: Option<String>,
+    #[schemars(skip)]
     pub network_alias: Option<Vec<String>>,
+    #[schemars(skip)]
     pub expose_host_port: Option<Vec<String>>,
+    #[schemars(skip)]
     pub uid_map: Option<Vec<String>>,
+    #[schemars(skip)]
     pub gid_map: Option<Vec<String>>,
+    #[schemars(skip)]
     pub sub_uid_map: Option<String>,
+    #[schemars(skip)]
     pub sub_gid_map: Option<String>,
+    #[schemars(skip)]
     pub shm_size: Option<String>,
+    #[schemars(skip)]
     pub mask: Option<Vec<String>>,
+    #[schemars(skip)]
     pub unmask_paths: Option<Vec<String>>,
+    #[schemars(skip)]
     pub sysctl: Option<Vec<String>>,
+    #[schemars(skip)]
     pub log_driver: Option<String>,
+    #[schemars(skip)]
     pub health: Option<Health>,
 }
 
@@ -180,26 +252,38 @@ pub struct Health {
 }
 
 /// Filesystem configuration (`[config.filesystem]`).
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Default, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct Filesystem {
+    #[schemars(skip)]
     pub read_only: Option<bool>,
+    #[schemars(skip)]
     pub read_only_tmpfs: Option<bool>,
+    #[schemars(skip)]
     pub tmpfs: Option<Vec<String>>,
     /// Raw mount strings passed to `--mount`.
+    #[schemars(skip)]
     pub mounts: Option<Vec<String>>,
-    /// Bind / named volume mounts (`[[config.filesystem.volumes]]`).
+    /// Ordered literal Quadlet `Volume=` entries.
     pub volumes: Option<Vec<FilesystemVolume>>,
     /// Device passthrough (`[[config.filesystem.devices]]`).
+    #[schemars(skip)]
     pub devices: Option<Vec<Device>>,
 }
 
 /// A single volume mount (`[[config.filesystem.volumes]]`).
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct FilesystemVolume {
+    /// Optional volume source. Colons are not supported.
+    #[schemars(length(min = 1))]
     pub source: Option<String>,
+    /// Required container target. Colons are not supported.
+    #[schemars(length(min = 1))]
     pub target: String,
+    /// Optional volume mode or options. Requires `source`; colons are not
+    /// supported.
+    #[schemars(length(min = 1))]
     pub mode: Option<String>,
 }
 
@@ -213,14 +297,21 @@ pub struct Device {
 }
 
 /// Network configuration (`[config.network]`).
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Default, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct Network {
+    #[schemars(skip)]
     pub mode: Option<String>,
+    /// Ordered literal Quadlet `PublishPort=` entries.
+    #[schemars(inner(length(min = 1)))]
     pub publish: Option<Vec<String>>,
+    #[schemars(skip)]
     pub dns: Option<Vec<String>>,
+    #[schemars(skip)]
     pub dns_option: Option<Vec<String>>,
+    #[schemars(skip)]
     pub dns_search: Option<Vec<String>>,
+    #[schemars(skip)]
     pub add_host: Option<Vec<String>>,
 }
 
@@ -344,16 +435,29 @@ pub struct Attach {
 }
 
 /// systemd service settings (`[config.service]`).
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Default, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct Service {
     #[serde(rename = "type")]
+    #[schemars(skip)]
     pub service_type: Option<String>,
+    /// Explicit systemd restart policy.
+    #[schemars(regex(
+        pattern = r"^(no|on-success|on-failure|on-abnormal|on-watchdog|on-abort|always)$"
+    ))]
     pub restart: Option<String>,
+    /// Literal systemd restart delay.
+    #[schemars(length(min = 1))]
     pub restart_sec: Option<String>,
+    /// Literal systemd start timeout.
+    #[schemars(length(min = 1))]
     pub timeout_start_sec: Option<String>,
+    /// Literal systemd stop timeout.
+    #[schemars(length(min = 1))]
     pub timeout_stop_sec: Option<String>,
+    #[schemars(skip)]
     pub remain_after_exit: Option<bool>,
+    #[schemars(skip)]
     pub restart_if_changed: Option<bool>,
 }
 
