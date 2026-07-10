@@ -1,0 +1,104 @@
+name: Bug report
+description: Report reproducible behavior that is incorrect in the current Graft scope.
+title: "bug: "
+labels:
+  - "type:bug"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for helping improve Graft. Security vulnerabilities must use [private vulnerability reporting](https://github.com/Patrick-Kappen/graft/security/advisories/new), not this public form.
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Preflight
+      options:
+        - label: I searched existing issues for this problem.
+          required: true
+        - label: This is not a security vulnerability or a report containing secrets.
+          required: true
+        - label: I removed private hostnames, paths, endpoints, repositories, credentials, and unrelated logs.
+          required: true
+
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Affected scope
+      options:
+        - CLI or TOML resolution
+        - NixOS system materialisation
+        - Home Manager user materialisation
+        - Quadlet or systemd generation
+        - Podman runtime behavior
+        - Documentation or example behavior
+        - Other or unknown
+    validations:
+      required: true
+
+  - type: dropdown
+    id: target
+    attributes:
+      label: Target mode
+      options:
+        - system / rootful
+        - user / rootless
+        - not applicable
+        - unknown
+    validations:
+      required: true
+
+  - type: dropdown
+    id: architecture
+    attributes:
+      label: Architecture
+      options:
+        - x86_64-linux
+        - aarch64-linux
+        - other
+        - unknown
+    validations:
+      required: true
+
+  - type: textarea
+    id: versions
+    attributes:
+      label: Relevant versions
+      description: List only relevant, sanitized version identifiers.
+      placeholder: |
+        Graft release or commit:
+        NixOS / Nixpkgs / Home Manager:
+        Podman / Quadlet:
+        systemd:
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Provide the smallest sanitized TOML, configuration fragment, and command sequence that demonstrates the problem.
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include only the relevant sanitized error or output, not a complete environment or log dump.
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+      description: Optional sanitized context that materially helps reproduce the issue.

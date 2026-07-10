@@ -1,0 +1,71 @@
+name: Feature or design proposal
+description: Propose a user-visible capability or architecture decision before implementation.
+title: "design: "
+labels:
+  - "type:design"
+  - "status:needs-design"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Graft discusses new behavior before implementation. Review the roadmap, vision, non-goals, and existing trackers first.
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Preflight
+      options:
+        - label: I searched existing issues and trackers for this proposal.
+          required: true
+        - label: I reviewed the current roadmap, long-term vision, and non-goals.
+          required: true
+        - label: This proposal contains no secrets or private infrastructure details.
+          required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: Describe the user or operator problem without assuming an implementation.
+    validations:
+      required: true
+
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: Explain observable success and who benefits.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: horizon
+    attributes:
+      label: Product horizon
+      options:
+        - Current rootfs-store foundation
+        - Active server workload or temporary-agent roadmap
+        - Long-term portable workload vision
+        - Unknown; needs triage
+    validations:
+      required: true
+
+  - type: textarea
+    id: boundaries
+    attributes:
+      label: Architecture and security boundaries
+      description: Note effects on typed intent, resolver ownership, Nix materialisation, systemd lifecycle, Podman runtime, host policy, or isolation.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Include existing Graft behavior or external tools that may already solve the problem.
+
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Related issues or dependencies
+      description: Link relevant design, security, compatibility, roadmap, or implementation issues.
