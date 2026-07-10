@@ -2,8 +2,9 @@
 //!
 //! All fields are `Option<_>` so that partial configs (used as override layers)
 //! parse successfully and can be merged with a base layer later.
-//! Validation of required fields (e.g. `home.source` when `home.mode =
-//! "persistent"`) happens at use-time, not at parse-time.
+//! Validation of required fields and cross-field constraints (e.g.
+//! `config.container.group` requires `config.container.user`) happens at
+//! use-time, not at parse-time.
 //!
 //! The generated JSON Schema describes complete, currently supported workload
 //! definitions. Schema-only skips intentionally hide reserved parser fields.
@@ -18,7 +19,7 @@ use std::collections::HashMap;
 #[schemars(
     title = "Graft container configuration v1",
     description = "Supported Graft TOML workload intent for schema version 1.",
-    extend("$id" = "https://raw.githubusercontent.com/Patrick-Kappen/graft/main/crates/graft/schema/graft-v1.schema.json")
+    extend("$id" = "urn:graft:schema:v1")
 )]
 pub struct ContainerConfig {
     /// Schema version. Must be `1`.

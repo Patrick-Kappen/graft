@@ -1,5 +1,5 @@
 {
-  "$id": "https://raw.githubusercontent.com/Patrick-Kappen/graft/main/crates/graft/schema/graft-v1.schema.json",
+  "$id": "urn:graft:schema:v1",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Graft container configuration v1",
   "description": "Supported Graft TOML workload intent for schema version 1.",
