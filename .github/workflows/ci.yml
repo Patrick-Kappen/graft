@@ -192,6 +192,7 @@ jobs:
           nix build \
             .#checks.x86_64-linux.nixos-module-eval \
             .#checks.x86_64-linux.home-manager-module-eval \
+            .#checks.x86_64-linux.quadlet-lifecycle \
             --print-out-paths
           nix flake check
 

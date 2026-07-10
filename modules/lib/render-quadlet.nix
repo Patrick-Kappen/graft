@@ -52,12 +52,18 @@ let
       publish = network.publish or [ ];
       publishLines = lib.concatMapStrings (port: "PublishPort=${escapeSystemdExecArg port}\n") publish;
       service = ctr.service or { };
+      serviceType = service.type or null;
+      remainAfterExit = service.remainAfterExit or null;
       restart = service.restart or null;
       restartSec = service.restartSec or null;
       timeoutStartSec = service.timeoutStartSec or null;
       timeoutStopSec = service.timeoutStopSec or null;
       serviceLines =
-        lib.optionalString (restart != null) "Restart=${toString restart}\n"
+        lib.optionalString (serviceType != null) "Type=${toString serviceType}\n"
+        +
+          lib.optionalString (remainAfterExit != null)
+            "RemainAfterExit=${if remainAfterExit then "yes" else "no"}\n"
+        + lib.optionalString (restart != null) "Restart=${toString restart}\n"
         + lib.optionalString (restartSec != null) "RestartSec=${toString restartSec}\n"
         + lib.optionalString (timeoutStartSec != null) "TimeoutStartSec=${toString timeoutStartSec}\n"
         + lib.optionalString (timeoutStopSec != null) "TimeoutStopSec=${toString timeoutStopSec}\n";

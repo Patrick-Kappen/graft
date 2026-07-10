@@ -138,6 +138,10 @@
             nixosEval.config.environment.etc."containers/systemd/escape-system.container".text;
           nixosHostRendered =
             nixosEval.config.environment.etc."containers/systemd/host-system.container".text;
+          nixosTimerJobRendered =
+            nixosEval.config.environment.etc."containers/systemd/timer-job-system.container".text;
+          nixosSetupRendered =
+            nixosEval.config.environment.etc."containers/systemd/setup-system.container".text;
           homeManagerRendered =
             homeManagerEval.config.xdg.configFile."containers/systemd/user.container".text;
           homeManagerPlainRendered =
@@ -146,6 +150,10 @@
             homeManagerEval.config.xdg.configFile."containers/systemd/escape-user.container".text;
           homeManagerHostRendered =
             homeManagerEval.config.xdg.configFile."containers/systemd/host-user.container".text;
+          homeManagerTimerJobRendered =
+            homeManagerEval.config.xdg.configFile."containers/systemd/timer-job-user.container".text;
+          homeManagerSetupRendered =
+            homeManagerEval.config.xdg.configFile."containers/systemd/setup-user.container".text;
           quickstartNixosRendered =
             quickstartNixosEval.config.environment.etc."containers/systemd/graft-example.container".text;
           quickstartHomeManagerRendered =
@@ -188,7 +196,7 @@
             "Group=1000"
             "WorkingDir=/workspace"
             expectedEnvironmentLines
-            "\n[Service]\nRestartSec=10s\nTimeoutStartSec=2m\nTimeoutStopSec=30s"
+            "\n[Service]\nType=notify\nRestart=on-failure\nRestartSec=10s\nTimeoutStartSec=2m\nTimeoutStopSec=30s"
           ];
           commonEscapedInfixes = [
             "User=100%%0"
@@ -198,7 +206,7 @@
             expectedEscapedEnvironmentLines
             "EnvironmentFile=\"/etc/graft/$$USER-%%n.env\"\nEnvironmentFile=\"/etc/graft/my config.env\"\nEnvironmentFile=\"/etc/graft/env\\\\prod.env\""
             "Volume=/tmp/graft-$$USER-%%n:/data$$HOME-%%h:ro%%z"
-            "\n[Service]\nRestartSec=15s"
+            "\n[Service]\nRestart=on-failure\nRestartSec=15s"
           ];
           commonPlainMissingInfixes = [
             "HostName="
@@ -208,6 +216,9 @@
             "Environment="
             "EnvironmentFile="
             "PublishPort="
+            "Type="
+            "RemainAfterExit="
+            "Restart="
             "RestartSec="
             "TimeoutStartSec="
             "TimeoutStopSec="
@@ -300,6 +311,16 @@
               "ContainerName=nix-check-host-system"
               "HostName=host-system.local"
             ];
+            assert assertHasInfixes nixosTimerJobRendered [
+              "ContainerName=nix-check-timer-job-system"
+              ''Exec="/bin/true"''
+              "\n[Service]\nType=oneshot\nRemainAfterExit=no\nRestart=on-failure\nRestartSec=10s\nTimeoutStartSec=2m\nTimeoutStopSec=30s"
+            ];
+            assert assertHasInfixes nixosSetupRendered [
+              "ContainerName=nix-check-setup-system"
+              ''Exec="/bin/true"''
+              "\n[Service]\nType=oneshot\nRemainAfterExit=yes\nTimeoutStartSec=2m\nTimeoutStopSec=30s"
+            ];
             assert !(nixosEval.config.environment.etc ? "containers/systemd/user.container");
             assert !(nixosEval.config.environment.etc ? "containers/systemd/escape-user.container");
             assert !(nixosEval.config.environment.etc ? "containers/systemd/host-user.container");
@@ -339,6 +360,16 @@
               "ContainerName=nix-check-host-user"
               "HostName=host-user.local"
             ];
+            assert assertHasInfixes homeManagerTimerJobRendered [
+              "ContainerName=nix-check-timer-job-user"
+              ''Exec="/bin/true"''
+              "\n[Service]\nType=oneshot\nRemainAfterExit=no\nRestart=on-failure\nRestartSec=10s\nTimeoutStartSec=2m\nTimeoutStopSec=30s"
+            ];
+            assert assertHasInfixes homeManagerSetupRendered [
+              "ContainerName=nix-check-setup-user"
+              ''Exec="/bin/true"''
+              "\n[Service]\nType=oneshot\nRemainAfterExit=yes\nTimeoutStartSec=2m\nTimeoutStopSec=30s"
+            ];
             assert !(homeManagerEval.config.xdg.configFile ? "containers/systemd/system.container");
             assert !(homeManagerEval.config.xdg.configFile ? "containers/systemd/escape-system.container");
             assert !(homeManagerEval.config.xdg.configFile ? "containers/systemd/host-system.container");
@@ -349,6 +380,58 @@
             );
             assert !(lib.hasInfix "WorkingDir=" quickstartHomeManagerRendered);
             pkgs.writeText "graft-home-manager-module-eval" homeManagerRendered;
+
+          quadlet-lifecycle =
+            let
+              sources = {
+                long-running-system = pkgs.writeText "long-running-system.container" nixosRendered;
+                long-running-user = pkgs.writeText "long-running-user.container" homeManagerRendered;
+                timer-job-system = pkgs.writeText "timer-job-system.container" nixosTimerJobRendered;
+                timer-job-user = pkgs.writeText "timer-job-user.container" homeManagerTimerJobRendered;
+                setup-system = pkgs.writeText "setup-system.container" nixosSetupRendered;
+                setup-user = pkgs.writeText "setup-user.container" homeManagerSetupRendered;
+              };
+            in
+            pkgs.runCommand "graft-quadlet-lifecycle" { } ''
+              mkdir source-system source-user generated-system generated-user $out
+              cp ${sources.long-running-system} source-system/long-running-system.container
+              cp ${sources.timer-job-system} source-system/timer-job-system.container
+              cp ${sources.setup-system} source-system/setup-system.container
+              cp ${sources.long-running-user} source-user/long-running-user.container
+              cp ${sources.timer-job-user} source-user/timer-job-user.container
+              cp ${sources.setup-user} source-user/setup-user.container
+
+              QUADLET_UNIT_DIRS="$PWD/source-system" \
+                ${pkgs.podman}/libexec/podman/quadlet \
+                generated-system generated-system generated-system
+              QUADLET_UNIT_DIRS="$PWD/source-user" \
+                ${pkgs.podman}/libexec/podman/quadlet -user \
+                generated-user generated-user generated-user
+
+              for scope in system user; do
+                generated="generated-$scope"
+
+                grep -Fx "Type=notify" "$generated/long-running-$scope.service"
+                grep -F -- "--sdnotify=conmon -d" "$generated/long-running-$scope.service"
+
+                grep -Fx "Type=oneshot" "$generated/timer-job-$scope.service"
+                grep -Fx "RemainAfterExit=no" "$generated/timer-job-$scope.service"
+                ! grep -F -- "--sdnotify=" "$generated/timer-job-$scope.service"
+                ! grep -E '^ExecStart=.* -d( |$)' "$generated/timer-job-$scope.service"
+
+                grep -Fx "Type=oneshot" "$generated/setup-$scope.service"
+                grep -Fx "RemainAfterExit=yes" "$generated/setup-$scope.service"
+                ! grep -F -- "--sdnotify=" "$generated/setup-$scope.service"
+                ! grep -E '^ExecStart=.* -d( |$)' "$generated/setup-$scope.service"
+              done
+
+              mkdir -p runtime/systemd
+              XDG_RUNTIME_DIR="$PWD/runtime" \
+                SYSTEMD_UNIT_PATH="$PWD/generated-system:$PWD/generated-user:${pkgs.podman}/share/systemd/user:${pkgs.systemd}/example/systemd/user:${pkgs.systemd}/example/systemd/system" \
+                ${lib.getExe' pkgs.systemd "systemd-analyze"} --user verify \
+                generated-system/*.service generated-user/*.service
+              cp generated-system/*.service generated-user/*.service $out/
+            '';
         }
       );
 

@@ -1,0 +1,14 @@
+version = 1
+name = "nix-check-setup-system"
+
+[deploy]
+target = "system"
+
+[config.runtime]
+packages = ["coreutils"]
+command = ["/bin/true"]
+
+[config.service]
+lifecycle = "setup"
+timeoutStartSec = "2m"
+timeoutStopSec = "30s"
