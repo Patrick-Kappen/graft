@@ -20,6 +20,12 @@ TOML → CLI resolved JSON → NixOS/Home Manager module → .container
 Symlinks are supported. NixOS can build a file in the store and link it through
 `environment.etc`. Home Manager can link a file through `xdg.configFile`.
 
+Today, the `.container` filename and resulting systemd service stem come from
+the TOML filename. `ContainerName=` comes from resolved `name`. Keep the
+filename stem and `name` equal until
+[#107](https://github.com/Patrick-Kappen/graft/issues/107) defines the final
+identity contract.
+
 ## Responsibilities
 
 ### CLI
@@ -172,8 +178,12 @@ lowerdir = /nix/store/xxx-graft-env   (read-only)
 upperdir = container storage          (writable)
 ```
 
-Writes inside the container go to the upperdir. That upperdir is the future
-basis for promote/diff workflows.
+Writes inside the container go to the upperdir. The current `Rootfs=...:O` mode
+does not configure a persistent, inspectable upperdir, so users must not rely on
+those writes after the runtime container is removed. It is not a promote flow.
+Reviewable overlay inspection, diff, and promotion are future work in
+[#160](https://github.com/Patrick-Kappen/graft/issues/160) and
+[#175](https://github.com/Patrick-Kappen/graft/issues/175).
 
 System containers (`target = "system"`) use rootful Podman with kernel overlayfs
 through `:O`. User containers (`target = "user"`) use rootless Podman and

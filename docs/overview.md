@@ -32,6 +32,11 @@ target = "user"   → ~/.config/containers/systemd/<name>.container
 systemd knows about the unit; it does not auto-start by default
 ```
 
+Today, the generated `.container` filename and service stem come from the TOML
+filename, while `ContainerName=` comes from top-level `name`. Keep those values
+equal until [#107](https://github.com/Patrick-Kappen/graft/issues/107) defines
+the final identity contract.
+
 ## Responsibilities
 
 ### TOML
@@ -173,6 +178,9 @@ rendered.
 - Graft uses `Rootfs=`, not `Image=`, for store-based containers.
 - The rootfs is a store path built from Nix packages.
 - `Rootfs=...:O` gives Podman a writable overlay above the read-only store rootfs.
+- The current mode configures no persistent, inspectable upperdir. Do not rely
+  on overlay writes after the runtime container is removed; diff/promote is
+  future work tracked by [#160](https://github.com/Patrick-Kappen/graft/issues/160).
 - `/nix/store` from the host is mounted read-only inside the container.
 - Not in the store means not available in the container.
 - No downloads happen at runtime.

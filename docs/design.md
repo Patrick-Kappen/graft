@@ -165,6 +165,9 @@ Important details:
 
 - `Image=` is not used for `rootfs-store` containers.
 - `Rootfs=...:O` gives Podman a writable overlay above the read-only store rootfs.
+- The current mode configures no persistent, inspectable upperdir. Do not rely
+  on overlay writes after the runtime container is removed; reviewable
+  diff/promote is future work tracked by [#160](https://github.com/Patrick-Kappen/graft/issues/160).
 - `/nix/store` is mounted read-only inside the container.
 - If a package is not in the generated rootfs/store closure, it is not available
   inside the container.

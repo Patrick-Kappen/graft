@@ -136,7 +136,9 @@ TOML remains user intent; Nix remains the materialisation substrate.
 ## Promote / diff workflow
 
 Rootfs-store containers use writable overlay state above a read-only Nix store
-rootfs. That overlay can become the basis for review workflows.
+rootfs. The current `Rootfs=...:O` mode does not configure a persistent,
+inspectable upperdir; it must not be treated as a current promote workflow. A
+future explicit overlay design can become the basis for review workflows.
 
 Goals:
 

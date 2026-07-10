@@ -10,13 +10,12 @@ parse-only today and do not yet affect Quadlet output.
 ## NixOS module
 
 ```nix
-{ inputs, pkgs, ... }:
+{ inputs, ... }:
 {
   imports = [ inputs.graft.nixosModules.graft ];
 
   services.graft = {
     enable = true;
-    package = inputs.graft.packages.${pkgs.stdenv.hostPlatform.system}.default;
     configRoot = ./containers;
     configRoots = [
       ./containers/common
@@ -29,7 +28,7 @@ parse-only today and do not yet affect Quadlet output.
 | Option | Type | Default | Description |
 | --- | --- | --- | --- |
 | `services.graft.enable` | bool | `false` | Enable system/rootful Graft containers. |
-| `services.graft.package` | package or null | `null` | Package providing `graft` and `graft-pause`; required when `configRoot` or `configRoots` is set. |
+| `services.graft.package` | package or null | `null` | Package providing `graft` and `graft-pause`; required by the underlying module when `configRoot` or `configRoots` is set. The exported flake module supplies the default package. |
 | `services.graft.configRoot` | path or null | `null` | Directory containing `*.toml` container definitions. |
 | `services.graft.configRoots` | list of paths | `[]` | Additional directories containing `*.toml` container definitions, read after `configRoot` in list order. |
 
@@ -38,20 +37,25 @@ places files under `/etc/containers/systemd/`.
 
 `configRoot` is kept for single-root configurations. When both `configRoot` and
 `configRoots` are set, Graft reads `configRoot` first and then each
-`configRoots` entry in order. Configured roots must exist. Duplicate TOML
-filenames across roots fail evaluation, and duplicate resolved container names
-within the same target fail evaluation.
+`configRoots` entry in order. Configured roots must exist. In a Git flake, new
+roots and TOML files must be tracked before Nix can evaluate them. Duplicate
+TOML filenames across roots fail evaluation, and duplicate resolved container
+names within the same target fail evaluation.
+
+The exported `inputs.graft.nixosModules.graft` module sets
+`services.graft.package` with `mkDefault`. Set it explicitly only to override
+the Graft package; importing `modules/nixos.nix` directly requires an explicit
+package when roots are configured.
 
 ## Home Manager module
 
 ```nix
-{ inputs, pkgs, ... }:
+{ inputs, ... }:
 {
   imports = [ inputs.graft.homeManagerModules.graft ];
 
   programs.graft = {
     enable = true;
-    package = inputs.graft.packages.${pkgs.stdenv.hostPlatform.system}.default;
     configRoot = ./containers;
     configRoots = [
       ./containers/common
@@ -64,15 +68,20 @@ within the same target fail evaluation.
 | Option | Type | Default | Description |
 | --- | --- | --- | --- |
 | `programs.graft.enable` | bool | `false` | Enable user/rootless Graft containers. |
-| `programs.graft.package` | package or null | `null` | Package providing `graft` and `graft-pause`; required when `configRoot` or `configRoots` is set. |
+| `programs.graft.package` | package or null | `null` | Package providing `graft` and `graft-pause`; required by the underlying module when `configRoot` or `configRoots` is set. The exported flake module supplies the default package. |
 | `programs.graft.configRoot` | path or null | `null` | Directory containing `*.toml` container definitions. |
 | `programs.graft.configRoots` | list of paths | `[]` | Additional directories containing `*.toml` container definitions, read after `configRoot` in list order. |
 
 The Home Manager module renders only resolved containers with `target = "user"`
 and places files under `~/.config/containers/systemd/`.
 
-`configRoot` and `configRoots` use the same ordering and collision rules as the
-NixOS module.
+`configRoot` and `configRoots` use the same ordering, tracked-source, and
+collision rules as the NixOS module.
+
+The exported `inputs.graft.homeManagerModules.graft` module sets
+`programs.graft.package` with `mkDefault`. Set it explicitly only to override
+the Graft package; importing `modules/home-manager.nix` directly requires an
+explicit package when roots are configured.
 
 ## Current TOML behaviour
 
@@ -80,6 +89,10 @@ Implemented today:
 
 - `version = 1` is required.
 - `name` is required and must be a safe container name.
+- The current generated `.container` filename and systemd service stem come from
+  the TOML filename; `ContainerName=` comes from `name`. Keep both values equal
+  until [#107](https://github.com/Patrick-Kappen/graft/issues/107) defines the
+  final identity contract.
 - `deploy.target` defaults to `system`.
 - `deploy.enable = false` prevents rendering.
 - `config.container.hostname` is rendered as Quadlet `HostName=` when explicitly set.
@@ -91,7 +104,10 @@ Implemented today:
 - `config.filesystem.volumes` is rendered as ordered Quadlet `Volume=` lines when explicitly set.
 - `config.network.publish` is rendered as ordered Quadlet `PublishPort=` lines when explicitly set.
 - `config.runtime.mode` supports only `rootfs-store`.
-- `config.runtime.packages` are mapped to Nix packages.
+- `config.runtime.packages` are mapped to packages in the target configuration's
+  `pkgs`; the host flake pin controls their versions.
+- Custom package names require an explicitly trusted host overlay or package-set
+  extension; TOML does not evaluate arbitrary repository Nix.
 - `graft-pause` is always added to the package list.
 - missing `config.runtime.command` becomes `['/bin/graft-pause']`.
 - explicit `config.runtime.command` is preserved.

@@ -5,15 +5,15 @@
 #
 # Then import this module (or inline it) in your NixOS configuration.
 
-{ inputs, pkgs, ... }:
+{ inputs, ... }:
 {
   imports = [ inputs.graft.nixosModules.graft ];
 
   services.graft = {
     enable = true;
 
-    # Package providing the graft CLI and graft-pause binary.
-    package = inputs.graft.packages.${pkgs.stdenv.hostPlatform.system}.default;
+    # The exported flake module supplies the Graft package by default.
+    # Set package explicitly only to override it.
 
     # Directory containing your .toml container definitions.
     # Place it wherever makes sense in your repo.
