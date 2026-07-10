@@ -379,6 +379,11 @@ explicit local, remote, and temporary placement is described separately in
 
 ## Documentation
 
+Complete runnable onboarding paths:
+
+- [NixOS system-container quickstart](docs/quickstart/nixos.md)
+- [Home Manager user-container quickstart](docs/quickstart/home-manager.md)
+
 - [Overview](docs/overview.md)
 - [Long-term vision](docs/vision.md)
 - [Design](docs/design.md)
