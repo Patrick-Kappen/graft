@@ -54,7 +54,8 @@ Exec="bash" "-c" "echo graft-example-ready; exec /bin/graft-pause"
 Volume=/nix/store:/nix/store:ro
 ```
 
-After activation, it is an ordinary systemd service and its journal contains:
+After activation and an explicit manual start, it is an ordinary systemd
+service and its journal contains:
 
 ```text
 graft-example-ready
@@ -77,8 +78,10 @@ checks:
   of introducing a separate container supervisor.
 - **System and user scope:** one intent model targets NixOS system/rootful or
   Home Manager user/rootless materialisation.
-- **Explicit host policy:** Graft does not silently enable Podman, linger,
-  firewall rules, accounts, mounts, or privileged capabilities.
+- **Explicit host policy:** apart from the generated read-only `/nix/store`
+  mount required by `rootfs-store`, Graft does not silently enable Podman,
+  linger, firewall rules, accounts, user-specified host mounts, or privileged
+  capabilities.
 - **Minimal defaults:** no default shell, `coreutils`, restart policy, or
   autostart is hidden in the workload.
 
