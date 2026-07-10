@@ -6,7 +6,7 @@
 
 <p>
   <a href="https://github.com/Patrick-Kappen/graft/actions/workflows/ci.yml"><img src="https://github.com/Patrick-Kappen/graft/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="https://codecov.io/gh/Patrick-Kappen/graft"><img src="https://codecov.io/gh/Patrick-Kappen/graft/branch/main/graph/badge.svg" alt="Codecov"></a>
+  <a href="https://app.codecov.io/gh/Patrick-Kappen/graft"><img src="https://codecov.io/gh/Patrick-Kappen/graft/branch/main/graph/badge.svg" alt="Codecov"></a>
   <a href="https://github.com/Patrick-Kappen/graft/actions/workflows/pages.yml"><img src="https://github.com/Patrick-Kappen/graft/actions/workflows/pages.yml/badge.svg" alt="Pages"></a>
   <img src="https://img.shields.io/badge/Nix-flake-blue?logo=nixos" alt="Nix flake">
   <img src="https://img.shields.io/badge/Rust-CLI-orange?logo=rust" alt="Rust">
@@ -127,7 +127,9 @@ materialised by Nix, picked up by Quadlet, and triggered by systemd.
 
 A useful rootless job can be described as a small TOML file: pick a Nix package
 as the entrypoint, mount a state directory, mount any read-only inputs, and let a
-normal systemd user timer trigger the generated service.
+normal systemd user timer trigger the generated service. This production-shaped
+example uses the project-specific `session-indexer` package, supplied by a
+trusted host overlay; it is illustrative rather than a copy-paste quickstart.
 
 ```toml
 version = 1
@@ -156,6 +158,23 @@ configuration; the TOML remains container intent. This is the shape Graft is
 built for: small declarative workloads without images or mutable package
 installation.
 
+## Host prerequisites
+
+Graft materialises Quadlet files; it does not configure the container host.
+
+- **NixOS system containers:** enable a Podman installation with Quadlet support
+  in the host configuration, for example `virtualisation.podman.enable = true;`.
+  The generated units run through the system systemd manager as rootful Podman
+  workloads.
+- **Home Manager user containers:** the host must already provide Podman with
+  Quadlet support to the user systemd manager, including any rootless overlay
+  support required by that host. The generated units run through
+  `systemctl --user` as rootless Podman workloads.
+- Graft does not enable Podman, configure a firewall or DNS, create accounts,
+  enable user linger, or otherwise mutate host policy. Configure those choices
+  separately. In particular, unattended user services need linger enabled by
+  host policy.
+
 ## Quickstart: NixOS system containers
 
 Add Graft as a flake input:
@@ -169,13 +188,12 @@ Add Graft as a flake input:
 Import the module and point it at a directory of TOML files:
 
 ```nix
-{ inputs, pkgs, ... }:
+{ inputs, ... }:
 {
   imports = [ inputs.graft.nixosModules.graft ];
 
   services.graft = {
     enable = true;
-    package = inputs.graft.packages.${pkgs.stdenv.hostPlatform.system}.default;
     configRoot = ./containers;
   };
 }
@@ -184,11 +202,10 @@ Import the module and point it at a directory of TOML files:
 Use `configRoots` for additional shared or host-specific directories:
 
 ```nix
-{ config, inputs, pkgs, ... }:
+{ config, inputs, ... }:
 {
   services.graft = {
     enable = true;
-    package = inputs.graft.packages.${pkgs.stdenv.hostPlatform.system}.default;
     configRoots = [
       ./containers/common
       ./hosts/${config.networking.hostName}/containers
@@ -204,9 +221,11 @@ version = 1
 name = "test"
 ```
 
-Rebuild, then start manually:
+Because Git flakes include only tracked source files, stage the new TOML before
+rebuilding:
 
 ```bash
+git add containers/test.toml
 sudo nixos-rebuild switch --flake .#your-host
 sudo systemctl start test.service
 ```
@@ -217,13 +236,12 @@ auto-start unless that behaviour is explicitly modelled in a future release.
 ## Quickstart: Home Manager user containers
 
 ```nix
-{ inputs, pkgs, ... }:
+{ inputs, ... }:
 {
   imports = [ inputs.graft.homeManagerModules.graft ];
 
   programs.graft = {
     enable = true;
-    package = inputs.graft.packages.${pkgs.stdenv.hostPlatform.system}.default;
     configRoot = ./containers;
   };
 }
@@ -242,9 +260,10 @@ name = "dev"
 target = "user"
 ```
 
-Activate Home Manager, then start manually:
+Stage the new TOML before activation when using a Git flake:
 
 ```bash
+git add containers/dev.toml
 home-manager switch --flake .#your-user
 systemctl --user daemon-reload
 systemctl --user start dev.service
@@ -252,6 +271,24 @@ systemctl --user start dev.service
 
 If Home Manager is integrated into your NixOS system, your normal
 `nixos-rebuild switch` path can activate it instead.
+
+### Config roots, package lookup, and names
+
+Configured `configRoot` and `configRoots` directories must exist and be visible
+to the flake source; stage new TOML files before evaluation. The exported Graft
+flake modules provide the Graft package by default. Set `services.graft.package`
+or `programs.graft.package` only to override that package deliberately.
+
+Runtime package names resolve from the target configuration's `pkgs`, so the
+host flake pin controls versions. Custom package names require an explicitly
+trusted host overlay or package-set extension; TOML does not evaluate arbitrary
+Nix from a repository.
+
+Today, the generated `.container` filename and resulting service stem come from
+the TOML filename, while `ContainerName=` comes from top-level `name`. Keep the
+filename stem and `name` equal (as in `test.toml` and `name = "test"`) until
+[#107](https://github.com/Patrick-Kappen/graft/issues/107) establishes the final
+identity contract.
 
 ## TOML basics
 
@@ -359,7 +396,7 @@ Graft is its own design, but it is informed by ideas from:
 - [devenv](https://github.com/cachix/devenv) for project-local declarative development environments.
 - [nix-direnv](https://github.com/nix-community/nix-direnv) for lightweight Nix-native per-repo workflows.
 - [compose2nix](https://github.com/aksiksi/compose2nix) for translating container intent into NixOS-managed services.
-- [Podman Quadlet](https://docs.podman.io/en/latest/markdown/podman-quadlet.5.html) for systemd-native Podman service generation.
+- [Podman Quadlet](https://docs.podman.io/en/latest/markdown/podman-systemd.unit.5.html) for systemd-native Podman service generation.
 - NixOS and Home Manager modules for declarative system/user materialisation.
 
 Graft is not a fork or wrapper around these projects; it combines similar ideas
