@@ -124,6 +124,7 @@ Implemented today:
 - `graft-pause` is always added to the package list.
 - missing `config.runtime.command` becomes `['/bin/graft-pause']`.
 - explicit `config.runtime.command` is preserved.
+- `config.service.lifecycle` accepts `long-running`, `job`, or `setup` and renders typed systemd lifecycle fields.
 - `config.service.restart` is rendered only when explicitly set.
 - `config.service.restartSec`, `timeoutStartSec`, and `timeoutStopSec` are rendered only when explicitly set.
 
@@ -249,17 +250,31 @@ Current published port validation:
 - no DNS settings or network aliases are rendered
 - no automatic firewall rules are managed
 
+`config.service.lifecycle` is typed workload intent:
+
+- absent keeps Quadlet's implicit long-running notify behavior
+- `long-running` renders `Type=notify`
+- `job` renders `Type=oneshot` and `RemainAfterExit=no`
+- `setup` renders `Type=oneshot` and `RemainAfterExit=yes`
+- `job` and `setup` require an explicit non-empty `config.runtime.command`
+- `always`, `on-success`, and `on-watchdog` restart policies are rejected for finite lifecycles
+- raw `type` and `remainAfterExit` fields are rejected with migration diagnostics
+
+See [Workload lifecycle semantics](lifecycle.md) for state transitions and timer
+boundaries.
+
 `config.service.restartSec`, `timeoutStartSec`, and `timeoutStopSec` are treated
 as literal systemd service timing values. A `[Service]` section is rendered when
-at least one supported service field is set. Service values are rendered
-verbatim and are not `%`-escaped by Graft.
+at least one supported service field is set. Timing values are rendered verbatim
+and are not `%`-escaped by Graft.
 
 Current service timing validation:
 
 - values must not be empty or whitespace-only
 - values must not contain control characters
+- `restartSec` requires `restart` other than `no`
 - no systemd timespan parsing is performed yet
-- `[Install]`, autostart, service type, `remainAfterExit`, and `restartIfChanged` are not rendered
+- `[Install]`, autostart, and `restartIfChanged` are not rendered
 
 Not all fields from the annotated TOML reference are rendered yet. Fields that
 are parsed but not listed above should be treated as reserved/roadmap fields. See

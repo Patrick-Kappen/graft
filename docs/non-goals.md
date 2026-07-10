@@ -20,8 +20,9 @@ Deferred for v0.2:
 - no Quadlet `.volume` or `.network` unit generation
 - no automatic firewall, DNS, or network alias management
 - no systemd timespan parser for service timing values
-- no `[Install]`, autostart, service type, `remainAfterExit`, or
-  `restartIfChanged` rendering
+- no `[Install]`, autostart, or `restartIfChanged` rendering
+- no raw systemd service type or `RemainAfterExit=` passthrough; lifecycle stays
+  typed Graft intent
 - no supplemental groups, UID/GID mapping, or user namespace policy from the
   group renderer
 - no secrets materialisation or host environment passthrough

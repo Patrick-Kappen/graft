@@ -75,7 +75,7 @@ VM-equivalent isolation boundary.
 | Horizon | Status |
 | --- | --- |
 | **Available now** | Rootfs-store materialisation for NixOS and Home Manager, selected typed container fields, and manual systemd lifecycle. |
-| **Active roadmap** | Contract hardening, services/jobs/timers, lifecycle CLI, secure rootless policy, temporary instances, deterministic merging, and explicit multi-host deployment. |
+| **Active roadmap** | Contract hardening, typed timers, lifecycle CLI, secure rootless policy, temporary instances, deterministic merging, and explicit multi-host deployment. |
 | **Long-term vision** | Portable repository environments with deliberate local, remote, or temporary placement and possible additional artifact/control integrations. |
 
 Only **Available now** is implemented. Read [Roadmap](roadmap.md) for active

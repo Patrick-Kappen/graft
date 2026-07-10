@@ -1,8 +1,8 @@
 # Workload lifecycle semantics
 
-> **Design status:** approved for implementation in
-> [#131](https://github.com/Patrick-Kappen/graft/issues/131), but not implemented
-> yet. Current configuration must not use the planned `service.lifecycle` field.
+> **Status:** implemented for generated `.container` services. Native typed
+> `.timer` generation remains tracked by
+> [#134](https://github.com/Patrick-Kappen/graft/issues/134).
 
 Graft models every workload as a systemd-managed service while distinguishing
 three process lifecycles through typed workload intent. Users should not need to
@@ -10,7 +10,7 @@ choose raw systemd `Type=` or `RemainAfterExit=` values.
 
 ## Intent contract
 
-The planned TOML field is:
+The TOML field is:
 
 ```toml
 [config.service]
@@ -29,15 +29,14 @@ When `service.lifecycle` is absent, `long-running` is the default. Graft does no
 infer lifecycle from `runtime.command`: the same executable can be a daemon, a
 finite job, or a setup action depending on its arguments and purpose.
 
-The existing parser fields `service.type` and `service.remainAfterExit` are raw
-systemd-shaped, are not implemented, and are not the public lifecycle contract.
-[#131](https://github.com/Patrick-Kappen/graft/issues/131) must reject them with
-an actionable migration diagnostic instead of preserving a second way to express
-the same intent.
+The reserved parser fields `service.type` and `service.remainAfterExit` are raw
+systemd-shaped and are not the public lifecycle contract. Resolution rejects
+them with an actionable migration diagnostic instead of preserving a second way
+to express the same intent.
 
 ## Long-running service
 
-Planned input:
+Input:
 
 ```toml
 [config.runtime]
@@ -80,7 +79,7 @@ are `Type=notify`, sd-notify, and detached execution.
 
 ## Finite job
 
-Planned input:
+Input:
 
 ```toml
 [config.runtime]
@@ -137,9 +136,8 @@ Graft does not generate timer units yet. Typed schedules, missed runs, overlap,
 jitter, persistence, and exact timer-to-service identity belong to
 [#134](https://github.com/Patrick-Kappen/graft/issues/134). That implementation
 must accept only `lifecycle = "job"` for repeating schedules and reject `setup`.
-After #131 implements typed jobs, external systemd timer units may trigger a
-Graft-generated job while native timer generation remains pending. Before #131,
-`service.lifecycle` is unavailable and this workaround does not exist.
+External systemd timer units may trigger a Graft-generated `job` while native
+timer generation remains pending.
 
 Timer-job state transitions:
 
@@ -151,7 +149,7 @@ later elapse + service inactive or failed     → a new activation
 
 ## Retained setup job
 
-Planned input:
+Input:
 
 ```toml
 [config.runtime]
@@ -205,8 +203,8 @@ systemd rejects `on-success` and `always` for `Type=oneshot`. Failure-only
 restart policies can retry a failed finite command. A successful `job` remains
 inactive; a successful `setup` remains active/exited.
 
-`restartSec` is meaningful only with an effective restart policy. #131 must
-reject it when `restart` is absent or `no`, rather than accepting intent that
+`restartSec` is meaningful only with an effective restart policy. Resolution
+rejects it when `restart` is absent or `no`, rather than accepting intent that
 cannot affect runtime behavior.
 
 ## Timeouts and stopping
@@ -244,9 +242,9 @@ closed under [#106](https://github.com/Patrick-Kappen/graft/issues/106).
 
 ## Implementation boundary
 
-[#131](https://github.com/Patrick-Kappen/graft/issues/131) owns:
+The implemented contract includes:
 
-- the typed lifecycle enum and machine-readable schema update;
+- the typed lifecycle enum in the machine-readable schema;
 - resolver mapping and invalid-combination diagnostics;
 - mechanical `Type=` and `RemainAfterExit=` rendering in both Nix modules;
 - equivalent system and user fixtures;

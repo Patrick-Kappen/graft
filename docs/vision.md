@@ -45,7 +45,7 @@ choice.
 | Workload intent | What should run and what does it need? | TOML resolves a rootfs-store container intent. |
 | Artifact backend | How is that workload materialised? | Nix-store rootfs only. |
 | Placement | Where should an instance run? | Local NixOS system or Home Manager user target; later explicit remote deployment. |
-| Lifecycle | Is it a service, finite job, scheduled job, or temporary instance? | Basic service materialisation; broader lifecycle work is planned. |
+| Lifecycle | Is it a service, finite job, scheduled job, or temporary instance? | Long-running, finite-job, and retained setup semantics; schedules and temporary instances are planned. |
 | Runtime authority | Which system owns runtime state? | Quadlet generates units, systemd manages lifecycle, and Podman runs containers. |
 | Control surface | How do people and automation inspect or request operations? | Build-time CLI resolver today; runtime CLI work is planned. |
 
