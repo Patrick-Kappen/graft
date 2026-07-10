@@ -15,7 +15,9 @@ TOML → CLI → JSON stdout → Nix modules → Quadlet .container
 - **Quadlet/systemd** runs the resulting services.
 
 Users do not write Quadlet boilerplate and do not write Nix module boilerplate
-for each container. The `.container` file is output.
+for each container. The `.container` file is output. The approved, not-yet-
+implemented distinction between long-running services, finite jobs, and retained
+setup jobs is defined in [Workload lifecycle semantics](lifecycle.md).
 
 ## TOML is user intent
 
@@ -207,9 +209,12 @@ Currently proven:
   environment, environment files, published ports, volumes, and service timing
 - clean keep-alive shutdown
 
-Future work is tracked in [Roadmap](roadmap.md). Deliberate exclusions are
-tracked in [Non-goals and deferred scope](non-goals.md). Contributor workflow is
-tracked in [Development](development.md).
+The typed lifecycle contract is approved in
+[Workload lifecycle semantics](lifecycle.md) and remains future behavior until
+[#131](https://github.com/Patrick-Kappen/graft/issues/131) lands. Other future
+work is tracked in [Roadmap](roadmap.md). Deliberate exclusions are tracked in
+[Non-goals and deferred scope](non-goals.md). Contributor workflow is tracked in
+[Development](development.md).
 
 ## Future CLI control plane
 
