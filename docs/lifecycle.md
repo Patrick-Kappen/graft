@@ -137,14 +137,16 @@ Graft does not generate timer units yet. Typed schedules, missed runs, overlap,
 jitter, persistence, and exact timer-to-service identity belong to
 [#134](https://github.com/Patrick-Kappen/graft/issues/134). That implementation
 must accept only `lifecycle = "job"` for repeating schedules and reject `setup`.
-External systemd timer units may trigger a Graft-generated job in the meantime.
+After #131 implements typed jobs, external systemd timer units may trigger a
+Graft-generated job while native timer generation remains pending. Before #131,
+`service.lifecycle` is unavailable and this workaround does not exist.
 
 Timer-job state transitions:
 
 ```text
-timer elapses + service inactive → job activating → inactive or failed
-timer elapses + service active   → no second service instance
-later elapse + service inactive  → a new activation
+timer elapses + service inactive or failed → job activating → inactive or failed
+timer elapses + service activating or active → no second service instance
+later elapse + service inactive or failed     → a new activation
 ```
 
 ## Retained setup job
