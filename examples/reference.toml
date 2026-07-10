@@ -55,7 +55,7 @@
 
 # [config.service]
 # lifecycle =                    # long-running | job | setup; finite lifecycles require an explicit command
-# restart =
+# restart =                      # no | on-success | on-failure | on-abnormal | on-watchdog | on-abort | always; finite rejects on-success/on-watchdog/always
 # restartSec =                   # literal systemd RestartSec; requires effective restart; non-empty, no control characters
 # timeoutStartSec =              # literal systemd TimeoutStartSec; non-empty, no control characters; no timespan parser yet
 # timeoutStopSec =               # literal systemd TimeoutStopSec; non-empty, no control characters; no timespan parser yet
@@ -224,12 +224,7 @@
 # shell =                        # string (default: "sh")
 # startDelay =                   # string (e.g. "500ms", "2s")
 
-# [config.service] - typed lifecycle and literal timing
-# lifecycle =                    # long-running | job | setup
-# restart =                      # no | on-success | on-failure | on-abnormal | on-watchdog | on-abort | always
-# restartSec =                   # string (e.g. "10s"; requires effective restart)
-# timeoutStartSec =              # string (e.g. "2m")
-# timeoutStopSec =               # string (e.g. "30s")
+# [config.service] - remaining option
 # restartIfChanged =             # reserved; not implemented
 
 # [config.quadlet.container]    # raw passthrough (cannot set Rootfs, ContainerName, Exec, Network, Volume)
