@@ -27,7 +27,9 @@ Dockerfile or hand-written Quadlet file for the current `rootfs-store` backend.
 [Published manual](https://patrick-kappen.github.io/graft/) ·
 [Current roadmap](docs/roadmap.md) ·
 [Long-term vision](docs/vision.md) ·
-[Releases](https://github.com/Patrick-Kappen/graft/releases)
+[Releases](https://github.com/Patrick-Kappen/graft/releases) ·
+[Security](SECURITY.md) ·
+[Contributing](CONTRIBUTING.md)
 
 ## From TOML to a service
 
@@ -129,7 +131,9 @@ targets are rootful, and containers share the host kernel: they are not
 presented as VM-equivalent isolation. The final threat model and secure defaults
 are active work; see [Security hardening](docs/roadmap.md#security-hardening),
 [Non-goals](docs/non-goals.md), and
-[issue #127](https://github.com/Patrick-Kappen/graft/issues/127).
+[issue #127](https://github.com/Patrick-Kappen/graft/issues/127). Report suspected
+vulnerabilities privately through the [security policy](SECURITY.md), never in a
+public issue.
 
 ## When Graft fits
 
@@ -168,12 +172,15 @@ recorded separately rather than advertised as implemented.
   [Annotated TOML](examples/reference.toml)
 - **Track direction:** [Roadmap](docs/roadmap.md) ·
   [Vision](docs/vision.md) · [Non-goals](docs/non-goals.md)
-- **Contribute:** [Development guide](docs/development.md)
+- **Security:** [Security policy and private reporting](SECURITY.md)
+- **Contribute:** [Contribution guide](CONTRIBUTING.md) ·
+  [Development checks](docs/development.md)
 
 ## Contributing and license
 
 Graft is early software. Bug reports, documentation corrections, design
 feedback, and focused pull requests are welcome. Read the
-[Development guide](docs/development.md) before implementing behavior changes.
+[Contribution guide](CONTRIBUTING.md) and
+[Development checks](docs/development.md) before implementing behavior changes.
 
 Licensed under [Apache-2.0](LICENSE).

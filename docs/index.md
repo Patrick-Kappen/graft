@@ -90,9 +90,13 @@ promised syntax or schedule.
   [Quadlet output](quadlet.md)
 - **Understand boundaries:** [Non-goals and deferred scope](non-goals.md)
 - **Track direction:** [Roadmap](roadmap.md) and [Long-term vision](vision.md)
-- **Contribute:** [Development](development.md)
+- **Contribute:** [Repository contribution entry point](https://github.com/Patrick-Kappen/graft/contribute)
+  and [Development](development.md)
+- **Security:** open the [Repository security page](https://github.com/Patrick-Kappen/graft/security)
+  and choose **Report a vulnerability** for private reporting
 
 Security hardening and the final threat model remain active work. See
 [Security hardening](roadmap.md#security-hardening) and
 [issue #127](https://github.com/Patrick-Kappen/graft/issues/127) before treating
-an alpha workload as a strong isolation boundary.
+an alpha workload as a strong isolation boundary. Never disclose a suspected
+vulnerability or secret in a public issue.

@@ -1,0 +1,54 @@
+name: Documentation problem
+description: Report incorrect, missing, unclear, or broken public documentation.
+title: "docs: "
+labels:
+  - "type:docs"
+  - "area:docs"
+body:
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Preflight
+      options:
+        - label: I searched existing issues for this documentation problem.
+          required: true
+        - label: This report contains no secrets or private infrastructure details.
+          required: true
+
+  - type: input
+    id: location
+    attributes:
+      label: Page or file
+      description: Link the published page or provide the repository path and section.
+      placeholder: docs/quickstart/nixos.md — Host requirements
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What is incorrect or unclear?
+      description: Explain the reader impact and the behavior the documentation currently implies.
+    validations:
+      required: true
+
+  - type: textarea
+    id: correction
+    attributes:
+      label: Suggested correction
+      description: Optional replacement wording, source, or verified behavior.
+
+  - type: dropdown
+    id: tested_scope
+    attributes:
+      label: Affected path
+      options:
+        - NixOS system / rootful
+        - Home Manager user / rootless
+        - Both materialisation paths
+        - CLI or TOML reference
+        - Roadmap or product vision
+        - Contributor documentation
+        - Other or not applicable
+    validations:
+      required: true
