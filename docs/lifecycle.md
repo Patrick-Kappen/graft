@@ -19,7 +19,7 @@ lifecycle = "long-running"
 
 `lifecycle` accepts exactly these values:
 
-| Lifecycle | Purpose | Quadlet service mapping | State after success | Repeating timer compatible |
+| Lifecycle | Purpose | Quadlet service mapping | State after success when no restart matches | Repeating timer compatible |
 | --- | --- | --- | --- | --- |
 | `long-running` | daemon or continuously available process | `Type=notify` | inactive if the process exits | no timer semantics |
 | `job` | finite or timer-triggered work | `Type=oneshot`, `RemainAfterExit=no` | inactive | yes |
@@ -219,9 +219,10 @@ cannot affect runtime behavior.
   the bound.
 
 `timeoutStopSec` bounds stop and cleanup behavior for every lifecycle. Quadlet
-adds both `ExecStop=` and best-effort `ExecStopPost=` removal. An explicit
-systemd stop does not trigger `Restart=`. A timeout or abnormal command exit is
-a failure and may trigger a matching restart policy.
+adds both `ExecStop=` and best-effort `ExecStopPost=` removal. A
+manager-requested stop does not trigger `Restart=`, including when its cleanup
+hits `TimeoutStopSec`. A start timeout or abnormal process exit outside a
+manager-requested stop is a failure and may trigger a matching restart policy.
 
 Quadlet currently generates `podman run --replace --rm` for all three
 lifecycles. Every new activation therefore creates a fresh runtime container;
