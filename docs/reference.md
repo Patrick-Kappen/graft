@@ -1,5 +1,9 @@
 # Reference
 
+Complete runnable onboarding paths:
+[NixOS system-container quickstart](quickstart/nixos.md) and
+[Home Manager user-container quickstart](quickstart/home-manager.md).
+
 The annotated TOML schema lives in
 [`examples/reference.toml`](https://github.com/Patrick-Kappen/graft/blob/main/examples/reference.toml).
 

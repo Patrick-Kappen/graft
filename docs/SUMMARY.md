@@ -2,6 +2,8 @@
 
 - [Graft](index.md)
 - [Overview](overview.md)
+- [NixOS quickstart](quickstart/nixos.md)
+- [Home Manager quickstart](quickstart/home-manager.md)
 - [Long-term vision](vision.md)
 - [Design](design.md)
 - [Quadlet output](quadlet.md)

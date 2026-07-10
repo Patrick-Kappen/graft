@@ -1,0 +1,10 @@
+version = 1
+name = "graft-example"
+
+[config.runtime]
+packages = ["bash"]
+command = ["bash", "-c", "echo graft-example-ready; exec /bin/graft-pause"]
+
+[config.container]
+workingDir = "/workspace"
+environment = { GRAFT_EXAMPLE = "nixos-system" }
