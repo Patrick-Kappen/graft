@@ -169,7 +169,8 @@ recorded separately rather than advertised as implemented.
 - **Understand the system:** [Overview](docs/overview.md) ·
   [Design](docs/design.md) · [Quadlet output](docs/quadlet.md)
 - **Configure it:** [Reference](docs/reference.md) ·
-  [Annotated TOML](examples/reference.toml)
+  [Supported JSON Schema](crates/graft/schema/graft-v1.schema.json) ·
+  [Annotated roadmap TOML](examples/reference.toml)
 - **Track direction:** [Roadmap](docs/roadmap.md) ·
   [Vision](docs/vision.md) · [Non-goals](docs/non-goals.md)
 - **Security:** [Security policy and private reporting](SECURITY.md)

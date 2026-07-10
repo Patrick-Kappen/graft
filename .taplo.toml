@@ -1,0 +1,6 @@
+[[rule]]
+include = ["examples/quickstart/**/*.toml", "tests/nix/**/*.toml"]
+
+[rule.schema]
+path = "crates/graft/schema/graft-v1.schema.json"
+enabled = true

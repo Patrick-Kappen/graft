@@ -154,6 +154,30 @@ thresholds; `resolve.rs` splitting is tracked in #97. Public API usage remains a
 manual visibility review until a low-noise tool path is proven; track that in
 issue #98.
 
+## Machine-readable TOML schema
+
+`crates/graft/schema/graft-v1.schema.json` is generated from the Rust parser
+types with unsupported/reserved fields excluded through schema-only attributes.
+Do not edit the JSON by hand.
+
+Regenerate it after an intentional supported-schema change:
+
+```bash
+nix develop .#ci -c bash -lc 'cd crates/graft && cargo run --example generate-schema > schema/graft-v1.schema.json'
+```
+
+The `schema` integration test compares generated and tracked JSON byte for byte
+and asserts the supported property sets. `.taplo.toml` applies the schema to
+runnable examples and `tests/nix` fixtures; `taplo lint` therefore checks parser
+shape, examples, and fixture drift in CI. The broader commented
+`examples/reference.toml` is intentionally outside that rule until its
+human-reference split in #180.
+
+Adding a parser field does not automatically make it supported intent. Expose it
+in the machine-readable schema only when the resolver and materialiser implement
+it; #106 owns fail-closed handling for reserved fields still accepted by the
+parser.
+
 ## Standard checks
 
 For Rust changes:
@@ -218,7 +242,7 @@ For Nix/module/docs changes:
 ```bash
 nix develop .#ci -c bash -lc 'git ls-files "*.nix" -z | xargs -0 nixfmt --check'
 nix develop .#ci -c bash -lc 'git ls-files "*.toml" -z | xargs -0 taplo format --check'
-nix develop .#ci -c bash -lc 'git ls-files "*.toml" -z | xargs -0 taplo lint --no-schema'
+nix develop .#ci -c bash -lc 'git ls-files "*.toml" -z | xargs -0 taplo lint'
 nix develop .#ci -c bash -lc 'git ls-files "*.md" -z | xargs -0 markdownlint-cli2 --config .markdownlint.jsonc'
 nix develop .#ci -c statix check .
 nix develop .#ci -c deadnix --fail .

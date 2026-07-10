@@ -146,7 +146,7 @@ jobs:
           nix develop .#ci -c bash -lc '
             set -euo pipefail
             git ls-files "*.toml" -z | xargs -0 taplo format --check
-            git ls-files "*.toml" -z | xargs -0 taplo lint --no-schema
+            git ls-files "*.toml" -z | xargs -0 taplo lint
             git ls-files "*.md" -z | xargs -0 markdownlint-cli2 --config .markdownlint.jsonc
             mdbook build
           '
