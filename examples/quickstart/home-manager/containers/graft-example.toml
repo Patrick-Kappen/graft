@@ -8,5 +8,4 @@ packages = ["bash"]
 command = ["bash", "-c", "echo graft-example-ready; exec /bin/graft-pause"]
 
 [config.container]
-workingDir = "/workspace"
 environment = { GRAFT_EXAMPLE = "home-manager-user" }

@@ -27,11 +27,25 @@ In the host flake's `inputs`:
 inputs.graft.url = "github:Patrick-Kappen/graft";
 ```
 
-Import `examples/quickstart/nixos/module.nix` from the NixOS host module. The
-exported `inputs.graft.nixosModules.graft` module supplies the Graft package by
-default. Copy `examples/quickstart/nixos/containers/graft-example.toml` to the
-`containers/` directory relative to that module, or update `configRoot` to the
-copied location.
+Copy `examples/quickstart/nixos/module.nix` and its `containers/` directory into
+the host repository. Add both the exported Graft module and the copied module to
+the host's `modules` list:
+
+```nix
+outputs = { graft, nixpkgs, ... }: {
+  nixosConfigurations.your-host = nixpkgs.lib.nixosSystem {
+    modules = [
+      ./configuration.nix
+      graft.nixosModules.graft
+      ./path/to/module.nix
+    ];
+  };
+};
+```
+
+The exported module supplies the Graft package by default. No `specialArgs`
+wiring is required by the copied module. Keep its `containers/graft-example.toml`
+relative to `module.nix`, or update `configRoot` to the copied location.
 
 The example uses only the public `bash` package from the host's pinned
 nixpkgs. Graft also adds its built-in `graft-pause` package.
@@ -68,7 +82,6 @@ ContainerName=graft-example
 Rootfs=/nix/store/...-graft-graft-example-env:O
 Exec="bash" "-c" "echo graft-example-ready; exec /bin/graft-pause"
 Volume=/nix/store:/nix/store:ro
-WorkingDir=/workspace
 Environment="GRAFT_EXAMPLE=nixos-system"
 ```
 
@@ -80,3 +93,18 @@ sudo systemctl stop graft-example.service
 
 Stopping removes the runtime container, but leaves the generated Quadlet file.
 The current `Rootfs=...:O` overlay is not a persistent promote mechanism.
+
+## Remove the example
+
+Remove `./path/to/module.nix` from the host's `modules` list, then remove the
+copied module and TOML declaratively:
+
+```bash
+git rm path/to/module.nix path/to/containers/graft-example.toml
+sudo nixos-rebuild switch --flake .#your-host
+sudo systemctl daemon-reload
+```
+
+After activation, `graft-example.service` is no longer generated. Removing only
+the TOML while leaving `configRoot` pointed at an untracked empty directory can
+make that directory invisible to a Git flake.
