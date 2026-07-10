@@ -140,12 +140,14 @@ Environment values are not a secret transport.
 
 ## Service settings
 
-Service settings have no Graft defaults.
+Service settings have no restart or timing defaults. An absent lifecycle leaves
+Quadlet's normal long-running notify behavior implicit.
 
 A `[Service]` section is rendered only when at least one supported service field
-is explicitly set. Supported fields currently include `Restart=`, `RestartSec=`,
-`TimeoutStartSec=`, and `TimeoutStopSec=`. Service values are copied verbatim
-into the generated unit and are not `%`-escaped by Graft.
+is explicitly set. `config.service.lifecycle` maps typed workload intent to
+`Type=` and, for finite workloads, `RemainAfterExit=`. Supported fields also
+include `Restart=`, `RestartSec=`, `TimeoutStartSec=`, and `TimeoutStopSec=`.
+Literal timing values are copied verbatim and are not `%`-escaped by Graft.
 
 Example:
 
@@ -192,9 +194,8 @@ rootless overlay support such as `fuse-overlayfs`.
 ## Lifecycle
 
 Generated containers are normal systemd services. The typed distinction between
-long-running services, repeatable finite jobs, and retained setup jobs is an
-approved design in [Workload lifecycle semantics](lifecycle.md), but remains
-unimplemented until [#131](https://github.com/Patrick-Kappen/graft/issues/131).
+long-running services, repeatable finite jobs, and retained setup jobs is defined
+in [Workload lifecycle semantics](lifecycle.md).
 
 System container:
 
