@@ -1,415 +1,176 @@
-<div align="center">
+# Graft
 
-<img src="docs/assets/graft-banner.png" alt="Graft banner">
+<p align="center">
+  <img src="docs/assets/graft-banner.png" alt="Graft turns TOML workload intent into a Nix-store rootfs, Podman Quadlet unit, and systemd service">
+</p>
 
-<br><br>
-
-<p>
-  <a href="https://github.com/Patrick-Kappen/graft/actions/workflows/ci.yml"><img src="https://github.com/Patrick-Kappen/graft/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="https://app.codecov.io/gh/Patrick-Kappen/graft"><img src="https://codecov.io/gh/Patrick-Kappen/graft/branch/main/graph/badge.svg" alt="Codecov"></a>
-  <a href="https://github.com/Patrick-Kappen/graft/actions/workflows/pages.yml"><img src="https://github.com/Patrick-Kappen/graft/actions/workflows/pages.yml/badge.svg" alt="Pages"></a>
-  <img src="https://img.shields.io/badge/Nix-flake-blue?logo=nixos" alt="Nix flake">
-  <img src="https://img.shields.io/badge/Rust-CLI-orange?logo=rust" alt="Rust">
-  <img src="https://img.shields.io/badge/Podman-Quadlet-892CA0?logo=podman" alt="Podman Quadlet">
-  <img src="https://img.shields.io/badge/docs-mdBook-blue" alt="Docs">
+<p align="center">
+  <a href="https://github.com/Patrick-Kappen/graft/actions/workflows/ci.yml"><img src="https://github.com/Patrick-Kappen/graft/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
+  <a href="https://app.codecov.io/gh/Patrick-Kappen/graft"><img src="https://codecov.io/gh/Patrick-Kappen/graft/branch/main/graph/badge.svg" alt="Code coverage"></a>
+  <a href="https://patrick-kappen.github.io/graft/"><img src="https://img.shields.io/badge/docs-mdBook-blue" alt="Published manual"></a>
+  <a href="https://github.com/Patrick-Kappen/graft/releases"><img src="https://img.shields.io/github/v/release/Patrick-Kappen/graft?include_prereleases&amp;label=release" alt="Latest release"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue" alt="License: Apache-2.0"></a>
-  <img src="https://img.shields.io/badge/status-early_MVP-yellow" alt="Status">
+  <img src="https://img.shields.io/badge/status-early_MVP-yellow" alt="Status: early MVP">
 </p>
 
-<p>
-  <a href="docs/overview.md">Overview</a> ·
-  <a href="docs/vision.md">Vision</a> ·
-  <a href="docs/design.md">Design</a> ·
-  <a href="docs/quadlet.md">Quadlet</a> ·
-  <a href="docs/roadmap.md">Roadmap</a> ·
-  <a href="docs/non-goals.md">Non-goals</a> ·
-  <a href="docs/reference.md">Reference</a> ·
-  <a href="docs/development.md">Development</a> ·
-  <a href="examples/reference.toml">Annotated TOML</a>
-</p>
+**Small TOML workload definitions become Nix-store rootfs containers managed by
+Podman Quadlet and systemd.** Graft provides the same typed intent path for
+NixOS system containers and Home Manager user containers, without requiring a
+Dockerfile or hand-written Quadlet file for the current `rootfs-store` backend.
 
-</div>
+> **Early MVP:** the rootfs-store path is working and has been validated for
+> system/rootful and user/rootless workloads. Lifecycle commands, broader
+> security policy, temporary agents, and multi-host control remain active
+> roadmap work. Start with the [NixOS quickstart](docs/quickstart/nixos.md) or
+> [Home Manager quickstart](docs/quickstart/home-manager.md).
 
-TOML-driven Podman Quadlet containers, built from the Nix store.
+[Published manual](https://patrick-kappen.github.io/graft/) ·
+[Current roadmap](docs/roadmap.md) ·
+[Long-term vision](docs/vision.md) ·
+[Releases](https://github.com/Patrick-Kappen/graft/releases)
 
-Graft turns small TOML files into rootfs-based Podman Quadlet services for
-NixOS and Home Manager. You describe container intent; Graft resolves the
-runtime details; Nix materialises the rootfs and Quadlet output; systemd runs
-the result like any other service.
+## From TOML to a service
 
-Today, `rootfs-store` containers need no OCI image or Dockerfile: Nix builds the
-rootfs from declared packages. No ad-hoc package installs. No hand-written
-Quadlet boilerplate.
-
-> Status: early MVP. The current `rootfs-store` flow works for NixOS system
-> containers and Home Manager user containers, with useful Quadlet rendering for
-> common container fields. The active implementation roadmap remains focused on
-> completing that foundation; see [Roadmap](docs/roadmap.md) and
-> [Non-goals](docs/non-goals.md). For the longer-term portable workload vision,
-> see [Vision](docs/vision.md).
-
-## A tiny container
+A current, public example uses only `bash` from the host's pinned nixpkgs plus
+Graft's built-in `graft-pause`:
 
 ```toml
 version = 1
-name = "node-dev"
+name = "graft-example"
 
 [config.runtime]
-packages = ["nodejs"]
+packages = ["bash"]
+command = ["bash", "-c", "echo graft-example-ready; exec /bin/graft-pause"]
 ```
 
-With no command set, Graft adds a tiny keep-alive process:
+Nix materialises the package closure and Graft renders the relevant Quadlet
+intent:
 
 ```ini
 [Container]
-ContainerName=node-dev
-Rootfs=/nix/store/...-graft-node-dev-env:O
-Exec="/bin/graft-pause"
+ContainerName=graft-example
+Rootfs=/nix/store/...-graft-graft-example-env:O
+Exec="bash" "-c" "echo graft-example-ready; exec /bin/graft-pause"
 Volume=/nix/store:/nix/store:ro
 ```
 
-Start it like any other Quadlet-generated service:
+After activation, it is an ordinary systemd service and its journal contains:
 
-```bash
-sudo systemctl start node-dev.service
+```text
+graft-example-ready
 ```
 
-For a user/rootless container:
+The complete examples include flake wiring, host prerequisites, Git tracking,
+activation, status, logs, stop, cleanup, rendered output, and automated drift
+checks:
 
-```toml
-version = 1
-name = "node-dev"
-
-[deploy]
-target = "user"
-
-[config.runtime]
-packages = ["nodejs"]
-```
-
-```bash
-systemctl --user start node-dev.service
-```
+- [NixOS system/rootful example](docs/quickstart/nixos.md)
+- [Home Manager user/rootless example](docs/quickstart/home-manager.md)
 
 ## Why Graft?
 
-- **TOML is user intent** not Nix boilerplate, not Quadlet boilerplate.
-- **Packages come from Nix** declare package names in TOML and rebuild.
-- **Current rootfs-store backend** uses `Rootfs=` from the Nix store with no OCI image pull/build step.
-- **NixOS and Home Manager** system/rootful and user/rootless containers.
-- **Everything is a service** output is Quadlet `.container` files for systemd.
-- **Minimal defaults** no default `bash`, `coreutils`, restart policy, or autostart.
+- **Typed TOML intent:** workload authors do not need to write per-workload Nix
+  modules, raw Quadlet, or Podman command lines.
+- **Nix-built rootfs:** package names resolve from the target host's pinned
+  `pkgs`; the running container performs no package installation.
+- **Systemd-native lifecycle:** Quadlet generates normal systemd services instead
+  of introducing a separate container supervisor.
+- **System and user scope:** one intent model targets NixOS system/rootful or
+  Home Manager user/rootless materialisation.
+- **Explicit host policy:** Graft does not silently enable Podman, linger,
+  firewall rules, accounts, mounts, or privileged capabilities.
+- **Minimal defaults:** no default shell, `coreutils`, restart policy, or
+  autostart is hidden in the workload.
 
-## How it works
+## Architecture
 
 ```text
-TOML
+TOML intent
   ↓
-graft CLI
-  ↓ JSON stdout
-Nix IFD
+graft resolver → deterministic JSON
   ↓
-rootfs in /nix/store
+NixOS / Home Manager materialisation
   ↓
-Quadlet .container
+Nix-store rootfs + Quadlet .container
   ↓
-systemd service
+systemd service → Podman container
 ```
 
-The CLI owns defaults and dependency resolution. The Nix modules are dumb
-materialisers: they read resolved JSON, build a rootfs, and render Quadlet.
+The CLI owns defaults, validation, and semantic decisions. Nix modules remain
+mechanical materialisers. Quadlet generates units, systemd owns lifecycle, and
+Podman runs the containers. See [Design](docs/design.md) and
+[Quadlet output](docs/quadlet.md) for the contracts.
 
-## A real workload shape
+## Scope: now, next, and later
 
-Graft has crossed the line from renderer experiment to real server workload:
-this shape is already running as a rootless job generated from TOML,
-materialised by Nix, picked up by Quadlet, and triggered by systemd.
+| Horizon | Status |
+| --- | --- |
+| **Available now** | TOML-to-JSON resolution; Nix-store rootfs; NixOS system and Home Manager user materialisation; explicit packages and commands; selected identity, environment, filesystem, network, and service fields; manual systemd lifecycle. |
+| **Active roadmap** | Fail-closed configuration; service/job/timer semantics; `up`/`down`, status and logs; secure rootless defaults; secrets, mounts, networking, limits, temporary instances, deterministic merging, and explicit multi-host deployment. |
+| **Long-term vision** | Repository-defined environments whose components may be placed locally, on explicit remote hosts, or in temporary instances; reviewed OCI and development-environment integrations; possible TUI or optional web control surface. |
 
-A useful rootless job can be described as a small TOML file: pick a Nix package
-as the entrypoint, mount a state directory, mount any read-only inputs, and let a
-normal systemd user timer trigger the generated service. This production-shaped
-example uses the project-specific `session-indexer` package, supplied by a
-trusted host overlay; it is illustrative rather than a copy-paste quickstart.
+Only the first row describes current functionality. See the
+[Roadmap](docs/roadmap.md) for active delivery and [Vision](docs/vision.md) for
+the explicitly non-committed endgame.
 
-```toml
-version = 1
-name = "session-indexer"
+## Requirements and security status
 
-[deploy]
-target = "user"
+Graft currently targets Linux hosts with Nix, systemd, and Podman with Quadlet
+support. NixOS handles system/rootful materialisation; Home Manager handles
+user/rootless materialisation. The host remains responsible for Podman setup,
+rootless prerequisites, user linger, firewall/DNS policy, accounts, and other
+host configuration.
 
-[config.runtime]
-packages = ["session-indexer", "coreutils"]
-command = ["session-indexer"]
+Rootless is the preferred direction for unattended server workloads. System
+targets are rootful, and containers share the host kernel: they are not
+presented as VM-equivalent isolation. The final threat model and secure defaults
+are active work; see [Security hardening](docs/roadmap.md#security-hardening),
+[Non-goals](docs/non-goals.md), and
+[issue #127](https://github.com/Patrick-Kappen/graft/issues/127).
 
-[[config.filesystem.volumes]]
-source = "/home/me/.local/share/session-index"
-target = "/data"
+## When Graft fits
 
-[[config.filesystem.volumes]]
-source = "/home/me/sessions"
-target = "/sessions"
-mode = "ro"
-```
+Graft is aimed at NixOS users who want small, reviewable workload intent,
+Nix-provided packages, and systemd-managed Podman services without repeating
+Nix or Quadlet boilerplate for every workload.
 
-That becomes a rootfs from the Nix store, a Quadlet `.container` file, and a
-regular user service. The timer, secrets, and user linger policy stay in host
-configuration; the TOML remains container intent. This is the shape Graft is
-built for: small declarative workloads without images or mutable package
-installation.
+Choose a different tool when you need full upstream Quadlet control today, a
+mature interactive development environment, OCI/Compose compatibility, a
+remote-workspace platform, Kubernetes scheduling, or a stronger VM isolation
+boundary.
 
-## Host prerequisites
+## Related approaches
 
-Graft materialises Quadlet files; it does not configure the container host.
+| Approach | Where it is stronger or different |
+| --- | --- |
+| [Podman Quadlet](https://docs.podman.io/en/latest/markdown/podman-systemd.unit.5.html) | Direct access to the full upstream unit format; Graft intentionally exposes a smaller typed intent model. |
+| [`quadlet-nix`](https://github.com/SEIAROTg/quadlet-nix) and [the mirkolenz implementation](https://github.com/mirkolenz/quadlet-nix) | Broader direct Quadlet coverage through Nix today; Graft uses TOML intent and automatically builds its current rootfs from package names. |
+| [Home Manager Podman](https://nix-community.github.io/home-manager/options.xhtml#opt-services.podman.enable) | Native Nix configuration for user-scoped Podman resources; Graft shares one TOML model across NixOS and Home Manager. |
+| [compose2nix](https://github.com/aksiksi/compose2nix) and [Arion](https://github.com/hercules-ci/arion) | OCI image and Compose workflows; Graft does not currently implement an OCI backend. |
+| [devenv](https://github.com/cachix/devenv), [Devbox](https://github.com/jetify-com/devbox), and [Flox](https://github.com/flox/flox) | Mature reproducible development-environment workflows; Graft is not yet a complete interactive devenv replacement. |
+| [DevPod](https://github.com/loft-sh/devpod) and [Coder](https://github.com/coder/coder) | Mature remote workspaces and IDE connectivity; Graft's placement and workspace direction is long-term vision only. |
+| [NixOS containers](https://nixos.org/manual/nixos/stable/#ch-containers) and [microvm.nix](https://github.com/microvm-nix/microvm.nix) | Full OS containers or stronger VM isolation; prefer a VM boundary for workloads that must not share the host kernel. |
 
-- **NixOS system containers:** enable a Podman installation with Quadlet support
-  in the host configuration, for example `virtualisation.podman.enable = true;`.
-  The generated units run through the system systemd manager as rootful Podman
-  workloads.
-- **Home Manager user containers:** the host must already provide Podman with
-  Quadlet support to the user systemd manager, including any rootless overlay
-  support required by that host. The generated units run through
-  `systemctl --user` as rootless Podman workloads.
-- Graft does not enable Podman, configure a firewall or DNS, create accounts,
-  enable user linger, or otherwise mutate host policy. Configure those choices
-  separately. In particular, unattended user services need linger enabled by
-  host policy.
-
-## Quickstart: NixOS system containers
-
-Add Graft as a flake input:
-
-```nix
-{
-  inputs.graft.url = "github:Patrick-Kappen/graft";
-}
-```
-
-Import the module and point it at a directory of TOML files:
-
-```nix
-{ inputs, ... }:
-{
-  imports = [ inputs.graft.nixosModules.graft ];
-
-  services.graft = {
-    enable = true;
-    configRoot = ./containers;
-  };
-}
-```
-
-Use `configRoots` for additional shared or host-specific directories:
-
-```nix
-{ config, inputs, ... }:
-{
-  services.graft = {
-    enable = true;
-    configRoots = [
-      ./containers/common
-      ./hosts/${config.networking.hostName}/containers
-    ];
-  };
-}
-```
-
-Create `containers/test.toml`:
-
-```toml
-version = 1
-name = "test"
-```
-
-Because Git flakes include only tracked source files, stage the new TOML before
-rebuilding:
-
-```bash
-git add containers/test.toml
-sudo nixos-rebuild switch --flake .#your-host
-sudo systemctl start test.service
-```
-
-Graft does not add an `[Install]` section by default, so containers do not
-auto-start unless that behaviour is explicitly modelled in a future release.
-
-## Quickstart: Home Manager user containers
-
-```nix
-{ inputs, ... }:
-{
-  imports = [ inputs.graft.homeManagerModules.graft ];
-
-  programs.graft = {
-    enable = true;
-    configRoot = ./containers;
-  };
-}
-```
-
-`programs.graft.configRoots` accepts additional directories with the same
-ordering and collision rules as the NixOS module.
-
-Create `containers/dev.toml`:
-
-```toml
-version = 1
-name = "dev"
-
-[deploy]
-target = "user"
-```
-
-Stage the new TOML before activation when using a Git flake:
-
-```bash
-git add containers/dev.toml
-home-manager switch --flake .#your-user
-systemctl --user daemon-reload
-systemctl --user start dev.service
-```
-
-If Home Manager is integrated into your NixOS system, your normal
-`nixos-rebuild switch` path can activate it instead.
-
-### Config roots, package lookup, and names
-
-Configured `configRoot` and `configRoots` directories must exist and be visible
-to the flake source; stage new TOML files before evaluation. The exported Graft
-flake modules provide the Graft package by default. Set `services.graft.package`
-or `programs.graft.package` only to override that package deliberately.
-
-Runtime package names resolve from the target configuration's `pkgs`, so the
-host flake pin controls versions. Custom package names require an explicitly
-trusted host overlay or package-set extension; TOML does not evaluate arbitrary
-Nix from a repository.
-
-Today, the generated `.container` filename and resulting service stem come from
-the TOML filename, while `ContainerName=` comes from top-level `name`. Keep the
-filename stem and `name` equal (as in `test.toml` and `name = "test"`) until
-[#107](https://github.com/Patrick-Kappen/graft/issues/107) establishes the final
-identity contract.
-
-## TOML basics
-
-Minimal system container:
-
-```toml
-version = 1
-name = "tools"
-```
-
-Add packages:
-
-```toml
-version = 1
-name = "tools"
-
-[config.runtime]
-packages = ["ripgrep", "jq"]
-```
-
-Run your own command:
-
-```toml
-version = 1
-name = "web"
-
-[config.runtime]
-packages = ["nodejs"]
-command = ["node", "server.js"]
-```
-
-Render as a user/rootless container:
-
-```toml
-version = 1
-name = "workspace"
-
-[deploy]
-target = "user"
-```
-
-Set restart explicitly:
-
-```toml
-version = 1
-name = "worker"
-
-[config.service]
-restart = "on-failure"
-```
-
-## Current behaviour
-
-- `version = 1` is required.
-- Missing command → `Exec="/bin/graft-pause"`.
-- User command → preserved exactly.
-- Packages → `graft-pause` plus user packages, deduplicated.
-- Deploy target → defaults to `system`.
-- Container fields → `HostName=`, `User=`, `Group=`, and `WorkingDir=` render when explicitly configured.
-- Environment → sorted, quoted `Environment="KEY=value"` lines; quoted environment files preserve user order.
-- Filesystem/network → ordered `Volume=` and `PublishPort=` lines.
-- Service timing → `Restart=`, `RestartSec=`, `TimeoutStartSec=`, and `TimeoutStopSec=` render only when explicitly configured.
-- Autostart → not rendered by default.
-- `graft-pause` exits cleanly on `SIGTERM` and `SIGINT`.
-
-## Flake outputs
-
-- `nixosModules.graft`: system containers under `/etc/containers/systemd/`
-- `homeManagerModules.graft`: user containers under `~/.config/containers/systemd/`
-- `packages.<system>.default`: `graft` CLI and `graft-pause`
-
-## Roadmap
-
-Graft currently focuses on the `rootfs-store` Quadlet path. The active roadmap
-includes:
-
-- project-local dev environments
-- `graft up` / `graft down` lifecycle commands
-- merge workflows across repositories
-- multi-server deployment
-- promote/diff from overlay state back into declarative config
-- stronger isolation and security hardening
-- broader Quadlet coverage
-
-See [Roadmap](docs/roadmap.md). The later goal of portable environments with
-explicit local, remote, and temporary placement is described separately in
-[Vision](docs/vision.md); it is not current functionality.
+Graft is not a fork of these projects. Its current distinction is the
+TOML → Nix-store rootfs → Quadlet → systemd path; its future placement model is
+recorded separately rather than advertised as implemented.
 
 ## Documentation
 
-Complete runnable onboarding paths:
+- **Get started:** [NixOS quickstart](docs/quickstart/nixos.md) ·
+  [Home Manager quickstart](docs/quickstart/home-manager.md)
+- **Understand the system:** [Overview](docs/overview.md) ·
+  [Design](docs/design.md) · [Quadlet output](docs/quadlet.md)
+- **Configure it:** [Reference](docs/reference.md) ·
+  [Annotated TOML](examples/reference.toml)
+- **Track direction:** [Roadmap](docs/roadmap.md) ·
+  [Vision](docs/vision.md) · [Non-goals](docs/non-goals.md)
+- **Contribute:** [Development guide](docs/development.md)
 
-- [NixOS system-container quickstart](docs/quickstart/nixos.md)
-- [Home Manager user-container quickstart](docs/quickstart/home-manager.md)
+## Contributing and license
 
-- [Overview](docs/overview.md)
-- [Long-term vision](docs/vision.md)
-- [Design](docs/design.md)
-- [Quadlet output](docs/quadlet.md)
-- [Roadmap](docs/roadmap.md)
-- [Non-goals and deferred scope](docs/non-goals.md)
-- [Reference](docs/reference.md)
-- [Development](docs/development.md)
-- [Annotated TOML reference](examples/reference.toml)
+Graft is early software. Bug reports, documentation corrections, design
+feedback, and focused pull requests are welcome. Read the
+[Development guide](docs/development.md) before implementing behavior changes.
 
-## Related work
-
-Graft is its own design, but it is informed by ideas from:
-
-- [devenv](https://github.com/cachix/devenv) for project-local declarative development environments.
-- [nix-direnv](https://github.com/nix-community/nix-direnv) for lightweight Nix-native per-repo workflows.
-- [compose2nix](https://github.com/aksiksi/compose2nix) for translating container intent into NixOS-managed services.
-- [Podman Quadlet](https://docs.podman.io/en/latest/markdown/podman-systemd.unit.5.html) for systemd-native Podman service generation.
-- NixOS and Home Manager modules for declarative system/user materialisation.
-
-Graft is not a fork or wrapper around these projects; it combines similar ideas
-around a TOML → Nix → Quadlet workflow.
-
-## Contributing
-
-Contributor workflow, local check commands, release notes, and renderer
-checklists live in [Development](docs/development.md). The short version: keep
-TOML intent, CLI resolution, Nix materialisation, and Quadlet output in separate
-layers.
+Licensed under [Apache-2.0](LICENSE).
