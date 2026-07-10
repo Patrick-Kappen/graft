@@ -12,6 +12,8 @@ body:
       options:
         - label: I searched existing issues for this documentation problem.
           required: true
+        - label: This is not a security vulnerability; vulnerabilities must use [private vulnerability reporting](https://github.com/Patrick-Kappen/graft/security/advisories/new), not this public form.
+          required: true
         - label: This report contains no secrets or private infrastructure details.
           required: true
 

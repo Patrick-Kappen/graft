@@ -19,6 +19,8 @@ body:
           required: true
         - label: I reviewed the current roadmap, long-term vision, and non-goals.
           required: true
+        - label: This is not a security vulnerability; vulnerabilities must use [private vulnerability reporting](https://github.com/Patrick-Kappen/graft/security/advisories/new), not this public form.
+          required: true
         - label: This proposal contains no secrets or private infrastructure details.
           required: true
 
