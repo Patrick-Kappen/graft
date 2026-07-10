@@ -26,7 +26,7 @@ Security vulnerabilities must not be discussed in a public issue. Follow the
 3. Add tests for successful behavior, failures, and meaningful edge cases.
 4. Update every affected public example and manual page.
 5. Run the relevant local checks.
-6. Open a focused pull request that links the issue and lists validation run.
+6. Open a focused pull request that links the issue and lists the validation performed.
 7. Address review comments without mixing unrelated cleanup into the change.
 
 The canonical commands and renderer checklists live in the
