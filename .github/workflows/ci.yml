@@ -147,6 +147,24 @@ jobs:
             set -euo pipefail
             git ls-files "*.toml" -z | xargs -0 taplo format --check
             git ls-files "*.toml" -z | xargs -0 taplo lint
+
+            trap "rm -f tests/nix/containers/schema-invalid.toml /tmp/graft-taplo-invalid.log" EXIT
+            printf "%s\n" \
+              "version = 1" \
+              "name = \"schema-invalid\"" \
+              "" \
+              "[config.security]" \
+              "privileged = true" \
+              > tests/nix/containers/schema-invalid.toml
+            if taplo lint tests/nix/containers/schema-invalid.toml >/tmp/graft-taplo-invalid.log 2>&1; then
+              echo "Taplo accepted a reserved field; schema association is inactive" >&2
+              exit 1
+            fi
+            grep -Fq "is not valid" /tmp/graft-taplo-invalid.log
+            grep -Fq "security" /tmp/graft-taplo-invalid.log
+            rm -f tests/nix/containers/schema-invalid.toml /tmp/graft-taplo-invalid.log
+            trap - EXIT
+
             git ls-files "*.md" -z | xargs -0 markdownlint-cli2 --config .markdownlint.jsonc
             mdbook build
           '
