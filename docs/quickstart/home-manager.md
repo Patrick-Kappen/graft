@@ -25,12 +25,27 @@ In the host flake's `inputs`:
 inputs.graft.url = "github:Patrick-Kappen/graft";
 ```
 
-Import `examples/quickstart/home-manager/module.nix` from the Home Manager
-configuration. The exported `inputs.graft.homeManagerModules.graft` module
-supplies the Graft package by default. Copy
-`examples/quickstart/home-manager/containers/graft-example.toml` to the
-`containers/` directory relative to that module, or update `configRoot` to the
-copied location.
+Copy `examples/quickstart/home-manager/module.nix` and its `containers/`
+directory into the Home Manager repository. Add both the exported Graft module
+and the copied module to the Home Manager `modules` list:
+
+```nix
+outputs = { graft, home-manager, nixpkgs, ... }: {
+  homeConfigurations."your-user" = home-manager.lib.homeManagerConfiguration {
+    pkgs = nixpkgs.legacyPackages.x86_64-linux;
+    modules = [
+      ./home.nix
+      graft.homeManagerModules.graft
+      ./path/to/module.nix
+    ];
+  };
+};
+```
+
+Adjust the package system for the target host. The exported module supplies the
+Graft package by default. No `extraSpecialArgs` wiring is required by the copied
+module. Keep its `containers/graft-example.toml` relative to `module.nix`, or
+update `configRoot` to the copied location.
 
 The example uses only the public `bash` package from the host's pinned
 nixpkgs. Graft also adds its built-in `graft-pause` package.
@@ -67,7 +82,6 @@ ContainerName=graft-example
 Rootfs=/nix/store/...-graft-graft-example-env:O
 Exec="bash" "-c" "echo graft-example-ready; exec /bin/graft-pause"
 Volume=/nix/store:/nix/store:ro
-WorkingDir=/workspace
 Environment="GRAFT_EXAMPLE=home-manager-user"
 ```
 
@@ -79,3 +93,18 @@ systemctl --user stop graft-example.service
 
 Stopping removes the runtime container, but leaves the generated Quadlet file.
 The current `Rootfs=...:O` overlay is not a persistent promote mechanism.
+
+## Remove the example
+
+Remove `./path/to/module.nix` from the Home Manager `modules` list, then remove
+the copied module and TOML declaratively:
+
+```bash
+git rm path/to/module.nix path/to/containers/graft-example.toml
+home-manager switch --flake .#your-user
+systemctl --user daemon-reload
+```
+
+After activation, `graft-example.service` is no longer generated. Removing only
+the TOML while leaving `configRoot` pointed at an untracked empty directory can
+make that directory invisible to a Git flake.

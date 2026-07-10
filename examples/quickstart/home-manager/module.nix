@@ -1,9 +1,6 @@
-# Import this module from an existing Home Manager configuration.
-# The exported Graft flake module supplies the Graft package by default.
-{ inputs, ... }:
+# Import this alongside inputs.graft.homeManagerModules.graft from an existing
+# Home Manager configuration. The exported module supplies Graft by default.
 {
-  imports = [ inputs.graft.homeManagerModules.graft ];
-
   programs.graft = {
     enable = true;
     configRoot = ./containers;

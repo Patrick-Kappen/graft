@@ -58,6 +58,11 @@
                 default = [ ];
               };
 
+              virtualisation.podman.enable = lib.mkOption {
+                type = lib.types.bool;
+                default = false;
+              };
+
               environment.etc = lib.mkOption {
                 type = lib.types.attrsOf (
                   lib.types.submodule {
@@ -108,6 +113,24 @@
             ];
           };
 
+          quickstartNixosEval = lib.evalModules {
+            specialArgs = { inherit pkgs; };
+            modules = [
+              moduleTestOptions
+              self.nixosModules.graft
+              ./examples/quickstart/nixos/module.nix
+            ];
+          };
+
+          quickstartHomeManagerEval = lib.evalModules {
+            specialArgs = { inherit pkgs; };
+            modules = [
+              moduleTestOptions
+              self.homeManagerModules.graft
+              ./examples/quickstart/home-manager/module.nix
+            ];
+          };
+
           nixosRendered = nixosEval.config.environment.etc."containers/systemd/system.container".text;
           nixosPlainRendered =
             nixosEval.config.environment.etc."containers/systemd/plain-system.container".text;
@@ -123,6 +146,15 @@
             homeManagerEval.config.xdg.configFile."containers/systemd/escape-user.container".text;
           homeManagerHostRendered =
             homeManagerEval.config.xdg.configFile."containers/systemd/host-user.container".text;
+          quickstartNixosRendered =
+            quickstartNixosEval.config.environment.etc."containers/systemd/graft-example.container".text;
+          quickstartHomeManagerRendered =
+            quickstartHomeManagerEval.config.xdg.configFile."containers/systemd/graft-example.container".text;
+          expectedQuickstartInfixes = [
+            "ContainerName=graft-example"
+            ''Exec="bash" "-c" "echo graft-example-ready; exec /bin/graft-pause"''
+            "Volume=/nix/store:/nix/store:ro"
+          ];
           expectedEnvironmentLines = lib.concatStringsSep "\n" [
             ''Environment="EMPTY="''
             ''Environment="EQUALS=a=b"''
@@ -273,6 +305,11 @@
             assert !(nixosEval.config.environment.etc ? "containers/systemd/host-user.container");
             assert duplicateFilenameNixosFails;
             assert duplicateNameNixosFails;
+            assert quickstartNixosEval.config.virtualisation.podman.enable;
+            assert assertHasInfixes quickstartNixosRendered (
+              expectedQuickstartInfixes ++ [ ''Environment="GRAFT_EXAMPLE=nixos-system"'' ]
+            );
+            assert !(lib.hasInfix "WorkingDir=" quickstartNixosRendered);
             pkgs.writeText "graft-nixos-module-eval" nixosRendered;
 
           home-manager-module-eval =
@@ -307,6 +344,10 @@
             assert !(homeManagerEval.config.xdg.configFile ? "containers/systemd/host-system.container");
             assert duplicateFilenameHomeManagerFails;
             assert duplicateNameHomeManagerFails;
+            assert assertHasInfixes quickstartHomeManagerRendered (
+              expectedQuickstartInfixes ++ [ ''Environment="GRAFT_EXAMPLE=home-manager-user"'' ]
+            );
+            assert !(lib.hasInfix "WorkingDir=" quickstartHomeManagerRendered);
             pkgs.writeText "graft-home-manager-module-eval" homeManagerRendered;
         }
       );
