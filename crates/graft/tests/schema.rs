@@ -47,7 +47,13 @@ fn schema_exposes_only_supported_fields() {
         ("Runtime", &["command", "mode", "packages"][..]),
         (
             "Service",
-            &["restart", "restartSec", "timeoutStartSec", "timeoutStopSec"][..],
+            &[
+                "lifecycle",
+                "restart",
+                "restartSec",
+                "timeoutStartSec",
+                "timeoutStopSec",
+            ][..],
         ),
     ];
 
@@ -69,4 +75,19 @@ fn schema_exposes_only_supported_fields() {
         assert_eq!(actual, expected, "unexpected fields in {definition} schema");
         assert_eq!(value["additionalProperties"], false);
     }
+
+    let lifecycle_values = schema["$defs"]["ServiceLifecycle"]["oneOf"]
+        .as_array()
+        .expect("ServiceLifecycle should define variants")
+        .iter()
+        .map(|variant| variant["const"].clone())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        lifecycle_values,
+        vec![
+            serde_json::json!("long-running"),
+            serde_json::json!("job"),
+            serde_json::json!("setup"),
+        ]
+    );
 }

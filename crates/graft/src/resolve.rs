@@ -7,7 +7,7 @@ use serde::Serialize;
 
 use crate::config::schema::{
     Container, ContainerConfig, DeployTarget, Filesystem, FilesystemVolume, Network, Runtime,
-    Service,
+    Service, ServiceLifecycle,
 };
 
 const SUPPORTED_VERSION: u32 = 1;
@@ -128,10 +128,26 @@ pub struct ResolvedNetwork {
     pub publish: Option<Vec<String>>,
 }
 
+/// Resolved systemd service type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ResolvedServiceType {
+    /// Quadlet notify service for a long-running process.
+    Notify,
+    /// Foreground systemd oneshot service for a finite process.
+    Oneshot,
+}
+
 /// Resolved service settings.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResolvedService {
+    /// Optional explicit systemd service type.
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
+    pub service_type: Option<ResolvedServiceType>,
+    /// Optional state retention after a successful finite process exits.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remain_after_exit: Option<bool>,
     /// Optional systemd restart policy.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub restart: Option<String>,
@@ -532,6 +548,7 @@ fn resolve_service(config: &ContainerConfig) -> Result<Option<ResolvedService>> 
         .as_ref()
         .and_then(|config| config.service.as_ref());
 
+    let (service_type, remain_after_exit) = resolve_service_lifecycle(config, service)?;
     let restart = resolve_restart_policy(service)?;
     let restart_sec = resolve_service_timing(
         service.and_then(|service| service.restart_sec.as_deref()),
@@ -546,7 +563,25 @@ fn resolve_service(config: &ContainerConfig) -> Result<Option<ResolvedService>> 
         "timeoutStopSec",
     )?;
 
-    if restart.is_none()
+    let lifecycle = service.and_then(|service| service.lifecycle);
+    if matches!(
+        lifecycle,
+        Some(ServiceLifecycle::Job | ServiceLifecycle::Setup)
+    ) {
+        if let Some(restart @ ("always" | "on-success" | "on-watchdog")) = restart.as_deref() {
+            bail!(
+                "config.service.restart = \"{restart}\" is not supported for finite config.service.lifecycle"
+            );
+        }
+    }
+
+    if restart_sec.is_some() && matches!(restart.as_deref(), None | Some("no")) {
+        bail!("config.service.restartSec requires config.service.restart other than \"no\"");
+    }
+
+    if service_type.is_none()
+        && remain_after_exit.is_none()
+        && restart.is_none()
         && restart_sec.is_none()
         && timeout_start_sec.is_none()
         && timeout_stop_sec.is_none()
@@ -555,11 +590,54 @@ fn resolve_service(config: &ContainerConfig) -> Result<Option<ResolvedService>> 
     }
 
     Ok(Some(ResolvedService {
+        service_type,
+        remain_after_exit,
         restart,
         restart_sec,
         timeout_start_sec,
         timeout_stop_sec,
     }))
+}
+
+fn resolve_service_lifecycle(
+    config: &ContainerConfig,
+    service: Option<&Service>,
+) -> Result<(Option<ResolvedServiceType>, Option<bool>)> {
+    let Some(service) = service else {
+        return Ok((None, None));
+    };
+
+    if service.service_type.is_some() {
+        bail!("config.service.type is not supported; use config.service.lifecycle");
+    }
+
+    if service.remain_after_exit.is_some() {
+        bail!("config.service.remainAfterExit is not supported; use config.service.lifecycle");
+    }
+
+    match service.lifecycle {
+        None => Ok((None, None)),
+        Some(ServiceLifecycle::LongRunning) => Ok((Some(ResolvedServiceType::Notify), None)),
+        Some(ServiceLifecycle::Job | ServiceLifecycle::Setup) => {
+            let has_explicit_command = config
+                .config
+                .as_ref()
+                .and_then(|config| config.runtime.as_ref())
+                .and_then(|runtime| runtime.command.as_ref())
+                .is_some();
+
+            if !has_explicit_command {
+                bail!(
+                    "config.service.lifecycle = \"job\" or \"setup\" requires config.runtime.command"
+                );
+            }
+
+            Ok((
+                Some(ResolvedServiceType::Oneshot),
+                Some(service.lifecycle == Some(ServiceLifecycle::Setup)),
+            ))
+        }
+    }
 }
 
 fn resolve_restart_policy(service: Option<&Service>) -> Result<Option<String>> {
@@ -664,6 +742,22 @@ mod tests {
             version: Some(SUPPORTED_VERSION),
             name: Some("dev".to_string()),
             config: Some(Config {
+                service: Some(service),
+                ..Config::default()
+            }),
+            ..ContainerConfig::default()
+        }
+    }
+
+    fn finite_service_config(service: Service) -> ContainerConfig {
+        ContainerConfig {
+            version: Some(SUPPORTED_VERSION),
+            name: Some("dev".to_string()),
+            config: Some(Config {
+                runtime: Some(Runtime {
+                    command: Some(vec!["/bin/true".to_string()]),
+                    ..Runtime::default()
+                }),
                 service: Some(service),
                 ..Config::default()
             }),
@@ -1787,6 +1881,146 @@ mod tests {
     }
 
     #[test]
+    fn explicit_long_running_lifecycle_resolves_to_notify() {
+        let config = service_config(Service {
+            lifecycle: Some(ServiceLifecycle::LongRunning),
+            ..Service::default()
+        });
+
+        let resolved = resolve(&config).unwrap();
+        let service = resolved.service.as_ref().unwrap();
+
+        assert_eq!(service.service_type, Some(ResolvedServiceType::Notify));
+        assert_eq!(service.remain_after_exit, None);
+        let json = serde_json::to_value(&resolved).unwrap();
+        assert_eq!(json["service"]["type"], "notify");
+        assert_eq!(json["service"].get("remainAfterExit"), None);
+    }
+
+    #[test]
+    fn finite_lifecycles_resolve_to_oneshot_with_explicit_retention() {
+        for (lifecycle, expected_remain_after_exit) in [
+            (ServiceLifecycle::Job, false),
+            (ServiceLifecycle::Setup, true),
+        ] {
+            let config = finite_service_config(Service {
+                lifecycle: Some(lifecycle),
+                ..Service::default()
+            });
+
+            let resolved = resolve(&config).unwrap();
+            let service = resolved.service.as_ref().unwrap();
+
+            assert_eq!(service.service_type, Some(ResolvedServiceType::Oneshot));
+            assert_eq!(service.remain_after_exit, Some(expected_remain_after_exit));
+            let json = serde_json::to_value(&resolved).unwrap();
+            assert_eq!(json["service"]["type"], "oneshot");
+            assert_eq!(
+                json["service"]["remainAfterExit"],
+                expected_remain_after_exit
+            );
+        }
+    }
+
+    #[test]
+    fn finite_lifecycle_without_explicit_command_returns_error() {
+        for lifecycle in [ServiceLifecycle::Job, ServiceLifecycle::Setup] {
+            let config = service_config(Service {
+                lifecycle: Some(lifecycle),
+                ..Service::default()
+            });
+
+            let error = resolve(&config).unwrap_err();
+
+            assert_eq!(
+                error.to_string(),
+                "config.service.lifecycle = \"job\" or \"setup\" requires config.runtime.command"
+            );
+        }
+    }
+
+    #[test]
+    fn raw_service_type_returns_migration_error() {
+        let config = service_config(Service {
+            service_type: Some("oneshot".to_string()),
+            ..Service::default()
+        });
+
+        let error = resolve(&config).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "config.service.type is not supported; use config.service.lifecycle"
+        );
+    }
+
+    #[test]
+    fn raw_remain_after_exit_returns_migration_error() {
+        let config = service_config(Service {
+            remain_after_exit: Some(false),
+            ..Service::default()
+        });
+
+        let error = resolve(&config).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "config.service.remainAfterExit is not supported; use config.service.lifecycle"
+        );
+    }
+
+    #[test]
+    fn finite_lifecycle_rejects_incompatible_restart_policies() {
+        for restart in ["always", "on-success", "on-watchdog"] {
+            let config = finite_service_config(Service {
+                lifecycle: Some(ServiceLifecycle::Job),
+                restart: Some(restart.to_string()),
+                ..Service::default()
+            });
+
+            let error = resolve(&config).unwrap_err();
+
+            assert_eq!(
+                error.to_string(),
+                format!(
+                    "config.service.restart = \"{restart}\" is not supported for finite config.service.lifecycle"
+                )
+            );
+        }
+    }
+
+    #[test]
+    fn finite_lifecycle_accepts_failure_restart_policies() {
+        for restart in ["on-failure", "on-abnormal", "on-abort"] {
+            let config = finite_service_config(Service {
+                lifecycle: Some(ServiceLifecycle::Job),
+                restart: Some(restart.to_string()),
+                ..Service::default()
+            });
+
+            assert!(resolve(&config).is_ok(), "{restart} is accepted");
+        }
+    }
+
+    #[test]
+    fn restart_sec_without_effective_restart_returns_error() {
+        for restart in [None, Some("no".to_string())] {
+            let config = service_config(Service {
+                restart,
+                restart_sec: Some("10s".to_string()),
+                ..Service::default()
+            });
+
+            let error = resolve(&config).unwrap_err();
+
+            assert_eq!(
+                error.to_string(),
+                "config.service.restartSec requires config.service.restart other than \"no\""
+            );
+        }
+    }
+
+    #[test]
     fn explicit_restart_is_preserved() {
         let config = service_config(Service {
             restart: Some("on-failure".to_string()),
@@ -1798,6 +2032,8 @@ mod tests {
         assert_eq!(
             resolved.service,
             Some(ResolvedService {
+                service_type: None,
+                remain_after_exit: None,
                 restart: Some("on-failure".to_string()),
                 restart_sec: None,
                 timeout_start_sec: None,
@@ -1809,6 +2045,7 @@ mod tests {
     #[test]
     fn explicit_service_timing_is_preserved() {
         let config = service_config(Service {
+            restart: Some("on-failure".to_string()),
             restart_sec: Some("10s".to_string()),
             timeout_start_sec: Some("2m".to_string()),
             timeout_stop_sec: Some("30s".to_string()),
@@ -1820,7 +2057,9 @@ mod tests {
         assert_eq!(
             resolved.service,
             Some(ResolvedService {
-                restart: None,
+                service_type: None,
+                remain_after_exit: None,
+                restart: Some("on-failure".to_string()),
                 restart_sec: Some("10s".to_string()),
                 timeout_start_sec: Some("2m".to_string()),
                 timeout_stop_sec: Some("30s".to_string()),
@@ -1828,10 +2067,12 @@ mod tests {
         );
 
         let json = serde_json::to_value(&resolved).unwrap();
+        assert_eq!(json["service"]["restart"], "on-failure");
         assert_eq!(json["service"]["restartSec"], "10s");
         assert_eq!(json["service"]["timeoutStartSec"], "2m");
         assert_eq!(json["service"]["timeoutStopSec"], "30s");
-        assert_eq!(json["service"].get("restart"), None);
+        assert_eq!(json["service"].get("type"), None);
+        assert_eq!(json["service"].get("remainAfterExit"), None);
     }
 
     #[test]
@@ -1871,7 +2112,7 @@ mod tests {
     }
 
     #[test]
-    fn all_supported_restart_policies_are_accepted() {
+    fn all_restart_policies_are_accepted_for_long_running_services() {
         for restart in [
             "no",
             "on-success",
@@ -1886,6 +2127,7 @@ mod tests {
                 name: Some("dev".to_string()),
                 config: Some(Config {
                     service: Some(Service {
+                        lifecycle: Some(ServiceLifecycle::LongRunning),
                         restart: Some(restart.to_string()),
                         ..Service::default()
                     }),

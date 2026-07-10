@@ -316,6 +316,17 @@
       "description": "systemd service settings (`[config.service]`).",
       "type": "object",
       "properties": {
+        "lifecycle": {
+          "description": "Typed workload lifecycle. Defaults to `long-running` when absent.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ServiceLifecycle"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "restart": {
           "description": "Explicit systemd restart policy.",
           "type": [
@@ -350,6 +361,26 @@
         }
       },
       "additionalProperties": false
+    },
+    "ServiceLifecycle": {
+      "description": "User-facing workload lifecycle.",
+      "oneOf": [
+        {
+          "description": "Continuously available process using Quadlet's notify lifecycle.",
+          "type": "string",
+          "const": "long-running"
+        },
+        {
+          "description": "Finite, repeatable process that becomes inactive after success.",
+          "type": "string",
+          "const": "job"
+        },
+        {
+          "description": "Finite process that remains active/exited after success.",
+          "type": "string",
+          "const": "setup"
+        }
+      ]
     }
   }
 }
