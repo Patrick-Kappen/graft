@@ -435,10 +435,25 @@ pub struct Attach {
     pub start_delay: Option<String>,
 }
 
+/// User-facing workload lifecycle.
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum ServiceLifecycle {
+    /// Continuously available process using Quadlet's notify lifecycle.
+    LongRunning,
+    /// Finite, repeatable process that becomes inactive after success.
+    Job,
+    /// Finite process that remains active/exited after success.
+    Setup,
+}
+
 /// systemd service settings (`[config.service]`).
 #[derive(Debug, Clone, Deserialize, Default, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct Service {
+    /// Typed workload lifecycle. Defaults to `long-running` when absent.
+    pub lifecycle: Option<ServiceLifecycle>,
+    /// Reserved raw systemd service type; use `lifecycle` instead.
     #[serde(rename = "type")]
     #[schemars(skip)]
     pub service_type: Option<String>,
@@ -456,6 +471,7 @@ pub struct Service {
     /// Literal systemd stop timeout.
     #[schemars(length(min = 1))]
     pub timeout_stop_sec: Option<String>,
+    /// Reserved raw systemd state retention; use `lifecycle` instead.
     #[schemars(skip)]
     pub remain_after_exit: Option<bool>,
     #[schemars(skip)]
@@ -560,6 +576,38 @@ mod tests {
         assert_eq!(home.mode.as_deref(), Some("persistent"));
         assert_eq!(home.source.as_deref(), Some("~/.graft/devshell"));
         assert_eq!(home.target.as_deref(), Some("/home/user"));
+    }
+
+    #[test]
+    fn parses_supported_service_lifecycles() {
+        for (value, expected) in [
+            ("long-running", ServiceLifecycle::LongRunning),
+            ("job", ServiceLifecycle::Job),
+            ("setup", ServiceLifecycle::Setup),
+        ] {
+            let toml = format!("[config.service]\nlifecycle = \"{value}\"");
+            let cfg = parse_toml(&toml).unwrap();
+            let lifecycle = cfg.config.unwrap().service.unwrap().lifecycle;
+
+            assert_eq!(lifecycle, Some(expected));
+        }
+    }
+
+    #[test]
+    fn parses_raw_service_fields_for_migration_diagnostics() {
+        let cfg =
+            parse_toml("[config.service]\ntype = \"oneshot\"\nremainAfterExit = false").unwrap();
+        let service = cfg.config.unwrap().service.unwrap();
+
+        assert_eq!(service.service_type.as_deref(), Some("oneshot"));
+        assert_eq!(service.remain_after_exit, Some(false));
+    }
+
+    #[test]
+    fn unsupported_service_lifecycle_returns_error() {
+        let result = parse_toml("[config.service]\nlifecycle = \"oneshot\"");
+
+        assert!(result.is_err());
     }
 
     #[test]
