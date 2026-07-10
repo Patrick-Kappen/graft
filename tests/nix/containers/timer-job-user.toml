@@ -1,0 +1,16 @@
+version = 1
+name = "nix-check-timer-job-user"
+
+[deploy]
+target = "user"
+
+[config.runtime]
+packages = ["coreutils"]
+command = ["/bin/true"]
+
+[config.service]
+lifecycle = "job"
+restart = "on-failure"
+restartSec = "10s"
+timeoutStartSec = "2m"
+timeoutStopSec = "30s"
