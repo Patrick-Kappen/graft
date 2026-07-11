@@ -17,7 +17,9 @@ TOML → CLI → JSON stdout → Nix modules → Quadlet .container
 Users do not write Quadlet boilerplate and do not write Nix module boilerplate
 for each container. The `.container` file is output. The typed distinction
 between long-running services, finite jobs, and retained setup jobs is defined
-in [Workload lifecycle semantics](lifecycle.md).
+in [Workload lifecycle semantics](lifecycle.md). The approved typed namespace,
+shared-container reference, and network security boundaries are defined in
+[Container network intent](networking.md).
 
 ## TOML is user intent
 
@@ -48,7 +50,7 @@ Those details are resolved by Graft and materialised by Nix.
 
 ## CLI resolve logic
 
-The CLI reads a single TOML file and writes resolved JSON to stdout:
+The CLI currently reads a single TOML file and writes resolved JSON to stdout:
 
 ```text
 graft <container.toml> > $out
@@ -74,6 +76,13 @@ The CLI owns business logic:
 - translating TOML/Graft concepts into the JSON shape Nix needs
 
 The CLI does not write JSON files into the repository.
+
+Typed cross-workload references require explicit context that one file cannot
+provide. The approved networking design uses a deterministic config index built
+by the CLI from the concrete TOML source set supplied by Nix. Nix remains a
+mechanical caller and does not resolve dependency semantics. This reference
+index is distinct from future parent/child configuration merging; see
+[Container network intent](networking.md).
 
 Checks that evaluate this IFD path should be built explicitly, for example with
 `nix build .#checks.x86_64-linux.nixos-module-eval`. `nix flake check` may omit
@@ -121,6 +130,7 @@ The CLI may only add defaults that belong to Graft semantics.
 | `runtime.mode` | currently only `rootfs-store` |
 | supported container fields | no defaults; include only if user sets them |
 | environment, publish, volumes | no defaults; preserve deterministic ordering rules |
+| `network.mode` | absent preserves Quadlet's target-specific default; typed modes are designed but not implemented |
 | `service.lifecycle` | absent means Quadlet's long-running notify default; explicit intent resolves to typed service fields |
 | `service.restart` and timing | no defaults; include only if user sets them |
 | `deploy.enable` | no default in JSON; modules render unless explicitly `false` |

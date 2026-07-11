@@ -116,6 +116,7 @@ Implemented today:
 - `config.container.environmentFile` is rendered as ordered, quoted Quadlet `EnvironmentFile="..."` lines when explicitly set.
 - `config.filesystem.volumes` is rendered as ordered Quadlet `Volume=` lines when explicitly set.
 - `config.network.publish` is rendered as ordered Quadlet `PublishPort=` lines when explicitly set.
+- `config.network.mode` is reserved and not rendered yet; the approved typed contract is documented in [Container network intent](networking.md).
 - `config.runtime.mode` supports only `rootfs-store`.
 - `config.runtime.packages` are mapped to packages in the target configuration's
   `pkgs`; the host flake pin controls their versions.
@@ -249,6 +250,12 @@ Current published port validation:
 - no Quadlet `.network` units are generated
 - no DNS settings or network aliases are rendered
 - no automatic firewall rules are managed
+
+`config.network.mode`, DNS settings, and host entries are currently reserved and
+must not be treated as effective runtime intent. The approved first networking
+phase covers an implicit default, `none`, and a typed Graft workload reference;
+see [Container network intent](networking.md). Implementation remains tracked by
+[#165](https://github.com/Patrick-Kappen/graft/issues/165).
 
 `config.service.lifecycle` is typed workload intent:
 
