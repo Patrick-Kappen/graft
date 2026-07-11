@@ -117,9 +117,9 @@ them:
 - `PublishPort=` from `config.network.publish`
 - `Volume=` from `config.filesystem.volumes`
 
-Typed `Network=` output is not implemented yet. The approved contract and the
-required `.container` source-unit form for automatic `Requires=`/`After=`
-relationships are defined in [Container network intent](networking.md).
+Typed `Network=` output supports `none` and resolved `.container` source-unit
+references. The source-unit form lets Quadlet add automatic `Requires=` and
+`After=` relationships; see [Container network intent](networking.md).
 
 Environment files, published ports, and volumes preserve user order. Environment
 variables are sorted by key. Environment files and command argv are quoted for
