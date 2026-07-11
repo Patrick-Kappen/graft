@@ -802,24 +802,21 @@ fn resolve_network_request(network: Option<&Network>) -> Result<Option<NetworkRe
     let Some(network) = network else {
         return Ok(None);
     };
-    let has_publish = network
-        .publish
-        .as_ref()
-        .is_some_and(|publish| !publish.is_empty());
+    let publish_is_configured = network.publish.is_some();
 
     match (network.mode, network.container.as_deref()) {
         (None, None) => Ok(None),
         (None | Some(NetworkMode::None), Some(_)) => {
             bail!("config.network.container requires config.network.mode = \"container\"")
         }
-        (Some(NetworkMode::None), None) if has_publish => {
+        (Some(NetworkMode::None), None) if publish_is_configured => {
             bail!("config.network.publish is incompatible with config.network.mode = \"none\"")
         }
         (Some(NetworkMode::None), None) => Ok(Some(NetworkRequest::None)),
         (Some(NetworkMode::Container), None) => {
             bail!("config.network.mode = \"container\" requires config.network.container")
         }
-        (Some(NetworkMode::Container), Some(_)) if has_publish => {
+        (Some(NetworkMode::Container), Some(_)) if publish_is_configured => {
             bail!("config.network.publish is incompatible with config.network.mode = \"container\"")
         }
         (Some(NetworkMode::Container), Some(reference)) => {
@@ -2386,7 +2383,18 @@ mod tests {
         for network in [
             Network {
                 mode: Some(NetworkMode::None),
+                publish: Some(Vec::new()),
+                ..Network::default()
+            },
+            Network {
+                mode: Some(NetworkMode::None),
                 publish: Some(vec!["8080:80".to_string()]),
+                ..Network::default()
+            },
+            Network {
+                mode: Some(NetworkMode::Container),
+                container: Some("database".to_string()),
+                publish: Some(Vec::new()),
                 ..Network::default()
             },
             Network {
