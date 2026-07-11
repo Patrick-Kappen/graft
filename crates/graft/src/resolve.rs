@@ -244,6 +244,9 @@ pub fn resolve(config: &ContainerConfig) -> Result<ResolvedContainer> {
 
 /// Resolve one parsed TOML config using an explicit set of workload sources.
 ///
+/// `config` must be the same parsed instance referenced by one of `sources` so
+/// graph validation and final resolution cannot observe different intent.
+///
 /// # Errors
 ///
 /// Returns an error when source identities or network references are invalid,
@@ -256,12 +259,14 @@ pub fn resolve_with_context(
         return resolve_internal(config, None);
     }
 
-    let index = ConfigIndex::build(sources)?;
-    let key = workload_key(config)?;
-    if !index.workloads.contains_key(&key) {
+    if !sources
+        .iter()
+        .any(|source| std::ptr::eq(source.config, config))
+    {
         bail!("current workload is missing from explicit config context");
     }
 
+    let index = ConfigIndex::build(sources)?;
     resolve_internal(config, Some(&index))
 }
 
@@ -2429,6 +2434,39 @@ mod tests {
         ];
 
         let error = resolve_with_context(&worker, &sources).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "current workload is missing from explicit config context"
+        );
+    }
+
+    #[test]
+    fn same_identity_different_config_is_not_context_membership() {
+        let source_worker = contextual_workload(
+            "worker",
+            ResolvedDeployTarget::System,
+            None,
+            None,
+            Some(container_network("database")),
+        );
+        let mut caller_worker = source_worker.clone();
+        caller_worker
+            .config
+            .as_mut()
+            .unwrap()
+            .network
+            .as_mut()
+            .unwrap()
+            .container = Some("different".to_string());
+        let database =
+            contextual_workload("database", ResolvedDeployTarget::System, None, None, None);
+        let sources = [
+            ConfigSource::new("worker", &source_worker),
+            ConfigSource::new("database", &database),
+        ];
+
+        let error = resolve_with_context(&caller_worker, &sources).unwrap_err();
 
         assert_eq!(
             error.to_string(),
