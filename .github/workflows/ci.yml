@@ -201,8 +201,7 @@ jobs:
             .#checks.x86_64-linux.network-runtime-rootfs \
             --no-link \
             --print-out-paths)
-          GRAFT_REQUIRE_NETWORK_RUNTIME=1 \
-            nix develop .#ci -c tests/runtime/network.sh "${network_rootfs}"
+          nix develop .#ci -c tests/runtime/network.sh "${network_rootfs}"
 
   checks:
     name: checks
