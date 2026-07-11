@@ -253,10 +253,14 @@ nix build \
   .#checks.x86_64-linux.quadlet-network \
   --print-out-paths
 nix flake check
+network_rootfs=$(nix build .#checks.x86_64-linux.network-runtime-rootfs --no-link --print-out-paths)
+GRAFT_REQUIRE_NETWORK_RUNTIME=1 nix develop .#ci -c tests/runtime/network.sh "${network_rootfs}"
 nix develop .#ci -c mdbook build
 git diff --check
 ```
 
-The module-eval and lifecycle-generator checks use IFD, so build them
-explicitly. `nix flake check` may omit them and must not be the only Nix module
-or generated-service gate.
+The module-eval and Quadlet generator checks use IFD, so build them explicitly.
+`nix flake check` may omit them and must not be the only Nix module or
+generated-service gate. The rootless network runtime test skips unavailable
+local Podman environments unless `GRAFT_REQUIRE_NETWORK_RUNTIME=1` is set; CI
+requires it.

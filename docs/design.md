@@ -78,11 +78,12 @@ The CLI owns business logic:
 The CLI does not write JSON files into the repository.
 
 Typed cross-workload references require explicit context that one file cannot
-provide. Repeated `--context <toml>` arguments let the CLI build a deterministic
-config index from the concrete source set supplied by Nix. Nix stages those
-sources under their original filenames, remains a mechanical caller, and does
-not resolve dependency semantics. This reference index is distinct from future
-parent/child configuration merging; see
+provide. Repeated `--context <toml>` arguments support direct single-workload
+resolution. The modules stage sources under their original filenames and invoke
+`graft --set <toml>...`, which parses and indexes the complete concrete source
+set once before returning resolved JSON keyed by TOML filename. Nix remains a
+mechanical caller and does not resolve dependency semantics. This reference
+index is distinct from future parent/child configuration merging; see
 [Container network intent](networking.md).
 
 Checks that evaluate this IFD path should be built explicitly, for example with

@@ -40,34 +40,26 @@ let
     else
       throw "${optionName}: duplicate container TOML filename(s): ${lib.concatStringsSep ", " duplicateTomlNames}";
 
-  tomlFiles = builtins.listToAttrs (
-    map (entry: lib.nameValuePair entry.name entry) checkedTomlEntries
-  );
-
   contextLinks = lib.concatMapStrings (
     entry: "ln -s ${lib.escapeShellArg "${entry.path}"} context/${lib.escapeShellArg entry.name}\n"
   ) checkedTomlEntries;
 
-  contextArgs = lib.concatMapStringsSep " " (
-    entry: "--context context/${lib.escapeShellArg entry.name}"
+  setArgs = lib.concatMapStringsSep " " (
+    entry: "context/${lib.escapeShellArg entry.name}"
   ) checkedTomlEntries;
 
-  resolveToml =
-    name: _:
-    let
-      containerName = lib.removeSuffix ".toml" name;
-    in
-    pkgs.runCommand "graft-resolve-${containerName}" { } ''
-      mkdir context
-      ${contextLinks}
-      ${lib.getExe' cfg.package "graft"} context/${lib.escapeShellArg name} ${contextArgs} > $out
-    '';
+  resolvedJsonFile =
+    if checkedTomlEntries == [ ] then
+      null
+    else
+      pkgs.runCommand "graft-resolve-set" { } ''
+        mkdir context
+        ${contextLinks}
+        ${lib.getExe' cfg.package "graft"} --set ${setArgs} > $out
+      '';
 
-  resolvedJsonFiles = lib.mapAttrs resolveToml tomlFiles;
-
-  resolvedContainers = lib.mapAttrs (
-    _: resolvedJson: builtins.fromJSON (builtins.readFile resolvedJson)
-  ) resolvedJsonFiles;
+  resolvedContainers =
+    if resolvedJsonFile == null then { } else builtins.fromJSON (builtins.readFile resolvedJsonFile);
 
   targetContainers = lib.filterAttrs (
     _: ctr: (ctr.deploy.enable or true) && ctr.deploy.target == target

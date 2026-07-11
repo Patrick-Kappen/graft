@@ -177,11 +177,13 @@ references:
 - effective service lifecycle;
 - typed network reference, when present.
 
-The Nix module supplies the concrete, deterministically ordered TOML source set.
-The CLI parses and validates the index, resolves workload names to source-unit
-identities, and reports duplicates, missing references, target mismatches, and
-cycles. Nix does not interpret dependency semantics. The resolver must not scan
-ambient directories, read environment-provided roots, or infer hidden state.
+The Nix module stages the concrete, deterministically ordered TOML source set
+under its original filenames and submits it to one `graft --set` invocation.
+The CLI parses each source once, validates the shared index, resolves workload
+names to source-unit identities, and reports source paths with duplicates,
+missing references, target mismatches, cycles, and semantic errors. Nix does not
+interpret dependency semantics. The resolver must not scan ambient directories,
+read environment-provided roots, or infer hidden state.
 
 This index is not configuration merging. Parent/child precedence, overlays, and
 provenance remain owned by
