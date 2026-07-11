@@ -33,6 +33,11 @@ if ! podman_info=$(podman info 2>&1); then
   [[ ${GRAFT_REQUIRE_NETWORK_RUNTIME:-0} != 1 ]] || printf '%s\n' "${podman_info}" >&2
   unavailable "podman info failed"
 fi
+if ! rootless=$(podman info --format '{{.Host.Security.Rootless}}' 2>&1); then
+  [[ ${GRAFT_REQUIRE_NETWORK_RUNTIME:-0} != 1 ]] || printf '%s\n' "${rootless}" >&2
+  unavailable "podman rootless status could not be read"
+fi
+[[ ${rootless} == true ]] || unavailable "podman is running rootful"
 
 for rootfs in probe none owner client conflict; do
   cp -a "${source_rootfs}" "${tmp}/${rootfs}"
@@ -42,8 +47,10 @@ done
 podman run --rm --cgroups=disabled --network none --rootfs "${tmp}/probe" /bin/true \
   >/dev/null 2>&1 || unavailable "a rootless no-network container could not start"
 
-routes=$(podman run --rm --cgroups=disabled --network none --rootfs "${tmp}/none" /bin/ip route)
-test -z "${routes}"
+ipv4_routes=$(podman run --rm --cgroups=disabled --network none --rootfs "${tmp}/none" /bin/ip route)
+ipv6_routes=$(podman run --rm --cgroups=disabled --network none --rootfs "${tmp}/none" /bin/ip -6 route)
+test -z "${ipv4_routes}"
+test -z "${ipv6_routes}"
 if podman run --rm --cgroups=disabled --network none --rootfs "${tmp}/none" \
   /bin/timeout 2 /bin/wget -qO- http://1.1.1.1; then
   echo "none network unexpectedly reached an external IP" >&2

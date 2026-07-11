@@ -50,20 +50,25 @@ Those details are resolved by Graft and materialised by Nix.
 
 ## CLI resolve logic
 
-The CLI currently reads a single TOML file and writes resolved JSON to stdout:
+For direct use, the CLI can resolve one TOML file to JSON stdout. Repeated
+context arguments provide explicit sources for a cross-workload reference:
 
 ```text
-graft <container.toml> > $out
+graft <container.toml> [--context <other.toml>...] > $out
 ```
 
-Nix captures stdout through Import From Derivation:
+The Nix modules use the batch form instead. They stage every configured source
+under its original filename, invoke the CLI once, and consume the returned map
+through Import From Derivation:
 
 ```nix
-resolvedJson = pkgs.runCommand "graft-resolve-${name}" {} ''
-  ${graft}/bin/graft ${tomlFile} > $out
+resolvedSetJson = pkgs.runCommand "graft-resolve-set" { } ''
+  mkdir context
+  # The materialiser links each explicit TOML source into context/<filename>.
+  ${graft}/bin/graft --set context/base.toml context/workload.toml > $out
 '';
 
-resolved = builtins.fromJSON (builtins.readFile resolvedJson);
+resolvedByFilename = builtins.fromJSON (builtins.readFile resolvedSetJson);
 ```
 
 The CLI owns business logic:
