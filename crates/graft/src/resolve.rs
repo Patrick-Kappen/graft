@@ -1,13 +1,13 @@
 //! Resolve user TOML config into the JSON spec consumed by Nix.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{bail, Result};
 use serde::Serialize;
 
 use crate::config::schema::{
-    Container, ContainerConfig, DeployTarget, Filesystem, FilesystemVolume, Network, Runtime,
-    Service, ServiceLifecycle,
+    Container, ContainerConfig, DeployTarget, Filesystem, FilesystemVolume, Network, NetworkMode,
+    Runtime, Service, ServiceLifecycle,
 };
 
 const SUPPORTED_VERSION: u32 = 1;
@@ -51,7 +51,7 @@ pub struct ResolvedDeploy {
 }
 
 /// Resolved deployment target.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ResolvedDeployTarget {
     /// Rootful/system Quadlet container.
@@ -123,9 +123,59 @@ pub struct ResolvedFilesystemVolume {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResolvedNetwork {
+    /// Optional resolved network namespace.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub namespace: Option<ResolvedNetworkNamespace>,
     /// Optional published ports rendered as Quadlet `PublishPort=`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub publish: Option<Vec<String>>,
+}
+
+/// Resolved network namespace with all mode-specific data.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase", tag = "mode")]
+pub enum ResolvedNetworkNamespace {
+    /// Render Quadlet `Network=none`.
+    None,
+    /// Render a Quadlet source-unit reference for another container.
+    Container {
+        /// Referenced Quadlet `.container` source-unit filename.
+        unit: String,
+    },
+}
+
+/// A parsed TOML source supplied explicitly for cross-workload resolution.
+#[derive(Debug, Clone, Copy)]
+pub struct ConfigSource<'a> {
+    unit_name: &'a str,
+    config: &'a ContainerConfig,
+}
+
+impl<'a> ConfigSource<'a> {
+    /// Create source context from a Quadlet unit stem and parsed configuration.
+    #[must_use]
+    pub const fn new(unit_name: &'a str, config: &'a ContainerConfig) -> Self {
+        Self { unit_name, config }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct WorkloadKey {
+    target: ResolvedDeployTarget,
+    name: String,
+}
+
+#[derive(Debug)]
+struct IndexedWorkload {
+    unit_name: String,
+    enabled: bool,
+    lifecycle: ServiceLifecycle,
+    network_container: Option<String>,
+}
+
+#[derive(Debug)]
+struct ConfigIndex {
+    workloads: BTreeMap<WorkloadKey, IndexedWorkload>,
 }
 
 /// Resolved systemd service type.
@@ -169,6 +219,43 @@ pub struct ResolvedService {
 /// Returns an error when required fields are missing or unsupported values are
 /// present.
 pub fn resolve(config: &ContainerConfig) -> Result<ResolvedContainer> {
+    resolve_internal(config, None)
+}
+
+/// Resolve one parsed TOML config using an explicit set of workload sources.
+///
+/// # Errors
+///
+/// Returns an error when source identities or network references are invalid,
+/// or when normal container resolution fails.
+pub fn resolve_with_context(
+    config: &ContainerConfig,
+    sources: &[ConfigSource<'_>],
+) -> Result<ResolvedContainer> {
+    if !sources.iter().any(|source| {
+        source
+            .config
+            .config
+            .as_ref()
+            .and_then(|config| config.network.as_ref())
+            .is_some_and(|network| network.mode == Some(NetworkMode::Container))
+    }) {
+        return resolve_internal(config, None);
+    }
+
+    let index = ConfigIndex::build(sources)?;
+    let key = workload_key(config)?;
+    if !index.workloads.contains_key(&key) {
+        bail!("current workload is missing from explicit config context");
+    }
+
+    resolve_internal(config, Some(&index))
+}
+
+fn resolve_internal(
+    config: &ContainerConfig,
+    context: Option<&ConfigIndex>,
+) -> Result<ResolvedContainer> {
     validate_version(config)?;
 
     let name = resolve_name(config)?;
@@ -197,7 +284,7 @@ pub fn resolve(config: &ContainerConfig) -> Result<ResolvedContainer> {
         },
         container: resolve_container(config)?,
         filesystem: resolve_filesystem(config)?,
-        network: resolve_network(config)?,
+        network: resolve_network(config, context)?,
         service: resolve_service(config)?,
     })
 }
@@ -404,18 +491,277 @@ fn validate_volume_part(name: &str, value: &str) -> Result<()> {
     Ok(())
 }
 
-fn resolve_network(config: &ContainerConfig) -> Result<Option<ResolvedNetwork>> {
+#[derive(Debug, Clone, Copy)]
+enum NetworkRequest<'a> {
+    None,
+    Container(&'a str),
+}
+
+impl ConfigIndex {
+    fn build(sources: &[ConfigSource<'_>]) -> Result<Self> {
+        let mut workloads = BTreeMap::new();
+        let mut unit_names = BTreeSet::new();
+
+        for source in sources {
+            validate_version(source.config)?;
+            if !is_safe_container_name(source.unit_name) {
+                bail!(
+                    "Quadlet source unit name contains unsupported characters: {}",
+                    source.unit_name
+                );
+            }
+
+            let key = workload_key(source.config)?;
+            if !unit_names.insert((key.target, source.unit_name)) {
+                bail!(
+                    "duplicate Quadlet source unit '{}' for target '{}'",
+                    source.unit_name,
+                    key.target.as_str()
+                );
+            }
+
+            let network = source
+                .config
+                .config
+                .as_ref()
+                .and_then(|config| config.network.as_ref());
+            let network_container = match resolve_network_request(network)? {
+                Some(NetworkRequest::Container(reference)) => Some(reference.to_string()),
+                Some(NetworkRequest::None) | None => None,
+            };
+            let workload = IndexedWorkload {
+                unit_name: source.unit_name.to_string(),
+                enabled: source
+                    .config
+                    .deploy
+                    .as_ref()
+                    .and_then(|deploy| deploy.enable)
+                    != Some(false),
+                lifecycle: effective_lifecycle(source.config),
+                network_container,
+            };
+
+            if workloads.insert(key.clone(), workload).is_some() {
+                bail!(
+                    "duplicate workload name '{}' for target '{}'",
+                    key.name,
+                    key.target.as_str()
+                );
+            }
+        }
+
+        let index = Self { workloads };
+        index.validate_references()?;
+        index.validate_cycles()?;
+        Ok(index)
+    }
+
+    fn validate_references(&self) -> Result<()> {
+        for (key, workload) in &self.workloads {
+            let Some(reference) = workload.network_container.as_ref() else {
+                continue;
+            };
+            let referenced_key = WorkloadKey {
+                target: key.target,
+                name: reference.clone(),
+            };
+
+            if &referenced_key == key {
+                bail!(
+                    "workload '{}' cannot share its own network namespace",
+                    key.name
+                );
+            }
+
+            let Some(referenced) = self.workloads.get(&referenced_key) else {
+                if self
+                    .workloads
+                    .keys()
+                    .any(|candidate| candidate.name == *reference)
+                {
+                    bail!(
+                        "network container reference '{}' for workload '{}' has a different deploy target",
+                        reference,
+                        key.name
+                    );
+                }
+                bail!(
+                    "network container reference '{}' for workload '{}' was not found",
+                    reference,
+                    key.name
+                );
+            };
+
+            if !referenced.enabled {
+                bail!(
+                    "network container reference '{}' for workload '{}' is disabled",
+                    reference,
+                    key.name
+                );
+            }
+            if referenced.lifecycle != ServiceLifecycle::LongRunning {
+                bail!(
+                    "network container reference '{}' for workload '{}' must use the long-running lifecycle",
+                    reference,
+                    key.name
+                );
+            }
+        }
+
+        Ok(())
+    }
+
+    fn validate_cycles(&self) -> Result<()> {
+        let mut complete = BTreeSet::new();
+        let mut path = Vec::new();
+
+        for key in self.workloads.keys() {
+            self.visit(key, &mut complete, &mut path)?;
+        }
+
+        Ok(())
+    }
+
+    fn visit(
+        &self,
+        key: &WorkloadKey,
+        complete: &mut BTreeSet<WorkloadKey>,
+        path: &mut Vec<WorkloadKey>,
+    ) -> Result<()> {
+        if complete.contains(key) {
+            return Ok(());
+        }
+        if let Some(start) = path.iter().position(|candidate| candidate == key) {
+            let mut names = path[start..]
+                .iter()
+                .map(|candidate| candidate.name.as_str())
+                .collect::<Vec<_>>();
+            names.push(key.name.as_str());
+            bail!("network container reference cycle: {}", names.join(" -> "));
+        }
+
+        path.push(key.clone());
+        if let Some(reference) = self
+            .workloads
+            .get(key)
+            .and_then(|workload| workload.network_container.as_ref())
+        {
+            let referenced_key = WorkloadKey {
+                target: key.target,
+                name: reference.clone(),
+            };
+            self.visit(&referenced_key, complete, path)?;
+        }
+        path.pop();
+        complete.insert(key.clone());
+        Ok(())
+    }
+
+    fn referenced_unit(&self, config: &ContainerConfig, reference: &str) -> Result<String> {
+        let current = workload_key(config)?;
+        let referenced = WorkloadKey {
+            target: current.target,
+            name: reference.to_string(),
+        };
+        let workload = self
+            .workloads
+            .get(&referenced)
+            .ok_or_else(|| anyhow::anyhow!("validated network reference disappeared"))?;
+        Ok(format!("{}.container", workload.unit_name))
+    }
+}
+
+impl ResolvedDeployTarget {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::System => "system",
+            Self::User => "user",
+        }
+    }
+}
+
+fn workload_key(config: &ContainerConfig) -> Result<WorkloadKey> {
+    Ok(WorkloadKey {
+        target: resolve_deploy_target(
+            config
+                .deploy
+                .as_ref()
+                .and_then(|deploy| deploy.target.as_ref()),
+        ),
+        name: resolve_name(config)?,
+    })
+}
+
+fn effective_lifecycle(config: &ContainerConfig) -> ServiceLifecycle {
+    config
+        .config
+        .as_ref()
+        .and_then(|config| config.service.as_ref())
+        .and_then(|service| service.lifecycle)
+        .unwrap_or(ServiceLifecycle::LongRunning)
+}
+
+fn resolve_network(
+    config: &ContainerConfig,
+    context: Option<&ConfigIndex>,
+) -> Result<Option<ResolvedNetwork>> {
     let network = config
         .config
         .as_ref()
         .and_then(|config| config.network.as_ref());
     let publish = resolve_publish(network)?;
+    let namespace = match resolve_network_request(network)? {
+        None => None,
+        Some(NetworkRequest::None) => Some(ResolvedNetworkNamespace::None),
+        Some(NetworkRequest::Container(reference)) => {
+            let Some(index) = context else {
+                bail!("config.network.mode = \"container\" requires explicit workload context");
+            };
+            Some(ResolvedNetworkNamespace::Container {
+                unit: index.referenced_unit(config, reference)?,
+            })
+        }
+    };
 
-    if publish.is_none() {
+    if namespace.is_none() && publish.is_none() {
         return Ok(None);
     }
 
-    Ok(Some(ResolvedNetwork { publish }))
+    Ok(Some(ResolvedNetwork { namespace, publish }))
+}
+
+fn resolve_network_request(network: Option<&Network>) -> Result<Option<NetworkRequest<'_>>> {
+    let Some(network) = network else {
+        return Ok(None);
+    };
+    let has_publish = network
+        .publish
+        .as_ref()
+        .is_some_and(|publish| !publish.is_empty());
+
+    match (network.mode, network.container.as_deref()) {
+        (None, None) => Ok(None),
+        (None | Some(NetworkMode::None), Some(_)) => {
+            bail!("config.network.container requires config.network.mode = \"container\"")
+        }
+        (Some(NetworkMode::None), None) if has_publish => {
+            bail!("config.network.publish is incompatible with config.network.mode = \"none\"")
+        }
+        (Some(NetworkMode::None), None) => Ok(Some(NetworkRequest::None)),
+        (Some(NetworkMode::Container), None) => {
+            bail!("config.network.mode = \"container\" requires config.network.container")
+        }
+        (Some(NetworkMode::Container), Some(_)) if has_publish => {
+            bail!("config.network.publish is incompatible with config.network.mode = \"container\"")
+        }
+        (Some(NetworkMode::Container), Some(reference)) => {
+            validate_not_empty_or_whitespace("network container reference", reference)?;
+            if !is_safe_container_name(reference) {
+                bail!("network container reference contains unsupported characters");
+            }
+            Ok(Some(NetworkRequest::Container(reference)))
+        }
+    }
 }
 
 fn resolve_publish(network: Option<&Network>) -> Result<Option<Vec<String>>> {
@@ -734,6 +1080,43 @@ mod tests {
                 ..Config::default()
             }),
             ..ContainerConfig::default()
+        }
+    }
+
+    fn contextual_workload(
+        name: &str,
+        target: ResolvedDeployTarget,
+        enable: Option<bool>,
+        lifecycle: Option<ServiceLifecycle>,
+        network: Option<Network>,
+    ) -> ContainerConfig {
+        ContainerConfig {
+            version: Some(SUPPORTED_VERSION),
+            name: Some(name.to_string()),
+            deploy: Some(Deploy {
+                enable,
+                target: Some(match target {
+                    ResolvedDeployTarget::System => DeployTarget::System,
+                    ResolvedDeployTarget::User => DeployTarget::User,
+                }),
+            }),
+            config: Some(Config {
+                network,
+                service: lifecycle.map(|lifecycle| Service {
+                    lifecycle: Some(lifecycle),
+                    ..Service::default()
+                }),
+                ..Config::default()
+            }),
+            ..ContainerConfig::default()
+        }
+    }
+
+    fn container_network(reference: &str) -> Network {
+        Network {
+            mode: Some(NetworkMode::Container),
+            container: Some(reference.to_string()),
+            ..Network::default()
         }
     }
 
@@ -1826,6 +2209,7 @@ mod tests {
         assert_eq!(
             resolved.network,
             Some(ResolvedNetwork {
+                namespace: None,
                 publish: Some(vec![
                     "127.0.0.1:8080:80".to_string(),
                     "8443:443/tcp".to_string(),
@@ -1836,6 +2220,343 @@ mod tests {
         let json = serde_json::to_value(&resolved).unwrap();
         assert_eq!(json["network"]["publish"][0], "127.0.0.1:8080:80");
         assert_eq!(json["network"]["publish"][1], "8443:443/tcp");
+    }
+
+    #[test]
+    fn none_network_namespace_is_resolved() {
+        let config = network_config(Network {
+            mode: Some(NetworkMode::None),
+            ..Network::default()
+        });
+
+        let resolved = resolve(&config).unwrap();
+
+        assert_eq!(
+            resolved.network,
+            Some(ResolvedNetwork {
+                namespace: Some(ResolvedNetworkNamespace::None),
+                publish: None,
+            })
+        );
+        let json = serde_json::to_value(&resolved).unwrap();
+        assert_eq!(json["network"]["namespace"]["mode"], "none");
+    }
+
+    #[test]
+    fn container_network_namespace_resolves_source_unit_from_context() {
+        let worker = contextual_workload(
+            "worker",
+            ResolvedDeployTarget::User,
+            None,
+            None,
+            Some(container_network("database")),
+        );
+        let database =
+            contextual_workload("database", ResolvedDeployTarget::User, None, None, None);
+        let sources = [
+            ConfigSource::new("worker", &worker),
+            ConfigSource::new("database-source", &database),
+        ];
+
+        let resolved = resolve_with_context(&worker, &sources).unwrap();
+
+        assert_eq!(
+            resolved.network,
+            Some(ResolvedNetwork {
+                namespace: Some(ResolvedNetworkNamespace::Container {
+                    unit: "database-source.container".to_string(),
+                }),
+                publish: None,
+            })
+        );
+    }
+
+    #[test]
+    fn container_network_namespace_requires_context() {
+        let config = network_config(container_network("database"));
+
+        let error = resolve(&config).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "config.network.mode = \"container\" requires explicit workload context"
+        );
+    }
+
+    #[test]
+    fn network_container_without_container_mode_returns_error() {
+        let config = network_config(Network {
+            container: Some("database".to_string()),
+            ..Network::default()
+        });
+
+        let error = resolve(&config).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "config.network.container requires config.network.mode = \"container\""
+        );
+    }
+
+    #[test]
+    fn container_mode_without_reference_returns_error() {
+        let config = network_config(Network {
+            mode: Some(NetworkMode::Container),
+            ..Network::default()
+        });
+
+        let error = resolve(&config).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "config.network.mode = \"container\" requires config.network.container"
+        );
+    }
+
+    #[test]
+    fn non_default_network_modes_reject_published_ports() {
+        for network in [
+            Network {
+                mode: Some(NetworkMode::None),
+                publish: Some(vec!["8080:80".to_string()]),
+                ..Network::default()
+            },
+            Network {
+                mode: Some(NetworkMode::Container),
+                container: Some("database".to_string()),
+                publish: Some(vec!["8080:80".to_string()]),
+                ..Network::default()
+            },
+        ] {
+            let error = resolve(&network_config(network)).unwrap_err();
+
+            assert!(error
+                .to_string()
+                .starts_with("config.network.publish is incompatible"));
+        }
+    }
+
+    #[test]
+    fn current_workload_missing_from_context_returns_error() {
+        let worker = network_config(container_network("database"));
+        let database = contextual_workload(
+            "database",
+            ResolvedDeployTarget::System,
+            None,
+            None,
+            Some(container_network("owner")),
+        );
+        let owner = contextual_workload("owner", ResolvedDeployTarget::System, None, None, None);
+        let sources = [
+            ConfigSource::new("database", &database),
+            ConfigSource::new("owner", &owner),
+        ];
+
+        let error = resolve_with_context(&worker, &sources).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "current workload is missing from explicit config context"
+        );
+    }
+
+    #[test]
+    fn missing_network_reference_returns_error() {
+        let worker = contextual_workload(
+            "worker",
+            ResolvedDeployTarget::System,
+            None,
+            None,
+            Some(container_network("database")),
+        );
+        let sources = [ConfigSource::new("worker", &worker)];
+
+        let error = resolve_with_context(&worker, &sources).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "network container reference 'database' for workload 'worker' was not found"
+        );
+    }
+
+    #[test]
+    fn invalid_network_reference_relationships_return_errors() {
+        let cases = vec![
+            (
+                contextual_workload(
+                    "worker",
+                    ResolvedDeployTarget::System,
+                    None,
+                    None,
+                    Some(container_network("worker")),
+                ),
+                None,
+                "cannot share its own network namespace",
+            ),
+            (
+                contextual_workload(
+                    "worker",
+                    ResolvedDeployTarget::System,
+                    None,
+                    None,
+                    Some(container_network("database")),
+                ),
+                Some(contextual_workload(
+                    "database",
+                    ResolvedDeployTarget::System,
+                    Some(false),
+                    None,
+                    None,
+                )),
+                "is disabled",
+            ),
+            (
+                contextual_workload(
+                    "worker",
+                    ResolvedDeployTarget::System,
+                    None,
+                    None,
+                    Some(container_network("database")),
+                ),
+                Some(contextual_workload(
+                    "database",
+                    ResolvedDeployTarget::User,
+                    None,
+                    None,
+                    None,
+                )),
+                "different deploy target",
+            ),
+            (
+                contextual_workload(
+                    "worker",
+                    ResolvedDeployTarget::System,
+                    None,
+                    None,
+                    Some(container_network("database")),
+                ),
+                Some(contextual_workload(
+                    "database",
+                    ResolvedDeployTarget::System,
+                    None,
+                    Some(ServiceLifecycle::Job),
+                    None,
+                )),
+                "must use the long-running lifecycle",
+            ),
+        ];
+
+        for (worker, dependency, expected) in cases {
+            let mut sources = vec![ConfigSource::new("worker", &worker)];
+            if let Some(dependency) = dependency.as_ref() {
+                sources.push(ConfigSource::new("database", dependency));
+            }
+
+            let error = resolve_with_context(&worker, &sources).unwrap_err();
+
+            assert!(error.to_string().contains(expected), "{error:#}");
+        }
+    }
+
+    #[test]
+    fn duplicate_workload_name_in_target_returns_error() {
+        let first = contextual_workload(
+            "database",
+            ResolvedDeployTarget::System,
+            None,
+            None,
+            Some(container_network("owner")),
+        );
+        let second = first.clone();
+        let sources = [
+            ConfigSource::new("first", &first),
+            ConfigSource::new("second", &second),
+        ];
+
+        let error = resolve_with_context(&first, &sources).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "duplicate workload name 'database' for target 'system'"
+        );
+    }
+
+    #[test]
+    fn duplicate_source_unit_name_in_target_returns_error() {
+        let worker = contextual_workload(
+            "worker",
+            ResolvedDeployTarget::System,
+            None,
+            None,
+            Some(container_network("database")),
+        );
+        let database =
+            contextual_workload("database", ResolvedDeployTarget::System, None, None, None);
+        let sources = [
+            ConfigSource::new("shared", &worker),
+            ConfigSource::new("shared", &database),
+        ];
+
+        let error = resolve_with_context(&worker, &sources).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "duplicate Quadlet source unit 'shared' for target 'system'"
+        );
+    }
+
+    #[test]
+    fn network_reference_cycle_returns_path() {
+        let first = contextual_workload(
+            "first",
+            ResolvedDeployTarget::System,
+            None,
+            None,
+            Some(container_network("second")),
+        );
+        let second = contextual_workload(
+            "second",
+            ResolvedDeployTarget::System,
+            None,
+            None,
+            Some(container_network("first")),
+        );
+        let sources = [
+            ConfigSource::new("first", &first),
+            ConfigSource::new("second", &second),
+        ];
+
+        let error = resolve_with_context(&first, &sources).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "network container reference cycle: first -> second -> first"
+        );
+    }
+
+    #[test]
+    fn unsafe_network_reference_returns_error() {
+        let config = network_config(container_network("bad/reference"));
+
+        let error = resolve(&config).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "network container reference contains unsupported characters"
+        );
+    }
+
+    #[test]
+    fn unsafe_source_unit_name_returns_error() {
+        let config = network_config(container_network("database"));
+        let sources = [ConfigSource::new("bad/unit", &config)];
+
+        let error = resolve_with_context(&config, &sources).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "Quadlet source unit name contains unsupported characters: bad/unit"
+        );
     }
 
     #[test]
