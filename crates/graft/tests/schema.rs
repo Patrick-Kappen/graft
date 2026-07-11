@@ -80,14 +80,15 @@ fn schema_exposes_only_supported_fields() {
         .as_array()
         .expect("ServiceLifecycle should define variants")
         .iter()
-        .map(|variant| variant["const"].clone())
-        .collect::<Vec<_>>();
-    assert_eq!(
-        lifecycle_values,
-        vec![
-            serde_json::json!("long-running"),
-            serde_json::json!("job"),
-            serde_json::json!("setup"),
-        ]
-    );
+        .map(|variant| {
+            variant["const"]
+                .as_str()
+                .expect("ServiceLifecycle variants should define string constants")
+        })
+        .collect::<BTreeSet<_>>();
+    let expected_lifecycle_values = ["long-running", "job", "setup"]
+        .into_iter()
+        .collect::<BTreeSet<_>>();
+
+    assert_eq!(lifecycle_values, expected_lifecycle_values);
 }
