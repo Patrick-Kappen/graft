@@ -35,7 +35,7 @@ if ! podman_info=$(podman info 2>&1); then
 fi
 
 for rootfs in probe none owner client conflict; do
-  cp -aL "${source_rootfs}" "${tmp}/${rootfs}"
+  cp -a "${source_rootfs}" "${tmp}/${rootfs}"
   chmod -R u+w "${tmp:?}/${rootfs}"
 done
 
@@ -63,8 +63,9 @@ for _ in $(seq 1 20); do
 done
 test "${output:-}" = "shared-network-ok"
 
+# Without -f, BusyBox httpd returns immediately after accepting the bind.
 if podman run --rm --cgroups=disabled --network "container:${owner}" \
-  --rootfs "${tmp}/conflict" /bin/httpd -f -p 127.0.0.1:18081 -h /www; then
+  --rootfs "${tmp}/conflict" /bin/httpd -p 127.0.0.1:18081 -h /www; then
   echo "shared namespace unexpectedly allowed a duplicate loopback port bind" >&2
   exit 1
 fi
