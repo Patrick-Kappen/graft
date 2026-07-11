@@ -446,8 +446,9 @@
 
           network-runtime-rootfs = pkgs.runCommand "graft-network-runtime-rootfs" { } ''
             mkdir -p $out/bin $out/etc $out/tmp $out/www
-            for executable in ${pkgs.pkgsStatic.busybox}/bin/*; do
-              ln -s "$executable" "$out/bin/$(basename "$executable")"
+            cp ${pkgs.pkgsStatic.busybox}/bin/busybox $out/bin/busybox
+            for applet in httpd ip timeout true wget; do
+              ln -s busybox "$out/bin/$applet"
             done
             echo shared-network-ok > $out/www/index.html
           '';
