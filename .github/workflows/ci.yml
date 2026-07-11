@@ -187,6 +187,7 @@ jobs:
             git ls-files "*.nix" -z | xargs -0 nixfmt --check
             statix check .
             deadnix --fail .
+            shellcheck tests/runtime/network.sh
           '
           nix build .#packages.x86_64-linux.default
           nix build \
@@ -196,6 +197,12 @@ jobs:
             .#checks.x86_64-linux.quadlet-network \
             --print-out-paths
           nix flake check
+          network_rootfs=$(nix build \
+            .#checks.x86_64-linux.network-runtime-rootfs \
+            --no-link \
+            --print-out-paths)
+          GRAFT_REQUIRE_NETWORK_RUNTIME=1 \
+            nix develop .#ci -c tests/runtime/network.sh "${network_rootfs}"
 
   checks:
     name: checks

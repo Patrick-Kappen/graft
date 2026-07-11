@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use serde::Serialize;
 
 use crate::config::schema::{
@@ -148,6 +148,7 @@ pub enum ResolvedNetworkNamespace {
 #[derive(Debug, Clone, Copy)]
 pub struct ConfigSource<'a> {
     unit_name: &'a str,
+    origin: &'a str,
     config: &'a ContainerConfig,
 }
 
@@ -155,7 +156,25 @@ impl<'a> ConfigSource<'a> {
     /// Create source context from a Quadlet unit stem and parsed configuration.
     #[must_use]
     pub const fn new(unit_name: &'a str, config: &'a ContainerConfig) -> Self {
-        Self { unit_name, config }
+        Self {
+            unit_name,
+            origin: unit_name,
+            config,
+        }
+    }
+
+    /// Create source context with a path or other diagnostic origin.
+    #[must_use]
+    pub const fn with_origin(
+        unit_name: &'a str,
+        origin: &'a str,
+        config: &'a ContainerConfig,
+    ) -> Self {
+        Self {
+            unit_name,
+            origin,
+            config,
+        }
     }
 }
 
@@ -232,14 +251,7 @@ pub fn resolve_with_context(
     config: &ContainerConfig,
     sources: &[ConfigSource<'_>],
 ) -> Result<ResolvedContainer> {
-    if !sources.iter().any(|source| {
-        source
-            .config
-            .config
-            .as_ref()
-            .and_then(|config| config.network.as_ref())
-            .is_some_and(|network| network.mode == Some(NetworkMode::Container))
-    }) {
+    if !requires_config_index(sources) {
         return resolve_internal(config, None);
     }
 
@@ -250,6 +262,37 @@ pub fn resolve_with_context(
     }
 
     resolve_internal(config, Some(&index))
+}
+
+/// Resolve an explicit set of parsed TOML sources with one shared config index.
+///
+/// # Errors
+///
+/// Returns an error when any source, cross-workload reference, or container
+/// configuration is invalid.
+pub fn resolve_set(sources: &[ConfigSource<'_>]) -> Result<Vec<ResolvedContainer>> {
+    let index = requires_config_index(sources)
+        .then(|| ConfigIndex::build(sources))
+        .transpose()?;
+
+    sources
+        .iter()
+        .map(|source| {
+            resolve_internal(source.config, index.as_ref())
+                .with_context(|| format!("failed to resolve config: {}", source.origin))
+        })
+        .collect()
+}
+
+fn requires_config_index(sources: &[ConfigSource<'_>]) -> bool {
+    sources.iter().any(|source| {
+        source
+            .config
+            .config
+            .as_ref()
+            .and_then(|config| config.network.as_ref())
+            .is_some_and(|network| network.mode == Some(NetworkMode::Container))
+    })
 }
 
 fn resolve_internal(
@@ -503,49 +546,22 @@ impl ConfigIndex {
         let mut unit_names = BTreeSet::new();
 
         for source in sources {
-            validate_version(source.config)?;
-            if !is_safe_container_name(source.unit_name) {
-                bail!(
-                    "Quadlet source unit name contains unsupported characters: {}",
-                    source.unit_name
-                );
-            }
-
-            let key = workload_key(source.config)?;
+            let (key, workload) = index_source(source)
+                .with_context(|| format!("invalid config context: {}", source.origin))?;
             if !unit_names.insert((key.target, source.unit_name)) {
                 bail!(
-                    "duplicate Quadlet source unit '{}' for target '{}'",
+                    "duplicate Quadlet source unit '{}' for target '{}' in config context {}",
                     source.unit_name,
-                    key.target.as_str()
+                    key.target.as_str(),
+                    source.origin
                 );
             }
-
-            let network = source
-                .config
-                .config
-                .as_ref()
-                .and_then(|config| config.network.as_ref());
-            let network_container = match resolve_network_request(network)? {
-                Some(NetworkRequest::Container(reference)) => Some(reference.to_string()),
-                Some(NetworkRequest::None) | None => None,
-            };
-            let workload = IndexedWorkload {
-                unit_name: source.unit_name.to_string(),
-                enabled: source
-                    .config
-                    .deploy
-                    .as_ref()
-                    .and_then(|deploy| deploy.enable)
-                    != Some(false),
-                lifecycle: effective_lifecycle(source.config),
-                network_container,
-            };
-
             if workloads.insert(key.clone(), workload).is_some() {
                 bail!(
-                    "duplicate workload name '{}' for target '{}'",
+                    "duplicate workload name '{}' for target '{}' in config context {}",
                     key.name,
-                    key.target.as_str()
+                    key.target.as_str(),
+                    source.origin
                 );
             }
         }
@@ -669,6 +685,40 @@ impl ConfigIndex {
             .ok_or_else(|| anyhow::anyhow!("validated network reference disappeared"))?;
         Ok(format!("{}.container", workload.unit_name))
     }
+}
+
+fn index_source(source: &ConfigSource<'_>) -> Result<(WorkloadKey, IndexedWorkload)> {
+    validate_version(source.config)?;
+    if !is_safe_container_name(source.unit_name) {
+        bail!(
+            "Quadlet source unit name contains unsupported characters: {}",
+            source.unit_name
+        );
+    }
+
+    let key = workload_key(source.config)?;
+    let network = source
+        .config
+        .config
+        .as_ref()
+        .and_then(|config| config.network.as_ref());
+    let network_container = match resolve_network_request(network)? {
+        Some(NetworkRequest::Container(reference)) => Some(reference.to_string()),
+        Some(NetworkRequest::None) | None => None,
+    };
+    let workload = IndexedWorkload {
+        unit_name: source.unit_name.to_string(),
+        enabled: source
+            .config
+            .deploy
+            .as_ref()
+            .and_then(|deploy| deploy.enable)
+            != Some(false),
+        lifecycle: effective_lifecycle(source.config),
+        network_container,
+    };
+
+    Ok((key, workload))
 }
 
 impl ResolvedDeployTarget {
@@ -2477,7 +2527,7 @@ mod tests {
 
         assert_eq!(
             error.to_string(),
-            "duplicate workload name 'database' for target 'system'"
+            "duplicate workload name 'database' for target 'system' in config context second"
         );
     }
 
@@ -2501,7 +2551,7 @@ mod tests {
 
         assert_eq!(
             error.to_string(),
-            "duplicate Quadlet source unit 'shared' for target 'system'"
+            "duplicate Quadlet source unit 'shared' for target 'system' in config context shared"
         );
     }
 
@@ -2554,8 +2604,8 @@ mod tests {
         let error = resolve_with_context(&config, &sources).unwrap_err();
 
         assert_eq!(
-            error.to_string(),
-            "Quadlet source unit name contains unsupported characters: bad/unit"
+            format!("{error:#}"),
+            "invalid config context: bad/unit: Quadlet source unit name contains unsupported characters: bad/unit"
         );
     }
 

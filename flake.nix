@@ -444,6 +444,14 @@
             assert !(lib.hasInfix "WorkingDir=" quickstartHomeManagerRendered);
             pkgs.writeText "graft-home-manager-module-eval" homeManagerRendered;
 
+          network-runtime-rootfs = pkgs.runCommand "graft-network-runtime-rootfs" { } ''
+            mkdir -p $out/bin $out/etc $out/tmp $out/www
+            for executable in ${pkgs.pkgsStatic.busybox}/bin/*; do
+              ln -s "$executable" "$out/bin/$(basename "$executable")"
+            done
+            echo shared-network-ok > $out/www/index.html
+          '';
+
           quadlet-lifecycle =
             let
               sources = {
@@ -568,8 +576,10 @@
               markdownlint-cli2
               mdbook
               nixfmt
+              podman
               rustc
               rustfmt
+              shellcheck
               statix
               taplo
               zizmor
