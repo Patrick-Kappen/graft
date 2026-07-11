@@ -187,6 +187,7 @@ struct WorkloadKey {
 #[derive(Debug)]
 struct IndexedWorkload {
     unit_name: String,
+    origin: String,
     enabled: bool,
     lifecycle: ServiceLifecycle,
     network_container: Option<String>,
@@ -584,8 +585,9 @@ impl ConfigIndex {
 
             if &referenced_key == key {
                 bail!(
-                    "workload '{}' cannot share its own network namespace",
-                    key.name
+                    "workload '{}' cannot share its own network namespace in config context {}",
+                    key.name,
+                    workload.origin
                 );
             }
 
@@ -596,30 +598,34 @@ impl ConfigIndex {
                     .any(|candidate| candidate.name == *reference)
                 {
                     bail!(
-                        "network container reference '{}' for workload '{}' has a different deploy target",
+                        "network container reference '{}' for workload '{}' has a different deploy target in config context {}",
                         reference,
-                        key.name
+                        key.name,
+                        workload.origin
                     );
                 }
                 bail!(
-                    "network container reference '{}' for workload '{}' was not found",
+                    "network container reference '{}' for workload '{}' was not found in config context {}",
                     reference,
-                    key.name
+                    key.name,
+                    workload.origin
                 );
             };
 
             if !referenced.enabled {
                 bail!(
-                    "network container reference '{}' for workload '{}' is disabled",
+                    "network container reference '{}' for workload '{}' is disabled in config context {}",
                     reference,
-                    key.name
+                    key.name,
+                    workload.origin
                 );
             }
             if referenced.lifecycle != ServiceLifecycle::LongRunning {
                 bail!(
-                    "network container reference '{}' for workload '{}' must use the long-running lifecycle",
+                    "network container reference '{}' for workload '{}' must use the long-running lifecycle in config context {}",
                     reference,
-                    key.name
+                    key.name,
+                    workload.origin
                 );
             }
         }
@@ -648,12 +654,15 @@ impl ConfigIndex {
             return Ok(());
         }
         if let Some(start) = path.iter().position(|candidate| candidate == key) {
-            let mut names = path[start..]
+            let mut members = path[start..]
                 .iter()
-                .map(|candidate| candidate.name.as_str())
-                .collect::<Vec<_>>();
-            names.push(key.name.as_str());
-            bail!("network container reference cycle: {}", names.join(" -> "));
+                .map(|candidate| self.cycle_member(candidate))
+                .collect::<Result<Vec<_>>>()?;
+            members.push(self.cycle_member(key)?);
+            bail!(
+                "network container reference cycle: {}",
+                members.join(" -> ")
+            );
         }
 
         path.push(key.clone());
@@ -671,6 +680,14 @@ impl ConfigIndex {
         path.pop();
         complete.insert(key.clone());
         Ok(())
+    }
+
+    fn cycle_member(&self, key: &WorkloadKey) -> Result<String> {
+        let workload = self
+            .workloads
+            .get(key)
+            .ok_or_else(|| anyhow::anyhow!("validated cycle member disappeared"))?;
+        Ok(format!("{} ({})", key.name, workload.origin))
     }
 
     fn referenced_unit(&self, config: &ContainerConfig, reference: &str) -> Result<String> {
@@ -708,6 +725,7 @@ fn index_source(source: &ConfigSource<'_>) -> Result<(WorkloadKey, IndexedWorklo
     };
     let workload = IndexedWorkload {
         unit_name: source.unit_name.to_string(),
+        origin: source.origin.to_string(),
         enabled: source
             .config
             .deploy
@@ -2425,7 +2443,7 @@ mod tests {
 
         assert_eq!(
             error.to_string(),
-            "network container reference 'database' for workload 'worker' was not found"
+            "network container reference 'database' for workload 'worker' was not found in config context worker"
         );
     }
 
@@ -2580,7 +2598,7 @@ mod tests {
 
         assert_eq!(
             error.to_string(),
-            "network container reference cycle: first -> second -> first"
+            "network container reference cycle: first (first) -> second (second) -> first (first)"
         );
     }
 

@@ -259,6 +259,26 @@ mod tests {
     }
 
     #[test]
+    fn missing_set_reference_error_contains_source_path() {
+        let directory = tempdir().unwrap();
+        let worker = directory.path().join("worker.toml");
+        fs::write(
+            &worker,
+            "version = 1\nname = \"worker\"\n[config.network]\nmode = \"container\"\ncontainer = \"missing\"\n",
+        )
+        .unwrap();
+        let cli = Cli {
+            toml_file: None,
+            context_files: Vec::new(),
+            set_files: vec![worker.clone()],
+        };
+
+        let error = resolve_cli(&cli).unwrap_err();
+
+        assert!(error.to_string().contains(&worker.display().to_string()));
+    }
+
+    #[test]
     fn semantic_set_error_contains_source_path() {
         let directory = tempdir().unwrap();
         let worker = directory.path().join("worker.toml");
