@@ -53,7 +53,7 @@ let
   ) checkedTomlEntries;
 
   resolveToml =
-    name: entry:
+    name: _:
     let
       containerName = lib.removeSuffix ".toml" name;
     in
