@@ -78,10 +78,11 @@ The CLI owns business logic:
 The CLI does not write JSON files into the repository.
 
 Typed cross-workload references require explicit context that one file cannot
-provide. The approved networking design uses a deterministic config index built
-by the CLI from the concrete TOML source set supplied by Nix. Nix remains a
-mechanical caller and does not resolve dependency semantics. This reference
-index is distinct from future parent/child configuration merging; see
+provide. Repeated `--context <toml>` arguments let the CLI build a deterministic
+config index from the concrete source set supplied by Nix. Nix stages those
+sources under their original filenames, remains a mechanical caller, and does
+not resolve dependency semantics. This reference index is distinct from future
+parent/child configuration merging; see
 [Container network intent](networking.md).
 
 Checks that evaluate this IFD path should be built explicitly, for example with
@@ -130,7 +131,7 @@ The CLI may only add defaults that belong to Graft semantics.
 | `runtime.mode` | currently only `rootfs-store` |
 | supported container fields | no defaults; include only if user sets them |
 | environment, publish, volumes | no defaults; preserve deterministic ordering rules |
-| `network.mode` | absent preserves Quadlet's target-specific default; typed modes are designed but not implemented |
+| `network.mode` | absent preserves Quadlet's target-specific default; `none` and typed container references are supported |
 | `service.lifecycle` | absent means Quadlet's long-running notify default; explicit intent resolves to typed service fields |
 | `service.restart` and timing | no defaults; include only if user sets them |
 | `deploy.enable` | no default in JSON; modules render unless explicitly `false` |

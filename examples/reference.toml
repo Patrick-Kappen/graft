@@ -46,8 +46,9 @@
 # mode =                          # optional literal Quadlet Volume mode/options; requires source; non-empty, no control characters, no ':'; no allowlist yet
 
 # [config.network]
-# mode =
-# publish =                      # literal Quadlet PublishPort entries; non-empty, no control characters; user order preserved
+# mode =                         # none | container; absence keeps Quadlet default
+# container =                    # required Graft workload name for mode = "container"
+# publish =                      # literal Quadlet PublishPort entries; default mode only; non-empty, no control characters; user order preserved
 
 # [config.security]
 # dropCapabilities =

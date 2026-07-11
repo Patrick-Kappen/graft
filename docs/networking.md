@@ -1,15 +1,14 @@
 # Container network intent
 
-> **Status:** approved design for
-> [#144](https://github.com/Patrick-Kappen/graft/issues/144). The typed modes
-> described here are not implemented yet; implementation is tracked by
-> [#165](https://github.com/Patrick-Kappen/graft/issues/165).
+> **Status:** the implicit default, `none`, and shared-container modes are
+> implemented. Dangerous host networking and advanced settings remain tracked
+> by [#193](https://github.com/Patrick-Kappen/graft/issues/193).
 
 Graft models the network namespace a workload needs. It does not expose raw
 Podman network arguments, arbitrary Quadlet `Network=` text, or host firewall
 configuration.
 
-The first implementation phase covers the implicit default network, no network,
+The implemented first phase covers the implicit default network, no network,
 and sharing another Graft workload's network namespace. Host networking and
 broader DNS, address, alias, and generated-network controls remain a second
 phase.
@@ -166,8 +165,8 @@ must reject those reserved fields rather than silently discard them.
 
 Single-file parsing is sufficient for scalar validation, but it cannot prove
 that another workload exists, is enabled, has a compatible lifecycle, or shares
-the same target. Phase A therefore requires an explicit config index owned by
-the Rust resolver.
+the same target. Shared-container resolution therefore uses an explicit config
+index owned by the Rust resolver.
 
 For each configured TOML source, the index contains only the context needed for
 references:
@@ -248,11 +247,11 @@ config.network.mode = "container" with config.network.container = "database"
 The reference uses the Graft workload name. It must not depend on a separately
 configured or generated Podman runtime name.
 
-## Phase A implementation and tests
+## Implemented Phase A and tests
 
-[#165](https://github.com/Patrick-Kappen/graft/issues/165) must implement Phase
-A through typed parser, schema, resolver, resolved-JSON, and renderer values.
-Tests must include:
+[#165](https://github.com/Patrick-Kappen/graft/issues/165) implements Phase A
+through typed parser, schema, resolver, resolved-JSON, and renderer values. Its
+coverage includes:
 
 - parser/schema coverage for absent, `none`, and typed container modes;
 - field-specific errors for malformed modes and invalid combinations;
@@ -267,12 +266,12 @@ Tests must include:
 - runtime tests proving no external IP path for `none` and shared loopback for a
   container reference.
 
-Runtime tests must avoid claiming stronger isolation than they observe. In
+Runtime tests avoid claiming stronger isolation than they observe. In
 particular, `none` tests should not mount host communication sockets, and shared
 namespace tests should prove both connectivity and port-space sharing.
 
-Phase A completion unblocks #106 even while dangerous host networking and the
-broader Phase B remain open.
+Phase A completion unblocks #106. Dangerous host networking and the broader
+Phase B remain in [#193](https://github.com/Patrick-Kappen/graft/issues/193).
 
 ## Phase B boundary
 

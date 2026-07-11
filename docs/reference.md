@@ -116,7 +116,9 @@ Implemented today:
 - `config.container.environmentFile` is rendered as ordered, quoted Quadlet `EnvironmentFile="..."` lines when explicitly set.
 - `config.filesystem.volumes` is rendered as ordered Quadlet `Volume=` lines when explicitly set.
 - `config.network.publish` is rendered as ordered Quadlet `PublishPort=` lines when explicitly set.
-- `config.network.mode` is reserved and not rendered yet; the approved typed contract is documented in [Container network intent](networking.md).
+- absent `config.network.mode` preserves Quadlet's target-specific default.
+- `config.network.mode = "none"` renders Quadlet `Network=none`.
+- `config.network.mode = "container"` requires `config.network.container` and renders a validated Graft workload reference as `Network=<source>.container`.
 - `config.runtime.mode` supports only `rootfs-store`.
 - `config.runtime.packages` are mapped to packages in the target configuration's
   `pkgs`; the host flake pin controls their versions.
@@ -251,11 +253,23 @@ Current published port validation:
 - no DNS settings or network aliases are rendered
 - no automatic firewall rules are managed
 
-`config.network.mode`, DNS settings, and host entries are currently reserved and
-must not be treated as effective runtime intent. The approved first networking
-phase covers an implicit default, `none`, and a typed Graft workload reference;
-see [Container network intent](networking.md). Implementation remains tracked by
-[#165](https://github.com/Patrick-Kappen/graft/issues/165).
+Current network namespace validation:
+
+- absence is the only representation of Quadlet's target-specific default
+- `none` and `container` are the only supported mode values
+- `container` requires a safe top-level Graft workload name
+- the referenced workload must exist, be enabled, share the deploy target, and
+  use the effective `long-running` lifecycle
+- self-references, duplicate identities, missing references, and cycles fail
+  before materialisation
+- `publish` is incompatible with both supported explicit modes
+- old `container:<runtime-name>` values receive a migration diagnostic
+- DNS settings and host entries remain reserved and ineffective
+- dangerous host networking and advanced settings remain tracked by
+  [#193](https://github.com/Patrick-Kappen/graft/issues/193)
+
+See [Container network intent](networking.md) for namespace and security
+boundaries.
 
 `config.service.lifecycle` is typed workload intent:
 
