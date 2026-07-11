@@ -44,13 +44,23 @@ let
     map (entry: lib.nameValuePair entry.name entry) checkedTomlEntries
   );
 
+  contextLinks = lib.concatMapStrings (
+    entry: "ln -s ${lib.escapeShellArg "${entry.path}"} context/${lib.escapeShellArg entry.name}\n"
+  ) checkedTomlEntries;
+
+  contextArgs = lib.concatMapStringsSep " " (
+    entry: "--context context/${lib.escapeShellArg entry.name}"
+  ) checkedTomlEntries;
+
   resolveToml =
     name: entry:
     let
       containerName = lib.removeSuffix ".toml" name;
     in
     pkgs.runCommand "graft-resolve-${containerName}" { } ''
-      ${lib.getExe' cfg.package "graft"} ${entry.path} > $out
+      mkdir context
+      ${contextLinks}
+      ${lib.getExe' cfg.package "graft"} context/${lib.escapeShellArg name} ${contextArgs} > $out
     '';
 
   resolvedJsonFiles = lib.mapAttrs resolveToml tomlFiles;

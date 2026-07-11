@@ -1,0 +1,9 @@
+version = 1
+name = "nix-check-network-client-user"
+
+[deploy]
+target = "user"
+
+[config.network]
+mode = "container"
+container = "nix-check-network-owner-user"

@@ -49,6 +49,16 @@ let
         "Volume=${escapeSystemdExecArg mount}\n"
       ) volumes;
       network = ctr.network or { };
+      namespace = network.namespace or null;
+      networkLine =
+        if namespace == null then
+          ""
+        else if namespace.mode == "none" then
+          "Network=none\n"
+        else if namespace.mode == "container" then
+          "Network=${escapeSystemdExecArg namespace.unit}\n"
+        else
+          throw "unsupported resolved network namespace mode '${namespace.mode}'";
       publish = network.publish or [ ];
       publishLines = lib.concatMapStrings (port: "PublishPort=${escapeSystemdExecArg port}\n") publish;
       service = ctr.service or { };
@@ -91,6 +101,7 @@ let
     + environmentLines
     + environmentFileLines
     + volumeLines
+    + networkLine
     + publishLines
     + serviceSection;
 in

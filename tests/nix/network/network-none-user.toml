@@ -1,0 +1,8 @@
+version = 1
+name = "nix-check-network-none-user"
+
+[deploy]
+target = "user"
+
+[config.network]
+mode = "none"
