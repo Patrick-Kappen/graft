@@ -113,6 +113,34 @@
             ];
           };
 
+          networkNixosEval = lib.evalModules {
+            specialArgs = { inherit pkgs; };
+            modules = [
+              moduleTestOptions
+              self.nixosModules.graft
+              {
+                services.graft = {
+                  enable = true;
+                  configRoot = ./tests/nix/network;
+                };
+              }
+            ];
+          };
+
+          networkHomeManagerEval = lib.evalModules {
+            specialArgs = { inherit pkgs; };
+            modules = [
+              moduleTestOptions
+              self.homeManagerModules.graft
+              {
+                programs.graft = {
+                  enable = true;
+                  configRoot = ./tests/nix/network;
+                };
+              }
+            ];
+          };
+
           quickstartNixosEval = lib.evalModules {
             specialArgs = { inherit pkgs; };
             modules = [
@@ -142,6 +170,12 @@
             nixosEval.config.environment.etc."containers/systemd/timer-job-system.container".text;
           nixosSetupRendered =
             nixosEval.config.environment.etc."containers/systemd/setup-system.container".text;
+          nixosNetworkOwnerRendered =
+            networkNixosEval.config.environment.etc."containers/systemd/network-owner-system.container".text;
+          nixosNetworkClientRendered =
+            networkNixosEval.config.environment.etc."containers/systemd/network-client-system.container".text;
+          nixosNetworkNoneRendered =
+            networkNixosEval.config.environment.etc."containers/systemd/network-none-system.container".text;
           homeManagerRendered =
             homeManagerEval.config.xdg.configFile."containers/systemd/user.container".text;
           homeManagerPlainRendered =
@@ -154,6 +188,12 @@
             homeManagerEval.config.xdg.configFile."containers/systemd/timer-job-user.container".text;
           homeManagerSetupRendered =
             homeManagerEval.config.xdg.configFile."containers/systemd/setup-user.container".text;
+          homeManagerNetworkOwnerRendered =
+            networkHomeManagerEval.config.xdg.configFile."containers/systemd/network-owner-user.container".text;
+          homeManagerNetworkClientRendered =
+            networkHomeManagerEval.config.xdg.configFile."containers/systemd/network-client-user.container".text;
+          homeManagerNetworkNoneRendered =
+            networkHomeManagerEval.config.xdg.configFile."containers/systemd/network-none-user.container".text;
           quickstartNixosRendered =
             quickstartNixosEval.config.environment.etc."containers/systemd/graft-example.container".text;
           quickstartHomeManagerRendered =
@@ -216,6 +256,7 @@
             "Environment="
             "EnvironmentFile="
             "PublishPort="
+            "Network="
             "Type="
             "RemainAfterExit="
             "Restart="
@@ -321,6 +362,17 @@
               ''Exec="/bin/true"''
               "\n[Service]\nType=oneshot\nRemainAfterExit=yes\nTimeoutStartSec=2m\nTimeoutStopSec=30s"
             ];
+            assert assertHasInfixes nixosNetworkOwnerRendered [
+              "ContainerName=nix-check-network-owner-system"
+            ];
+            assert assertHasInfixes nixosNetworkClientRendered [
+              "ContainerName=nix-check-network-client-system"
+              "Network=network-owner-system.container"
+            ];
+            assert assertHasInfixes nixosNetworkNoneRendered [
+              "ContainerName=nix-check-network-none-system"
+              "Network=none"
+            ];
             assert !(nixosEval.config.environment.etc ? "containers/systemd/user.container");
             assert !(nixosEval.config.environment.etc ? "containers/systemd/escape-user.container");
             assert !(nixosEval.config.environment.etc ? "containers/systemd/host-user.container");
@@ -369,6 +421,17 @@
               "ContainerName=nix-check-setup-user"
               ''Exec="/bin/true"''
               "\n[Service]\nType=oneshot\nRemainAfterExit=yes\nTimeoutStartSec=2m\nTimeoutStopSec=30s"
+            ];
+            assert assertHasInfixes homeManagerNetworkOwnerRendered [
+              "ContainerName=nix-check-network-owner-user"
+            ];
+            assert assertHasInfixes homeManagerNetworkClientRendered [
+              "ContainerName=nix-check-network-client-user"
+              "Network=network-owner-user.container"
+            ];
+            assert assertHasInfixes homeManagerNetworkNoneRendered [
+              "ContainerName=nix-check-network-none-user"
+              "Network=none"
             ];
             assert !(homeManagerEval.config.xdg.configFile ? "containers/systemd/system.container");
             assert !(homeManagerEval.config.xdg.configFile ? "containers/systemd/escape-system.container");
@@ -423,6 +486,52 @@
                 grep -Fx "RemainAfterExit=yes" "$generated/setup-$scope.service"
                 ! grep -F -- "--sdnotify=" "$generated/setup-$scope.service"
                 ! grep -E '^ExecStart=.* -d( |$)' "$generated/setup-$scope.service"
+              done
+
+              mkdir -p runtime/systemd
+              XDG_RUNTIME_DIR="$PWD/runtime" \
+                SYSTEMD_UNIT_PATH="$PWD/generated-system:$PWD/generated-user:${pkgs.podman}/share/systemd/user:${pkgs.systemd}/example/systemd/user:${pkgs.systemd}/example/systemd/system" \
+                ${lib.getExe' pkgs.systemd "systemd-analyze"} --user verify \
+                generated-system/*.service generated-user/*.service
+              cp generated-system/*.service generated-user/*.service $out/
+            '';
+
+          quadlet-network =
+            let
+              sources = {
+                owner-system = pkgs.writeText "network-owner-system.container" nixosNetworkOwnerRendered;
+                client-system = pkgs.writeText "network-client-system.container" nixosNetworkClientRendered;
+                none-system = pkgs.writeText "network-none-system.container" nixosNetworkNoneRendered;
+                owner-user = pkgs.writeText "network-owner-user.container" homeManagerNetworkOwnerRendered;
+                client-user = pkgs.writeText "network-client-user.container" homeManagerNetworkClientRendered;
+                none-user = pkgs.writeText "network-none-user.container" homeManagerNetworkNoneRendered;
+              };
+            in
+            pkgs.runCommand "graft-quadlet-network" { } ''
+              mkdir source-system source-user generated-system generated-user $out
+              cp ${sources.owner-system} source-system/network-owner-system.container
+              cp ${sources.client-system} source-system/network-client-system.container
+              cp ${sources.none-system} source-system/network-none-system.container
+              cp ${sources.owner-user} source-user/network-owner-user.container
+              cp ${sources.client-user} source-user/network-client-user.container
+              cp ${sources.none-user} source-user/network-none-user.container
+
+              QUADLET_UNIT_DIRS="$PWD/source-system" \
+                ${pkgs.podman}/libexec/podman/quadlet \
+                generated-system generated-system generated-system
+              QUADLET_UNIT_DIRS="$PWD/source-user" \
+                ${pkgs.podman}/libexec/podman/quadlet -user \
+                generated-user generated-user generated-user
+
+              for scope in system user; do
+                generated="generated-$scope"
+                owner="network-owner-$scope.service"
+                client="$generated/network-client-$scope.service"
+
+                grep -Fx "Requires=$owner" "$client"
+                grep -Fx "After=$owner" "$client"
+                grep -E "^ExecStart=.* --network container:nix-check-network-owner-$scope( |$)" "$client"
+                grep -E "^ExecStart=.* --network none( |$)" "$generated/network-none-$scope.service"
               done
 
               mkdir -p runtime/systemd

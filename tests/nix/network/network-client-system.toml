@@ -1,0 +1,9 @@
+version = 1
+name = "nix-check-network-client-system"
+
+[deploy]
+target = "system"
+
+[config.network]
+mode = "container"
+container = "nix-check-network-owner-system"

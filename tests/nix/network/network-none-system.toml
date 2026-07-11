@@ -1,0 +1,8 @@
+version = 1
+name = "nix-check-network-none-system"
+
+[deploy]
+target = "system"
+
+[config.network]
+mode = "none"

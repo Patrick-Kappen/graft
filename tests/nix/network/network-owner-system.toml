@@ -1,0 +1,8 @@
+version = 1
+name = "nix-check-network-owner-system"
+
+[deploy]
+target = "system"
+
+[config.service]
+lifecycle = "long-running"
