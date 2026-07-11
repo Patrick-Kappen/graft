@@ -261,6 +261,7 @@ git diff --check
 
 The module-eval and Quadlet generator checks use IFD, so build them explicitly.
 `nix flake check` may omit them and must not be the only Nix module or
-generated-service gate. The rootless network runtime test skips unavailable
-local Podman environments unless `GRAFT_REQUIRE_NETWORK_RUNTIME=1` is set; CI
-requires it.
+generated-service gate. The rootless network runtime test reports an explicit
+skip when Podman is unavailable or the execution environment blocks rootless
+containers. Set `GRAFT_REQUIRE_NETWORK_RUNTIME=1` on a capable host to make
+availability mandatory.
