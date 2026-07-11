@@ -25,7 +25,14 @@ unavailable() {
 }
 
 command -v podman >/dev/null || unavailable "podman is not installed"
-podman info >/dev/null 2>&1 || unavailable "podman info failed"
+if [[ ! -d ${XDG_RUNTIME_DIR:-} ]]; then
+  export XDG_RUNTIME_DIR="${tmp}/runtime"
+  mkdir -m 0700 "${XDG_RUNTIME_DIR}"
+fi
+if ! podman_info=$(podman info 2>&1); then
+  [[ ${GRAFT_REQUIRE_NETWORK_RUNTIME:-0} != 1 ]] || printf '%s\n' "${podman_info}" >&2
+  unavailable "podman info failed"
+fi
 
 for rootfs in probe none owner client conflict; do
   cp -aL "${source_rootfs}" "${tmp}/${rootfs}"
