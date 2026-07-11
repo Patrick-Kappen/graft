@@ -117,6 +117,10 @@ them:
 - `PublishPort=` from `config.network.publish`
 - `Volume=` from `config.filesystem.volumes`
 
+Typed `Network=` output is not implemented yet. The approved contract and the
+required `.container` source-unit form for automatic `Requires=`/`After=`
+relationships are defined in [Container network intent](networking.md).
+
 Environment files, published ports, and volumes preserve user order. Environment
 variables are sorted by key. Environment files and command argv are quoted for
 systemd argument parsing. Container values render literal `%` as `%%` and

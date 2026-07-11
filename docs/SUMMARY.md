@@ -7,6 +7,7 @@
 - [Long-term vision](vision.md)
 - [Design](design.md)
 - [Workload lifecycle semantics](lifecycle.md)
+- [Container network intent](networking.md)
 - [Quadlet output](quadlet.md)
 - [Roadmap](roadmap.md)
 - [Non-goals and deferred scope](non-goals.md)
