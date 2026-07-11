@@ -73,7 +73,7 @@
           ]
         },
         "network": {
-          "description": "Supported published-port settings.",
+          "description": "Supported network namespace and published-port settings.",
           "anyOf": [
             {
               "$ref": "#/$defs/Network"
@@ -260,6 +260,25 @@
       "description": "Network configuration (`[config.network]`).",
       "type": "object",
       "properties": {
+        "container": {
+          "description": "Graft workload whose network namespace should be shared.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+        },
+        "mode": {
+          "description": "Network namespace intent. Absence preserves Quadlet's default.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NetworkMode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "publish": {
           "description": "Ordered literal Quadlet `PublishPort=` entries.",
           "type": [
@@ -273,6 +292,21 @@
         }
       },
       "additionalProperties": false
+    },
+    "NetworkMode": {
+      "description": "Supported network namespace intent.",
+      "oneOf": [
+        {
+          "description": "Create no externally connected IP network for the workload.",
+          "type": "string",
+          "const": "none"
+        },
+        {
+          "description": "Share another Graft workload's network namespace.",
+          "type": "string",
+          "const": "container"
+        }
+      ]
     },
     "Runtime": {
       "description": "Runtime configuration (`[config.runtime]`).",

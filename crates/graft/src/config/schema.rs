@@ -10,7 +10,7 @@
 //! definitions. Schema-only skips intentionally hide reserved parser fields.
 
 use schemars::JsonSchema;
-use serde::Deserialize;
+use serde::{de, Deserialize, Deserializer};
 use std::collections::HashMap;
 
 /// Top-level container configuration.
@@ -99,7 +99,7 @@ pub struct Config {
     pub container: Option<Container>,
     /// Supported filesystem volume settings.
     pub filesystem: Option<Filesystem>,
-    /// Supported published-port settings.
+    /// Supported network namespace and published-port settings.
     pub network: Option<Network>,
     /// Extra Quadlet `.network` units (`[[config.networks]]`).
     #[schemars(skip)]
@@ -301,8 +301,11 @@ pub struct Device {
 #[derive(Debug, Clone, Deserialize, Default, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct Network {
-    #[schemars(skip)]
-    pub mode: Option<String>,
+    /// Network namespace intent. Absence preserves Quadlet's default.
+    pub mode: Option<NetworkMode>,
+    /// Graft workload whose network namespace should be shared.
+    #[schemars(regex(pattern = r"^[A-Za-z0-9][A-Za-z0-9._-]*$"))]
+    pub container: Option<String>,
     /// Ordered literal Quadlet `PublishPort=` entries.
     #[schemars(inner(length(min = 1)))]
     pub publish: Option<Vec<String>>,
@@ -314,6 +317,38 @@ pub struct Network {
     pub dns_search: Option<Vec<String>>,
     #[schemars(skip)]
     pub add_host: Option<Vec<String>>,
+}
+
+/// Supported network namespace intent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, JsonSchema)]
+#[schemars(rename_all = "lowercase")]
+pub enum NetworkMode {
+    /// Create no externally connected IP network for the workload.
+    None,
+    /// Share another Graft workload's network namespace.
+    Container,
+}
+
+impl<'de> Deserialize<'de> for NetworkMode {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        match value.as_str() {
+            "none" => Ok(Self::None),
+            "container" => Ok(Self::Container),
+            value if value.starts_with("container:") => Err(de::Error::custom(format!(
+                "config.network.mode = {value:?} is not supported; use config.network.mode = \
+                 \"container\" with config.network.container = {:?}",
+                value.trim_start_matches("container:")
+            ))),
+            "host" => Err(de::Error::custom(
+                "config.network.mode = \"host\" is dangerous and not supported yet",
+            )),
+            _ => Err(de::Error::unknown_variant(&value, &["none", "container"])),
+        }
+    }
 }
 
 /// Extra Quadlet `.network` unit (`[[config.networks]]`).
@@ -576,6 +611,38 @@ mod tests {
         assert_eq!(home.mode.as_deref(), Some("persistent"));
         assert_eq!(home.source.as_deref(), Some("~/.graft/devshell"));
         assert_eq!(home.target.as_deref(), Some("/home/user"));
+    }
+
+    #[test]
+    fn parses_supported_network_modes() {
+        for (value, expected) in [
+            ("none", NetworkMode::None),
+            ("container", NetworkMode::Container),
+        ] {
+            let toml = format!("[config.network]\nmode = \"{value}\"");
+            let cfg = parse_toml(&toml).unwrap();
+            let mode = cfg.config.unwrap().network.unwrap().mode;
+
+            assert_eq!(mode, Some(expected));
+        }
+    }
+
+    #[test]
+    fn old_container_network_mode_returns_migration_error() {
+        let error = parse_toml("[config.network]\nmode = \"container:database\"").unwrap_err();
+
+        assert!(error.to_string().contains(
+            "use config.network.mode = \"container\" with config.network.container = \"database\""
+        ));
+    }
+
+    #[test]
+    fn dangerous_host_network_mode_returns_error() {
+        let error = parse_toml("[config.network]\nmode = \"host\"").unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("config.network.mode = \"host\" is dangerous and not supported yet"));
     }
 
     #[test]

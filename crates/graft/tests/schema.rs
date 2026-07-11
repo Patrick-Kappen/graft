@@ -43,7 +43,7 @@ fn schema_exposes_only_supported_fields() {
         ("Deploy", &["enable", "target"][..]),
         ("Filesystem", &["volumes"][..]),
         ("FilesystemVolume", &["mode", "source", "target"][..]),
-        ("Network", &["publish"][..]),
+        ("Network", &["container", "mode", "publish"][..]),
         ("Runtime", &["command", "mode", "packages"][..]),
         (
             "Service",
@@ -91,4 +91,18 @@ fn schema_exposes_only_supported_fields() {
         .collect::<BTreeSet<_>>();
 
     assert_eq!(lifecycle_values, expected_lifecycle_values);
+
+    let network_mode_values = schema["$defs"]["NetworkMode"]["oneOf"]
+        .as_array()
+        .expect("NetworkMode should define variants")
+        .iter()
+        .map(|variant| {
+            variant["const"]
+                .as_str()
+                .expect("NetworkMode variants should define string constants")
+        })
+        .collect::<BTreeSet<_>>();
+    let expected_network_mode_values = ["none", "container"].into_iter().collect::<BTreeSet<_>>();
+
+    assert_eq!(network_mode_values, expected_network_mode_values);
 }
