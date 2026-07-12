@@ -1,0 +1,13 @@
+version = 1
+name = "long-running-system"
+
+[deploy]
+target = "system"
+activation = "startup"
+
+[config.container]
+workingDir = "/workspace"
+
+[[config.filesystem.volumes]]
+source = "/var/lib/graft-workspace"
+target = "/workspace"

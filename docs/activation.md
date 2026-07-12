@@ -1,8 +1,7 @@
 # Workload startup activation
 
-> **Status:** implemented for generated `.container` services. Manager-level
-> boot, login, linger, reboot, and rebuild runtime coverage remains tracked by
-> [#196](https://github.com/Patrick-Kappen/graft/issues/196).
+> **Status:** implemented and covered through both generated-service checks and
+> an advisory manager-level NixOS VM test.
 
 Graft separates workload startup policy from process lifecycle and dependency
 activation. A rendered workload remains manually, externally, or
@@ -214,10 +213,30 @@ path for startup activation.
 - regressions proving timer jobs remain without startup intent and typed
   dependency activation remains independent.
 
-Manager-level tests must additionally distinguish generator relationship
-creation from immediate reconciliation of an already active manager. System
-boot, user-manager login and linger, reboot, and live rebuild/removal behavior
-remain tracked by [#196](https://github.com/Patrick-Kappen/graft/issues/196).
+[#196](https://github.com/Patrick-Kappen/graft/issues/196) adds an isolated
+x86_64 NixOS VM that validates:
+
+- normal system startup for long-running, finite job, and retained setup
+  workloads;
+- a rootless user manager started at boot through declarative linger;
+- a non-lingering rootless user manager started and stopped through a real tty
+  login session;
+- dependency activation of a shared-network owner without startup intent;
+- live startup-intent removal without stopping running workloads;
+- reboot into the no-startup specialisation and a later full reboot after
+  re-adding startup intent;
+- preservation of persistent markers, a mounted workspace, and a foreign
+  systemd unit throughout the transitions.
+
+Build the manager-level test locally with:
+
+```bash
+nix build .#packages.x86_64-linux.activation-runtime-test --no-link --print-build-logs
+```
+
+The corresponding `activation-runtime` CI job is advisory and is deliberately
+excluded from the aggregate required checks while its cost and runner stability
+are evaluated.
 
 ## Upstream evidence
 

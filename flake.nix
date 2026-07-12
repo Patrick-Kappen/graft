@@ -26,9 +26,7 @@
         system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
-        in
-        {
-          default = pkgs.rustPlatform.buildRustPackage {
+          graftPackage = pkgs.rustPlatform.buildRustPackage {
             pname = "graft";
             version = "0.2.0-alpha.1";
             src = ./crates/graft;
@@ -42,6 +40,16 @@
               platforms = pkgs.lib.platforms.linux;
             };
           };
+        in
+        {
+          default = graftPackage;
+        }
+        // pkgs.lib.optionalAttrs (system == "x86_64-linux") {
+          activation-runtime-test = pkgs.testers.runNixOSTest (
+            import ./tests/nixos/activation.nix {
+              inherit pkgs graftPackage;
+            }
+          );
         }
       );
 

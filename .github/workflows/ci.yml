@@ -204,6 +204,22 @@ jobs:
             --print-out-paths)
           nix develop .#ci -c tests/runtime/network.sh "${network_rootfs}"
 
+  activation_runtime:
+    name: activation-runtime
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - name: Setup Nix
+        uses: ./.github/actions/setup-nix
+
+      - name: Startup activation runtime test
+        run: nix build .#packages.x86_64-linux.activation-runtime-test --no-link --print-build-logs
+
   checks:
     name: checks
     runs-on: ubuntu-latest

@@ -1,0 +1,6 @@
+version = 1
+name = "linger-user"
+
+[deploy]
+target = "user"
+activation = "startup"
