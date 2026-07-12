@@ -20,6 +20,7 @@
 # [deploy]
 # enable =
 # target =
+# activation =                    # startup; absent means no manager-start relationship
 
 # [config.runtime]
 # mode =

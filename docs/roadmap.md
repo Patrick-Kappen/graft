@@ -58,8 +58,8 @@ Goals:
 - User/rootless containers should be a natural fit for local development.
 - Packages are declared in TOML and realised by Nix, not installed ad-hoc inside
   the container.
-- Explicit autostart can be modelled later for dev sessions, but there is no
-  implicit autostart default.
+- Explicit startup activation is available for manager-started workloads, but
+  there is no implicit autostart default.
 
 Agreed lifecycle command names:
 

@@ -3,7 +3,7 @@
 > **Status:** implemented for generated `.container` services. Native typed
 > `.timer` generation remains tracked by
 > [#134](https://github.com/Patrick-Kappen/graft/issues/134). Explicit manager
-> startup policy is designed separately in
+> startup policy is implemented separately through
 > [Workload startup activation](activation.md).
 
 Graft models every workload as a systemd-managed service while distinguishing
@@ -139,8 +139,8 @@ jitter, persistence, and exact timer-to-service identity belong to
 [#134](https://github.com/Patrick-Kappen/graft/issues/134). That implementation
 must accept only `lifecycle = "job"` for repeating schedules and reject `setup`.
 External systemd timer units may trigger a Graft-generated `job` while native
-timer generation remains pending. A `job` may also use the approved future
-`deploy.activation = "startup"` contract for one run per manager startup; that
+timer generation remains pending. A `job` may also use
+`deploy.activation = "startup"` for one run per manager startup; that
 does not make it periodic.
 
 Timer-job state transitions:
@@ -256,9 +256,9 @@ The implemented contract includes:
   behavior;
 - a regression fixture for the first finite timer-job service shape.
 
-It does not generate `.timer` units, implement health/readiness, implement the
-approved startup contract, or expose arbitrary systemd service keys. Startup
-implementation remains tracked by #132.
+It does not generate `.timer` units, implement health/readiness, or expose
+arbitrary systemd service keys. Startup activation composes with all three
+lifecycles through the separate typed deployment contract.
 
 ## Upstream evidence
 

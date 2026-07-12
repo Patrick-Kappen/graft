@@ -108,6 +108,7 @@ Implemented today:
   final identity contract.
 - `deploy.target` defaults to `system`.
 - `deploy.enable = false` prevents rendering.
+- `deploy.activation = "startup"` renders a fixed target-specific `[Install]` relationship; absence renders none.
 - `config.container.hostname` is rendered as Quadlet `HostName=` when explicitly set.
 - `config.container.user` is rendered as Quadlet `User=` when explicitly set.
 - `config.container.group` is rendered as Quadlet `Group=` when explicitly set together with `config.container.user`.
@@ -131,21 +132,20 @@ Implemented today:
 - `config.service.restart` is rendered only when explicitly set.
 - `config.service.restartSec`, `timeoutStartSec`, and `timeoutStopSec` are rendered only when explicitly set.
 
-### Approved startup contract, not yet implemented
+### Startup activation
 
-Issue [#191](https://github.com/Patrick-Kappen/graft/issues/191) approves the
-future typed form:
+The supported typed form is:
 
 ```toml
 [deploy]
 activation = "startup"
 ```
 
-It will map system workloads to `WantedBy=multi-user.target` and user workloads
-to `WantedBy=default.target`. The field is deliberately absent from the current
-machine-readable schema until #132 implements parser, resolver, renderer, and
-generator coverage. Do not use it in runnable TOML yet. See
-[Workload startup activation](activation.md) for the complete contract.
+It maps system workloads to `WantedBy=multi-user.target` and user workloads to
+`WantedBy=default.target`. Absence renders no `[Install]` section. Disabled
+workloads may retain dormant startup intent but are not materialised. See
+[Workload startup activation](activation.md) for lifecycle, linger, rebuild, and
+removal boundaries.
 
 ### Renderer escaping
 
@@ -311,8 +311,8 @@ Current service timing validation:
 - values must not contain control characters
 - `restartSec` requires `restart` other than `no`
 - no systemd timespan parsing is performed yet
-- typed startup activation is designed but not implemented; `[Install]`,
-  autostart, and `restartIfChanged` are not rendered today
+- only typed startup activation may render `[Install]`; arbitrary install maps
+  and `restartIfChanged` are not rendered
 
 Not all fields from the annotated TOML reference are rendered yet. Fields that
 are parsed but not listed above should be treated as reserved/roadmap fields. See
