@@ -222,6 +222,10 @@ in
           machine.connect()
           machine.wait_for_unit("multi-user.target")
           machine.wait_for_unit("user@1000.service")
+          machine.wait_until_succeeds(
+              "systemctl --user --machine=graftlinger@ is-active default.target",
+              timeout=120,
+          )
           machine.fail("grep -Fx 'WantedBy=multi-user.target' /etc/containers/systemd/long-running-system.container")
           machine.fail("systemctl is-active long-running-system.service")
           machine.fail("systemctl --user --machine=graftlinger@ is-active linger-user.service")
@@ -234,8 +238,8 @@ in
           setup_runs_after_reboot = int(
               machine.succeed("wc -l < /var/lib/graft-activation/setup-runs").strip()
           )
-          assert job_runs_after_reboot > job_runs_before_reboot
-          assert setup_runs_after_reboot > setup_runs_before_reboot
+          assert job_runs_after_reboot == job_runs_before_reboot + 1
+          assert setup_runs_after_reboot == setup_runs_before_reboot + 1
           machine.succeed("systemctl is-active graft-foreign.service")
           machine.succeed("test -e /var/lib/graft-activation/foreign-unit")
           machine.succeed("grep -Fx preserved /var/lib/graft-workspace/marker")
@@ -249,6 +253,10 @@ in
           machine.wait_until_tty_matches("2", "Password: ")
           machine.send_chars("test\n")
           machine.wait_for_unit("user@1001.service")
+          machine.wait_until_succeeds(
+              "systemctl --user --machine=graftlogin@ is-active default.target",
+              timeout=120,
+          )
           machine.fail("systemctl --user --machine=graftlogin@ is-active login-user.service")
           machine.send_chars("exit\n")
           machine.wait_until_fails("systemctl is-active user@1001.service", timeout=60)
@@ -283,8 +291,8 @@ in
           setup_runs_after_readd_reboot = int(
               machine.succeed("wc -l < /var/lib/graft-activation/setup-runs").strip()
           )
-          assert job_runs_after_readd_reboot > job_runs_before_readd_reboot
-          assert setup_runs_after_readd_reboot > setup_runs_before_readd_reboot
+          assert job_runs_after_readd_reboot == job_runs_before_readd_reboot + 1
+          assert setup_runs_after_readd_reboot == setup_runs_before_readd_reboot + 1
           machine.succeed("systemctl is-active graft-foreign.service")
           machine.succeed("test -e /var/lib/graft-activation/foreign-unit")
           machine.succeed("grep -Fx preserved /var/lib/graft-workspace/marker")
