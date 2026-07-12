@@ -131,6 +131,22 @@ Implemented today:
 - `config.service.restart` is rendered only when explicitly set.
 - `config.service.restartSec`, `timeoutStartSec`, and `timeoutStopSec` are rendered only when explicitly set.
 
+### Approved startup contract, not yet implemented
+
+Issue [#191](https://github.com/Patrick-Kappen/graft/issues/191) approves the
+future typed form:
+
+```toml
+[deploy]
+activation = "startup"
+```
+
+It will map system workloads to `WantedBy=multi-user.target` and user workloads
+to `WantedBy=default.target`. The field is deliberately absent from the current
+machine-readable schema until #132 implements parser, resolver, renderer, and
+generator coverage. Do not use it in runnable TOML yet. See
+[Workload startup activation](activation.md) for the complete contract.
+
 ### Renderer escaping
 
 Rendered `[Container]` values use systemd-safe escaping while preserving
@@ -295,7 +311,8 @@ Current service timing validation:
 - values must not contain control characters
 - `restartSec` requires `restart` other than `no`
 - no systemd timespan parsing is performed yet
-- `[Install]`, autostart, and `restartIfChanged` are not rendered
+- typed startup activation is designed but not implemented; `[Install]`,
+  autostart, and `restartIfChanged` are not rendered today
 
 Not all fields from the annotated TOML reference are rendered yet. Fields that
 are parsed but not listed above should be treated as reserved/roadmap fields. See

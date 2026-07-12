@@ -7,6 +7,7 @@
 - [Long-term vision](vision.md)
 - [Design](design.md)
 - [Workload lifecycle semantics](lifecycle.md)
+- [Workload startup activation](activation.md)
 - [Container network intent](networking.md)
 - [Quadlet output](quadlet.md)
 - [Roadmap](roadmap.md)
