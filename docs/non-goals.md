@@ -20,7 +20,10 @@ Deferred for v0.2:
 - no Quadlet `.volume` or `.network` unit generation
 - no automatic firewall, DNS, or network alias management
 - no systemd timespan parser for service timing values
-- no `[Install]`, autostart, or `restartIfChanged` rendering
+- no implemented `[Install]` or autostart rendering yet; the typed startup
+  contract is designed in [Workload startup activation](activation.md) and
+  implementation remains tracked by #132
+- no `restartIfChanged` rendering
 - no raw systemd service type or `RemainAfterExit=` passthrough; lifecycle stays
   typed Graft intent
 - no supplemental groups, UID/GID mapping, or user namespace policy from the

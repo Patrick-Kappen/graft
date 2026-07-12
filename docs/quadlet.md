@@ -165,15 +165,17 @@ TimeoutStopSec=30s
 
 Without explicit service settings, no `[Service]` section is rendered.
 
-## Autostart
+## Startup activation
 
-A `.container` file may exist without starting automatically.
+A `.container` file may exist without starting automatically. The current schema,
+resolver, and modules do not generate an `[Install]` section, so systemd knows
+the generated service without requesting it during manager startup.
 
-The current modules do not generate an `[Install]` section. That means systemd
-knows the generated service, but does not enable/start it automatically.
-
-If autostart is supported later, it must flow explicitly through TOML and
-resolved JSON. It must not be a module default.
+The approved future contract is explicit `deploy.activation = "startup"`; see
+[Workload startup activation](activation.md). The resolver will map that typed
+intent to a fixed system or user target, and the modules will render the
+resolved `[Install]` relationship mechanically. Absence will continue to render
+no `[Install]` section. Implementation remains tracked by #132.
 
 ## Overlay
 
