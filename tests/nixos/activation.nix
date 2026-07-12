@@ -193,7 +193,9 @@ in
 
       with subtest("live switch removes startup links without stopping workloads"):
           machine.succeed("${withoutActivation}/bin/switch-to-configuration switch")
+          machine.succeed("test -f /etc/containers/systemd/long-running-system.container")
           machine.fail("grep -Fx 'WantedBy=multi-user.target' /etc/containers/systemd/long-running-system.container")
+          machine.succeed("test -f /etc/containers/systemd/users/1000/linger-user.container")
           machine.fail(
               "grep -Fx 'WantedBy=default.target' /etc/containers/systemd/users/1000/linger-user.container"
           )
@@ -226,7 +228,12 @@ in
               "systemctl --user --machine=graftlinger@ is-active default.target",
               timeout=120,
           )
+          machine.succeed("test -f /etc/containers/systemd/long-running-system.container")
           machine.fail("grep -Fx 'WantedBy=multi-user.target' /etc/containers/systemd/long-running-system.container")
+          machine.succeed("test -f /etc/containers/systemd/users/1000/linger-user.container")
+          machine.fail(
+              "grep -Fx 'WantedBy=default.target' /etc/containers/systemd/users/1000/linger-user.container"
+          )
           machine.fail("systemctl is-active long-running-system.service")
           machine.fail("systemctl --user --machine=graftlinger@ is-active linger-user.service")
           machine.wait_for_unit("network-client-system.service")
