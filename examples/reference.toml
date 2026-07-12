@@ -231,7 +231,7 @@
 
 # [config.quadlet.container]    # raw passthrough (cannot set Rootfs, ContainerName, Exec, Network, Volume)
 # [config.quadlet.service]      # raw passthrough
-# [config.quadlet.install]      # raw passthrough
+# [config.quadlet.install]      # rejected; use [deploy] activation = "startup"
 
 
 # ---------------------------------------------------------------------------
