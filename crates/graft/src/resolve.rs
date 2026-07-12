@@ -6,8 +6,8 @@ use anyhow::{bail, Context, Result};
 use serde::Serialize;
 
 use crate::config::schema::{
-    Container, ContainerConfig, DeployTarget, Filesystem, FilesystemVolume, Network, NetworkMode,
-    Runtime, Service, ServiceLifecycle,
+    Container, ContainerConfig, DeployActivation, DeployTarget, Filesystem, FilesystemVolume,
+    Network, NetworkMode, Runtime, Service, ServiceLifecycle,
 };
 
 const SUPPORTED_VERSION: u32 = 1;
@@ -23,6 +23,9 @@ pub struct ResolvedContainer {
     pub name: String,
     /// Deployment settings.
     pub deploy: ResolvedDeploy,
+    /// Optional resolved Quadlet install relationship.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub install: Option<ResolvedInstall>,
     /// Runtime settings used to build the rootfs and Quadlet `Exec=`.
     pub runtime: ResolvedRuntime,
     /// Optional container settings rendered into Quadlet `[Container]`.
@@ -58,6 +61,25 @@ pub enum ResolvedDeployTarget {
     System,
     /// Rootless/user Quadlet container.
     User,
+}
+
+/// Resolved Quadlet install relationship.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolvedInstall {
+    /// Fixed target that requests the generated service at startup.
+    pub wanted_by: ResolvedInstallTarget,
+}
+
+/// Fixed systemd target selected for startup activation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum ResolvedInstallTarget {
+    /// System manager multi-user startup target.
+    #[serde(rename = "multi-user.target")]
+    MultiUser,
+    /// User manager default startup target.
+    #[serde(rename = "default.target")]
+    Default,
 }
 
 /// Resolved runtime settings.
@@ -315,17 +337,21 @@ fn resolve_internal(
 
     validate_runtime_mode(runtime)?;
 
+    let deploy_target = resolve_deploy_target(
+        config
+            .deploy
+            .as_ref()
+            .and_then(|deploy| deploy.target.as_ref()),
+    );
+    let install = resolve_install(config, deploy_target)?;
+
     Ok(ResolvedContainer {
         name,
         deploy: ResolvedDeploy {
             enable: config.deploy.as_ref().and_then(|deploy| deploy.enable),
-            target: resolve_deploy_target(
-                config
-                    .deploy
-                    .as_ref()
-                    .and_then(|deploy| deploy.target.as_ref()),
-            ),
+            target: deploy_target,
         },
+        install,
         runtime: ResolvedRuntime {
             mode: ROOTFS_STORE_MODE.to_string(),
             packages: resolve_packages(runtime)?,
@@ -901,6 +927,32 @@ fn resolve_deploy_target(target: Option<&DeployTarget>) -> ResolvedDeployTarget 
     }
 }
 
+fn resolve_install(
+    config: &ContainerConfig,
+    deploy_target: ResolvedDeployTarget,
+) -> Result<Option<ResolvedInstall>> {
+    let raw_install = config
+        .config
+        .as_ref()
+        .and_then(|config| config.quadlet.as_ref())
+        .and_then(|quadlet| quadlet.install.as_ref());
+    if raw_install.is_some() {
+        bail!("config.quadlet.install is not supported; use deploy.activation = \"startup\"");
+    }
+
+    let activation = config.deploy.as_ref().and_then(|deploy| deploy.activation);
+    let Some(DeployActivation::Startup) = activation else {
+        return Ok(None);
+    };
+
+    let wanted_by = match deploy_target {
+        ResolvedDeployTarget::System => ResolvedInstallTarget::MultiUser,
+        ResolvedDeployTarget::User => ResolvedInstallTarget::Default,
+    };
+
+    Ok(Some(ResolvedInstall { wanted_by }))
+}
+
 fn resolve_packages(runtime: Option<&Runtime>) -> Result<Vec<String>> {
     let mut packages = Vec::new();
     push_unique(&mut packages, GRAFT_PAUSE_PACKAGE);
@@ -1093,7 +1145,7 @@ fn push_unique(packages: &mut Vec<String>, package: &str) {
 mod tests {
     use std::collections::{BTreeMap, HashMap};
 
-    use crate::config::schema::{Config, Deploy, Service};
+    use crate::config::schema::{Config, Deploy, Quadlet, Service};
 
     use super::*;
 
@@ -1169,6 +1221,7 @@ mod tests {
                     ResolvedDeployTarget::System => DeployTarget::System,
                     ResolvedDeployTarget::User => DeployTarget::User,
                 }),
+                ..Deploy::default()
             }),
             config: Some(Config {
                 network,
@@ -3019,6 +3072,137 @@ mod tests {
     }
 
     #[test]
+    fn startup_activation_maps_to_fixed_install_targets() {
+        for (target, expected_deploy_target, expected_install_target, expected_json) in [
+            (
+                None,
+                ResolvedDeployTarget::System,
+                ResolvedInstallTarget::MultiUser,
+                "multi-user.target",
+            ),
+            (
+                Some(DeployTarget::System),
+                ResolvedDeployTarget::System,
+                ResolvedInstallTarget::MultiUser,
+                "multi-user.target",
+            ),
+            (
+                Some(DeployTarget::User),
+                ResolvedDeployTarget::User,
+                ResolvedInstallTarget::Default,
+                "default.target",
+            ),
+        ] {
+            let config = ContainerConfig {
+                version: Some(SUPPORTED_VERSION),
+                name: Some("dev".to_string()),
+                deploy: Some(Deploy {
+                    target,
+                    activation: Some(DeployActivation::Startup),
+                    ..Deploy::default()
+                }),
+                ..ContainerConfig::default()
+            };
+
+            let resolved = resolve(&config).unwrap();
+
+            assert_eq!(resolved.deploy.target, expected_deploy_target);
+            assert_eq!(
+                resolved.install,
+                Some(ResolvedInstall {
+                    wanted_by: expected_install_target,
+                })
+            );
+            let json = serde_json::to_value(&resolved).unwrap();
+            assert_eq!(json["install"]["wantedBy"], expected_json);
+        }
+    }
+
+    #[test]
+    fn disabled_startup_activation_remains_resolved_dormant_intent() {
+        let config = ContainerConfig {
+            version: Some(SUPPORTED_VERSION),
+            name: Some("dev".to_string()),
+            deploy: Some(Deploy {
+                enable: Some(false),
+                activation: Some(DeployActivation::Startup),
+                ..Deploy::default()
+            }),
+            ..ContainerConfig::default()
+        };
+
+        let resolved = resolve(&config).unwrap();
+
+        assert_eq!(resolved.deploy.enable, Some(false));
+        assert_eq!(
+            resolved.install,
+            Some(ResolvedInstall {
+                wanted_by: ResolvedInstallTarget::MultiUser,
+            })
+        );
+    }
+
+    #[test]
+    fn startup_activation_accepts_all_service_lifecycles() {
+        for lifecycle in [
+            ServiceLifecycle::LongRunning,
+            ServiceLifecycle::Job,
+            ServiceLifecycle::Setup,
+        ] {
+            let mut config = if lifecycle == ServiceLifecycle::LongRunning {
+                service_config(Service {
+                    lifecycle: Some(lifecycle),
+                    ..Service::default()
+                })
+            } else {
+                finite_service_config(Service {
+                    lifecycle: Some(lifecycle),
+                    ..Service::default()
+                })
+            };
+            config.deploy = Some(Deploy {
+                activation: Some(DeployActivation::Startup),
+                ..Deploy::default()
+            });
+
+            let resolved = resolve(&config).unwrap();
+
+            assert_eq!(
+                resolved.install,
+                Some(ResolvedInstall {
+                    wanted_by: ResolvedInstallTarget::MultiUser,
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn raw_quadlet_install_returns_migration_error() {
+        let config = ContainerConfig {
+            version: Some(SUPPORTED_VERSION),
+            name: Some("dev".to_string()),
+            config: Some(Config {
+                quadlet: Some(Quadlet {
+                    install: Some(HashMap::from([(
+                        "WantedBy".to_string(),
+                        vec!["default.target".to_string()],
+                    )])),
+                    ..Quadlet::default()
+                }),
+                ..Config::default()
+            }),
+            ..ContainerConfig::default()
+        };
+
+        let error = resolve(&config).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "config.quadlet.install is not supported; use deploy.activation = \"startup\""
+        );
+    }
+
+    #[test]
     fn deploy_target_defaults_to_system() {
         let resolved = resolve(&named_config()).unwrap();
         assert_eq!(resolved.deploy.target, ResolvedDeployTarget::System);
@@ -3076,6 +3260,7 @@ mod tests {
         let resolved = resolve(&named_config()).unwrap();
         let json = serde_json::to_value(&resolved).unwrap();
 
+        assert_eq!(json.get("install"), None);
         assert_eq!(json.get("container"), None);
         assert_eq!(json.get("filesystem"), None);
         assert_eq!(json.get("network"), None);
