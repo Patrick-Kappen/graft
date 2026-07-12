@@ -78,6 +78,11 @@ let
         + lib.optionalString (timeoutStartSec != null) "TimeoutStartSec=${toString timeoutStartSec}\n"
         + lib.optionalString (timeoutStopSec != null) "TimeoutStopSec=${toString timeoutStopSec}\n";
       serviceSection = lib.optionalString (serviceLines != "") "\n[Service]\n${serviceLines}";
+      install = ctr.install or { };
+      wantedBy = install.wantedBy or null;
+      installSection = lib.optionalString (
+        wantedBy != null
+      ) "\n[Install]\nWantedBy=${toString wantedBy}\n";
     in
     ''
       [Container]
@@ -103,7 +108,8 @@ let
     + volumeLines
     + networkLine
     + publishLines
-    + serviceSection;
+    + serviceSection
+    + installSection;
 in
 {
   inherit renderQuadletFile;

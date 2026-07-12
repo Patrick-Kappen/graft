@@ -1,6 +1,9 @@
 version = 1
 name = "nix-check-system"
 
+[deploy]
+activation = "startup"
+
 [config.container]
 hostname = "nix-check-system.local"
 user = "1000"

@@ -3,6 +3,7 @@ name = "nix-check-setup-user"
 
 [deploy]
 target = "user"
+activation = "startup"
 
 [config.runtime]
 packages = ["coreutils"]

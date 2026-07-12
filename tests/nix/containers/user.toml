@@ -3,6 +3,7 @@ name = "nix-check-user"
 
 [deploy]
 target = "user"
+activation = "startup"
 
 [config.container]
 hostname = "nix-check-user.local"

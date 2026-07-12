@@ -1,5 +1,5 @@
 version = 1
-name = "nix-check-setup-system"
+name = "nix-check-startup-job-system"
 
 [deploy]
 target = "system"
@@ -10,6 +10,4 @@ packages = ["coreutils"]
 command = ["/bin/true"]
 
 [config.service]
-lifecycle = "setup"
-timeoutStartSec = "2m"
-timeoutStopSec = "30s"
+lifecycle = "job"
