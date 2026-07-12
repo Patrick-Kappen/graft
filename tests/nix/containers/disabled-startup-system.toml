@@ -1,0 +1,7 @@
+version = 1
+name = "nix-check-disabled-startup-system"
+
+[deploy]
+enable = false
+target = "system"
+activation = "startup"

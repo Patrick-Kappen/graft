@@ -1,0 +1,7 @@
+version = 1
+name = "nix-check-disabled-startup-user"
+
+[deploy]
+enable = false
+target = "user"
+activation = "startup"

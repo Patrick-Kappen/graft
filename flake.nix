@@ -168,6 +168,8 @@
             nixosEval.config.environment.etc."containers/systemd/host-system.container".text;
           nixosTimerJobRendered =
             nixosEval.config.environment.etc."containers/systemd/timer-job-system.container".text;
+          nixosStartupJobRendered =
+            nixosEval.config.environment.etc."containers/systemd/startup-job-system.container".text;
           nixosSetupRendered =
             nixosEval.config.environment.etc."containers/systemd/setup-system.container".text;
           nixosNetworkOwnerRendered =
@@ -186,6 +188,8 @@
             homeManagerEval.config.xdg.configFile."containers/systemd/host-user.container".text;
           homeManagerTimerJobRendered =
             homeManagerEval.config.xdg.configFile."containers/systemd/timer-job-user.container".text;
+          homeManagerStartupJobRendered =
+            homeManagerEval.config.xdg.configFile."containers/systemd/startup-job-user.container".text;
           homeManagerSetupRendered =
             homeManagerEval.config.xdg.configFile."containers/systemd/setup-user.container".text;
           homeManagerNetworkOwnerRendered =
@@ -263,6 +267,7 @@
             "RestartSec="
             "TimeoutStartSec="
             "TimeoutStopSec="
+            "WantedBy="
           ];
           renderAssertions =
             {
@@ -336,6 +341,7 @@
                 "EnvironmentFile=\"/etc/graft/system.env\"\nEnvironmentFile=\"/run/graft/shared.env\""
                 "Volume=/system-cache\nVolume=/tmp/graft-system-data:/data\nVolume=/tmp/graft-system-config:/config:ro"
                 "PublishPort=127.0.0.1:18080:80\nPublishPort=18443:443/tcp"
+                "\n[Install]\nWantedBy=multi-user.target"
               ];
               escapeInfixes = [
                 "ContainerName=escape-system"
@@ -357,10 +363,18 @@
               ''Exec="/bin/true"''
               "\n[Service]\nType=oneshot\nRemainAfterExit=no\nRestart=on-failure\nRestartSec=10s\nTimeoutStartSec=2m\nTimeoutStopSec=30s"
             ];
+            assert assertNoInfixes nixosTimerJobRendered [ "WantedBy=" ];
+            assert assertHasInfixes nixosStartupJobRendered [
+              "ContainerName=nix-check-startup-job-system"
+              ''Exec="/bin/true"''
+              "\n[Service]\nType=oneshot\nRemainAfterExit=no"
+              "\n[Install]\nWantedBy=multi-user.target"
+            ];
             assert assertHasInfixes nixosSetupRendered [
               "ContainerName=nix-check-setup-system"
               ''Exec="/bin/true"''
               "\n[Service]\nType=oneshot\nRemainAfterExit=yes\nTimeoutStartSec=2m\nTimeoutStopSec=30s"
+              "\n[Install]\nWantedBy=multi-user.target"
             ];
             assert assertHasInfixes nixosNetworkOwnerRendered [
               "ContainerName=nix-check-network-owner-system"
@@ -368,7 +382,9 @@
             assert assertHasInfixes nixosNetworkClientRendered [
               "ContainerName=nix-check-network-client-system"
               "Network=network-owner-system.container"
+              "\n[Install]\nWantedBy=multi-user.target"
             ];
+            assert assertNoInfixes nixosNetworkOwnerRendered [ "WantedBy=" ];
             assert assertHasInfixes nixosNetworkNoneRendered [
               "ContainerName=nix-check-network-none-system"
               "Network=none"
@@ -376,6 +392,8 @@
             assert !(nixosEval.config.environment.etc ? "containers/systemd/user.container");
             assert !(nixosEval.config.environment.etc ? "containers/systemd/escape-user.container");
             assert !(nixosEval.config.environment.etc ? "containers/systemd/host-user.container");
+            assert !(nixosEval.config.environment.etc ? "containers/systemd/disabled-startup-system.container");
+            assert !(nixosEval.config.environment.etc ? "containers/systemd/disabled-startup-user.container");
             assert duplicateFilenameNixosFails;
             assert duplicateNameNixosFails;
             assert quickstartNixosEval.config.virtualisation.podman.enable;
@@ -396,6 +414,7 @@
                 "EnvironmentFile=\"/etc/graft/user.env\"\nEnvironmentFile=\"/run/graft/shared.env\""
                 "Volume=/user-cache\nVolume=/tmp/graft-user-data:/data\nVolume=/tmp/graft-user-config:/config:ro"
                 "PublishPort=127.0.0.1:28080:80\nPublishPort=28443:443/tcp"
+                "\n[Install]\nWantedBy=default.target"
               ];
               escapeInfixes = [
                 "ContainerName=escape-user"
@@ -417,10 +436,18 @@
               ''Exec="/bin/true"''
               "\n[Service]\nType=oneshot\nRemainAfterExit=no\nRestart=on-failure\nRestartSec=10s\nTimeoutStartSec=2m\nTimeoutStopSec=30s"
             ];
+            assert assertNoInfixes homeManagerTimerJobRendered [ "WantedBy=" ];
+            assert assertHasInfixes homeManagerStartupJobRendered [
+              "ContainerName=nix-check-startup-job-user"
+              ''Exec="/bin/true"''
+              "\n[Service]\nType=oneshot\nRemainAfterExit=no"
+              "\n[Install]\nWantedBy=default.target"
+            ];
             assert assertHasInfixes homeManagerSetupRendered [
               "ContainerName=nix-check-setup-user"
               ''Exec="/bin/true"''
               "\n[Service]\nType=oneshot\nRemainAfterExit=yes\nTimeoutStartSec=2m\nTimeoutStopSec=30s"
+              "\n[Install]\nWantedBy=default.target"
             ];
             assert assertHasInfixes homeManagerNetworkOwnerRendered [
               "ContainerName=nix-check-network-owner-user"
@@ -428,7 +455,9 @@
             assert assertHasInfixes homeManagerNetworkClientRendered [
               "ContainerName=nix-check-network-client-user"
               "Network=network-owner-user.container"
+              "\n[Install]\nWantedBy=default.target"
             ];
+            assert assertNoInfixes homeManagerNetworkOwnerRendered [ "WantedBy=" ];
             assert assertHasInfixes homeManagerNetworkNoneRendered [
               "ContainerName=nix-check-network-none-user"
               "Network=none"
@@ -436,6 +465,10 @@
             assert !(homeManagerEval.config.xdg.configFile ? "containers/systemd/system.container");
             assert !(homeManagerEval.config.xdg.configFile ? "containers/systemd/escape-system.container");
             assert !(homeManagerEval.config.xdg.configFile ? "containers/systemd/host-system.container");
+            assert
+              !(homeManagerEval.config.xdg.configFile ? "containers/systemd/disabled-startup-system.container");
+            assert
+              !(homeManagerEval.config.xdg.configFile ? "containers/systemd/disabled-startup-user.container");
             assert duplicateFilenameHomeManagerFails;
             assert duplicateNameHomeManagerFails;
             assert assertHasInfixes quickstartHomeManagerRendered (
@@ -503,6 +536,114 @@
                 ${lib.getExe' pkgs.systemd "systemd-analyze"} --user verify \
                 generated-system/*.service generated-user/*.service
               cp generated-system/*.service generated-user/*.service $out/
+            '';
+
+          quadlet-activation =
+            let
+              sources = {
+                long-running-system = pkgs.writeText "long-running-system.container" nixosRendered;
+                startup-job-system = pkgs.writeText "startup-job-system.container" nixosStartupJobRendered;
+                setup-system = pkgs.writeText "setup-system.container" nixosSetupRendered;
+                timer-job-system = pkgs.writeText "timer-job-system.container" nixosTimerJobRendered;
+                plain-system = pkgs.writeText "plain-system.container" nixosPlainRendered;
+                network-owner-system = pkgs.writeText "network-owner-system.container" nixosNetworkOwnerRendered;
+                network-client-system = pkgs.writeText "network-client-system.container" nixosNetworkClientRendered;
+                long-running-user = pkgs.writeText "long-running-user.container" homeManagerRendered;
+                startup-job-user = pkgs.writeText "startup-job-user.container" homeManagerStartupJobRendered;
+                setup-user = pkgs.writeText "setup-user.container" homeManagerSetupRendered;
+                timer-job-user = pkgs.writeText "timer-job-user.container" homeManagerTimerJobRendered;
+                plain-user = pkgs.writeText "plain-user.container" homeManagerPlainRendered;
+                network-owner-user = pkgs.writeText "network-owner-user.container" homeManagerNetworkOwnerRendered;
+                network-client-user = pkgs.writeText "network-client-user.container" homeManagerNetworkClientRendered;
+              };
+            in
+            pkgs.runCommand "graft-quadlet-activation" { } ''
+              mkdir source-system source-user generated-system generated-user persistent foreign $out
+              cp ${sources.long-running-system} source-system/long-running-system.container
+              cp ${sources.startup-job-system} source-system/startup-job-system.container
+              cp ${sources.setup-system} source-system/setup-system.container
+              cp ${sources.timer-job-system} source-system/timer-job-system.container
+              cp ${sources.plain-system} source-system/plain-system.container
+              cp ${sources.network-owner-system} source-system/network-owner-system.container
+              cp ${sources.network-client-system} source-system/network-client-system.container
+              cp ${sources.long-running-user} source-user/long-running-user.container
+              cp ${sources.startup-job-user} source-user/startup-job-user.container
+              cp ${sources.setup-user} source-user/setup-user.container
+              cp ${sources.timer-job-user} source-user/timer-job-user.container
+              cp ${sources.plain-user} source-user/plain-user.container
+              cp ${sources.network-owner-user} source-user/network-owner-user.container
+              cp ${sources.network-client-user} source-user/network-client-user.container
+
+              QUADLET_UNIT_DIRS="$PWD/source-system" \
+                ${pkgs.podman}/libexec/podman/quadlet \
+                generated-system generated-system generated-system
+              QUADLET_UNIT_DIRS="$PWD/source-user" \
+                ${pkgs.podman}/libexec/podman/quadlet -user \
+                generated-user generated-user generated-user
+
+              for unit in long-running startup-job setup network-client; do
+                test -L "generated-system/multi-user.target.wants/$unit-system.service"
+                test "$(readlink "generated-system/multi-user.target.wants/$unit-system.service")" = \
+                  "../$unit-system.service"
+                test -L "generated-user/default.target.wants/$unit-user.service"
+                test "$(readlink "generated-user/default.target.wants/$unit-user.service")" = \
+                  "../$unit-user.service"
+              done
+
+              for unit in timer-job plain network-owner; do
+                test ! -e "generated-system/multi-user.target.wants/$unit-system.service"
+                test ! -e "generated-user/default.target.wants/$unit-user.service"
+              done
+
+              grep -Fx "Requires=network-owner-system.service" \
+                generated-system/network-client-system.service
+              grep -Fx "Requires=network-owner-user.service" \
+                generated-user/network-client-user.service
+
+              mkdir -p runtime/systemd
+              XDG_RUNTIME_DIR="$PWD/runtime" \
+                SYSTEMD_UNIT_PATH="$PWD/generated-system:$PWD/generated-user:${pkgs.podman}/share/systemd/user:${pkgs.systemd}/example/systemd/user:${pkgs.systemd}/example/systemd/system" \
+                ${lib.getExe' pkgs.systemd "systemd-analyze"} --user verify \
+                generated-system/*.service generated-user/*.service
+
+              touch persistent/workload-state foreign/foreign.service
+              rm source-system/startup-job-system.container source-user/startup-job-user.container
+              cp ${sources.plain-system} source-system/startup-job-system.container
+              cp ${sources.plain-user} source-user/startup-job-user.container
+              rm -rf generated-system generated-user
+              mkdir generated-system generated-user
+
+              QUADLET_UNIT_DIRS="$PWD/source-system" \
+                ${pkgs.podman}/libexec/podman/quadlet \
+                generated-system generated-system generated-system
+              QUADLET_UNIT_DIRS="$PWD/source-user" \
+                ${pkgs.podman}/libexec/podman/quadlet -user \
+                generated-user generated-user generated-user
+
+              test ! -e generated-system/multi-user.target.wants/startup-job-system.service
+              test ! -e generated-user/default.target.wants/startup-job-user.service
+              test -e persistent/workload-state
+              test -e foreign/foreign.service
+
+              rm source-system/startup-job-system.container source-user/startup-job-user.container
+              cp ${sources.startup-job-system} source-system/startup-job-system.container
+              cp ${sources.startup-job-user} source-user/startup-job-user.container
+              rm -rf generated-system generated-user
+              mkdir generated-system generated-user
+
+              QUADLET_UNIT_DIRS="$PWD/source-system" \
+                ${pkgs.podman}/libexec/podman/quadlet \
+                generated-system generated-system generated-system
+              QUADLET_UNIT_DIRS="$PWD/source-user" \
+                ${pkgs.podman}/libexec/podman/quadlet -user \
+                generated-user generated-user generated-user
+
+              test -L generated-system/multi-user.target.wants/startup-job-system.service
+              test -L generated-user/default.target.wants/startup-job-user.service
+              test -e persistent/workload-state
+              test -e foreign/foreign.service
+
+              cp -a generated-system generated-user persistent foreign $out/
             '';
 
           quadlet-network =

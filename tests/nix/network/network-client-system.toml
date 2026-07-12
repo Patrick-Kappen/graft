@@ -3,6 +3,7 @@ name = "nix-check-network-client-system"
 
 [deploy]
 target = "system"
+activation = "startup"
 
 [config.network]
 mode = "container"
