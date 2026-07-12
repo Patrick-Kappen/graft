@@ -1,0 +1,17 @@
+version = 1
+name = "setup-system"
+
+[deploy]
+target = "system"
+activation = "startup"
+
+[config.runtime]
+packages = ["bash"]
+command = ["/bin/bash", "-c", "printf 'setup\\n' >> /state/setup-runs"]
+
+[[config.filesystem.volumes]]
+source = "/var/lib/graft-activation"
+target = "/state"
+
+[config.service]
+lifecycle = "setup"

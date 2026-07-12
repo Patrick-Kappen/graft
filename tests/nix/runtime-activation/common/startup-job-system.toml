@@ -1,0 +1,17 @@
+version = 1
+name = "startup-job-system"
+
+[deploy]
+target = "system"
+activation = "startup"
+
+[config.runtime]
+packages = ["bash"]
+command = ["/bin/bash", "-c", "printf 'job\\n' >> /state/job-runs"]
+
+[[config.filesystem.volumes]]
+source = "/var/lib/graft-activation"
+target = "/state"
+
+[config.service]
+lifecycle = "job"

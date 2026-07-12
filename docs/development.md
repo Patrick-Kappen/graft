@@ -134,6 +134,17 @@ sessions, sockets, or other local-only workflow details in the public manual.
 Runtime test output should check the generated unit text and the Podman runtime
 state where possible.
 
+Startup activation has an isolated x86_64 NixOS VM test that exercises real
+system and rootless user managers, declarative linger, tty login, Podman,
+specialisation transitions, and reboot behavior:
+
+```bash
+nix build .#packages.x86_64-linux.activation-runtime-test --no-link --print-build-logs
+```
+
+This expensive test is an advisory `activation-runtime` CI job and is not part
+of the aggregate required checks while runner stability is evaluated.
+
 ## Dead-code and module-boundary hygiene
 
 The baseline already has several hard gates for unused or dead code:
@@ -254,6 +265,7 @@ nix build \
   .#checks.x86_64-linux.quadlet-network \
   --print-out-paths
 nix flake check
+nix build .#packages.x86_64-linux.activation-runtime-test --no-link --print-build-logs
 network_rootfs=$(nix build .#checks.x86_64-linux.network-runtime-rootfs --no-link --print-out-paths)
 GRAFT_REQUIRE_NETWORK_RUNTIME=1 nix develop .#ci -c tests/runtime/network.sh "${network_rootfs}"
 nix develop .#ci -c mdbook build
@@ -262,9 +274,11 @@ git diff --check
 
 The module-eval and Quadlet generator checks use IFD, so build them explicitly.
 The activation check verifies fixed system/user target links, lifecycle
-combinations, absent intent, dependency activation, and generator reruns.
-`nix flake check` may omit them and must not be the only Nix module or
-generated-service gate. The rootless network runtime test reports an explicit
-skip when Podman is unavailable or the execution environment blocks rootless
-containers. Set `GRAFT_REQUIRE_NETWORK_RUNTIME=1` on a capable host to make
-availability mandatory.
+combinations, absent intent, dependency activation, and generator reruns. The
+separate activation runtime package validates actual system and user-manager
+transitions in a VM. `nix flake check` may omit these IFD-backed checks and must
+not be the only Nix module or generated-service gate. The rootless network
+runtime test reports an explicit skip when Podman is unavailable or the
+execution environment blocks rootless containers. Set
+`GRAFT_REQUIRE_NETWORK_RUNTIME=1` on a capable host to make availability
+mandatory.
