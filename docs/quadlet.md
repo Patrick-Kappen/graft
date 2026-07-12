@@ -167,15 +167,14 @@ Without explicit service settings, no `[Service]` section is rendered.
 
 ## Startup activation
 
-A `.container` file may exist without starting automatically. The current schema,
-resolver, and modules do not generate an `[Install]` section, so systemd knows
-the generated service without requesting it during manager startup.
+A `.container` file may exist without starting automatically. When
+`deploy.activation` is absent, the modules generate no `[Install]` section, so
+systemd knows the service without requesting it during manager startup.
 
-The approved future contract is explicit `deploy.activation = "startup"`; see
-[Workload startup activation](activation.md). The resolver will map that typed
-intent to a fixed system or user target, and the modules will render the
-resolved `[Install]` relationship mechanically. Absence will continue to render
-no `[Install]` section. Implementation remains tracked by #132.
+Explicit `deploy.activation = "startup"` maps to a fixed system or user target;
+see [Workload startup activation](activation.md). The resolver selects the target
+and the modules render the resolved `[Install]` relationship mechanically. Graft
+never invokes `systemctl enable` during build or materialisation.
 
 ## Overlay
 

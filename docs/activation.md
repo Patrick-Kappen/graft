@@ -1,8 +1,8 @@
 # Workload startup activation
 
-> **Status:** design approved; implementation remains tracked by
-> [#132](https://github.com/Patrick-Kappen/graft/issues/132). The current schema,
-> resolver, and modules do not accept or render this field yet.
+> **Status:** implemented for generated `.container` services. Manager-level
+> boot, login, linger, reboot, and rebuild runtime coverage remains tracked by
+> [#196](https://github.com/Patrick-Kappen/graft/issues/196).
 
 Graft separates workload startup policy from process lifecycle and dependency
 activation. A rendered workload remains manually, externally, or
@@ -10,7 +10,7 @@ dependency-activated unless the user explicitly asks for startup activation.
 
 ## Intent contract
 
-The approved TOML shape is:
+The TOML shape is:
 
 ```toml
 [deploy]
@@ -195,43 +195,29 @@ Raw `[Install]` passthrough remains subject to the dangerous-capability policy i
 [#128](https://github.com/Patrick-Kappen/graft/issues/128). It is not an interim
 path for startup activation.
 
-## Implementation requirements for #132
+## Implemented scope and checks
 
-The implementation must cover the complete path:
+[#132](https://github.com/Patrick-Kappen/graft/issues/132) implements:
 
-- add the typed field to Rust parser types and the generated v1 schema;
-- validate activation, enable state, lifecycle, and reserved raw install intent
-  in the resolver;
-- resolve the fixed target relationship before JSON reaches Nix;
-- render `[Install]` identically in NixOS and Home Manager;
-- preserve no `[Install]` output when activation is absent;
-- regenerate the tracked schema deterministically;
-- document the field as supported only when the implementation lands.
-
-Required tests are:
-
-- parser, schema, resolver, and resolved-JSON tests for absent, valid, disabled,
-  and unsupported activation intent;
-- equivalent system and user Nix fixtures;
-- long-running, job, and setup lifecycle combinations;
+- the typed field in Rust parser types and the generated v1 schema;
+- fixed target resolution before JSON reaches Nix;
+- field-specific rejection of reserved raw install intent;
+- mechanical `[Install]` rendering in NixOS and Home Manager;
+- absence, disabled dormant intent, and all three lifecycle combinations;
 - real Podman 5.8.2 generator assertions for
   `multi-user.target.wants/<name>.service` and
   `default.target.wants/<name>.service`;
 - negative generator assertions proving absent intent creates no target link;
+- generator rerun assertions for relationship addition and removal without
+  `systemctl enable` or changes outside generator output;
 - `systemd-analyze verify` over the complete generated unit sets;
-- system boot and rootless user-manager startup tests, with linger supplied only
-  by the host fixture;
-- rebuild tests proving relationship creation/removal without invoking
-  `systemctl enable`;
-- removal tests proving persistent data is untouched and no foreign unit is
-  deleted;
-- a regression proving a typed dependency can start a workload independently of
-  startup intent;
-- a regression proving a timer-triggered job remains timer-owned.
+- regressions proving timer jobs remain without startup intent and typed
+  dependency activation remains independent.
 
-Runtime tests must distinguish generator relationship creation from immediate
-reconciliation of an already active manager. They must not pass because NixOS or
-Home Manager happens to start changed units as an unrelated activation policy.
+Manager-level tests must additionally distinguish generator relationship
+creation from immediate reconciliation of an already active manager. System
+boot, user-manager login and linger, reboot, and live rebuild/removal behavior
+remain tracked by [#196](https://github.com/Patrick-Kappen/graft/issues/196).
 
 ## Upstream evidence
 

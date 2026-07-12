@@ -168,10 +168,11 @@ TimeoutStartSec=2m
 TimeoutStopSec=30s
 ```
 
-The current modules do not render `[Install]` by default. A `.container` file can
-exist while the container does not start automatically. Future autostart support
-must be explicit in TOML and resolved JSON before an `[Install]` section is
-rendered.
+The modules do not render `[Install]` by default. A `.container` file can exist
+while the container does not start automatically. Explicit
+`deploy.activation = "startup"` resolves a fixed system or user target and
+renders the corresponding `[Install]` relationship; see
+[Workload startup activation](activation.md).
 
 ## Rootfs-store container model
 

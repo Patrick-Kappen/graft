@@ -142,7 +142,7 @@ The CLI may only add defaults that belong to Graft semantics.
 | `service.lifecycle` | absent means Quadlet's long-running notify default; explicit intent resolves to typed service fields |
 | `service.restart` and timing | no defaults; include only if user sets them |
 | `deploy.enable` | no default in JSON; modules render unless explicitly `false` |
-| `deploy.activation` | approved value is `startup`; absent means no `[Install]`; implementation is tracked by #132 |
+| `deploy.activation` | `startup` resolves a fixed system/user `[Install]` target; absent means no startup relationship |
 
 A TOML file existing means Graft may render a `.container` file. That is not the
 same as automatically starting the service.
@@ -229,10 +229,10 @@ Currently proven:
 - clean keep-alive shutdown
 
 Typed long-running, finite-job, and retained setup-job behavior is defined in
-[Workload lifecycle semantics](lifecycle.md). The explicit startup contract is
-defined in [Workload startup activation](activation.md) and remains unimplemented
-until #132. Other future work is tracked in [Roadmap](roadmap.md). Deliberate
-exclusions are tracked in
+[Workload lifecycle semantics](lifecycle.md). Explicit startup activation is
+implemented through the contract in [Workload startup activation](activation.md).
+Other future work is tracked in [Roadmap](roadmap.md). Deliberate exclusions are
+tracked in
 [Non-goals and deferred scope](non-goals.md). Contributor workflow is tracked in
 [Development](development.md).
 

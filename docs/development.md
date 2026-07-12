@@ -249,6 +249,7 @@ nix develop .#ci -c deadnix --fail .
 nix build \
   .#checks.x86_64-linux.nixos-module-eval \
   .#checks.x86_64-linux.home-manager-module-eval \
+  .#checks.x86_64-linux.quadlet-activation \
   .#checks.x86_64-linux.quadlet-lifecycle \
   .#checks.x86_64-linux.quadlet-network \
   --print-out-paths
@@ -260,6 +261,8 @@ git diff --check
 ```
 
 The module-eval and Quadlet generator checks use IFD, so build them explicitly.
+The activation check verifies fixed system/user target links, lifecycle
+combinations, absent intent, dependency activation, and generator reruns.
 `nix flake check` may omit them and must not be the only Nix module or
 generated-service gate. The rootless network runtime test reports an explicit
 skip when Podman is unavailable or the execution environment blocks rootless
