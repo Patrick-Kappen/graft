@@ -61,6 +61,16 @@ pub struct Deploy {
     pub enable: Option<bool>,
     /// Scope to render the Quadlet unit in.
     pub target: Option<DeployTarget>,
+    /// Optional service-manager startup activation.
+    pub activation: Option<DeployActivation>,
+}
+
+/// Supported deployment activation intent.
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum DeployActivation {
+    /// Request the workload during normal target-manager startup.
+    Startup,
 }
 
 /// Deploy scope.
@@ -554,6 +564,21 @@ mod tests {
         let deploy = cfg.deploy.unwrap();
         assert_eq!(deploy.enable, Some(true));
         assert_eq!(deploy.target, Some(DeployTarget::User));
+    }
+
+    #[test]
+    fn parses_startup_activation() {
+        let cfg = parse_toml("[deploy]\nactivation = \"startup\"").unwrap();
+        let activation = cfg.deploy.unwrap().activation;
+
+        assert_eq!(activation, Some(DeployActivation::Startup));
+    }
+
+    #[test]
+    fn unsupported_deploy_activation_returns_error() {
+        let result = parse_toml("[deploy]\nactivation = \"manual\"");
+
+        assert!(result.is_err());
     }
 
     #[test]

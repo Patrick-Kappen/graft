@@ -40,7 +40,7 @@ fn schema_exposes_only_supported_fields() {
                 "workingDir",
             ][..],
         ),
-        ("Deploy", &["enable", "target"][..]),
+        ("Deploy", &["activation", "enable", "target"][..]),
         ("Filesystem", &["volumes"][..]),
         ("FilesystemVolume", &["mode", "source", "target"][..]),
         ("Network", &["container", "mode", "publish"][..]),
@@ -75,6 +75,20 @@ fn schema_exposes_only_supported_fields() {
         assert_eq!(actual, expected, "unexpected fields in {definition} schema");
         assert_eq!(value["additionalProperties"], false);
     }
+
+    let activation_values = schema["$defs"]["DeployActivation"]["oneOf"]
+        .as_array()
+        .expect("DeployActivation should define variants")
+        .iter()
+        .map(|variant| {
+            variant["const"]
+                .as_str()
+                .expect("DeployActivation variants should define string constants")
+        })
+        .collect::<BTreeSet<_>>();
+    let expected_activation_values = ["startup"].into_iter().collect::<BTreeSet<_>>();
+
+    assert_eq!(activation_values, expected_activation_values);
 
     let lifecycle_values = schema["$defs"]["ServiceLifecycle"]["oneOf"]
         .as_array()

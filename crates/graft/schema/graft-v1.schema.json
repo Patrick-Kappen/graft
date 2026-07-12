@@ -172,6 +172,17 @@
       "description": "Module deployment settings (`[deploy]`).",
       "type": "object",
       "properties": {
+        "activation": {
+          "description": "Optional service-manager startup activation.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DeployActivation"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "enable": {
           "description": "Whether the NixOS / HM module should render this container.",
           "type": [
@@ -192,6 +203,16 @@
         }
       },
       "additionalProperties": false
+    },
+    "DeployActivation": {
+      "description": "Supported deployment activation intent.",
+      "oneOf": [
+        {
+          "description": "Request the workload during normal target-manager startup.",
+          "type": "string",
+          "const": "startup"
+        }
+      ]
     },
     "DeployTarget": {
       "description": "Deploy scope.",
