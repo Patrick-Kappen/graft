@@ -9,8 +9,9 @@ managed by Podman Quadlet and systemd.** The same typed intent path supports
 NixOS system containers and Home Manager user containers.
 
 > **Early MVP:** the current `rootfs-store` path works for system/rootful and
-> user/rootless workloads. Lifecycle commands, secure defaults, temporary
-> agents, and multi-host control remain roadmap work.
+> Home Manager user-manager workloads. Podman is rootless only for a non-root
+> account. Lifecycle commands, secure defaults, temporary agents, and
+> multi-host control remain roadmap work.
 
 ## Start here
 
@@ -18,8 +19,8 @@ Choose the scope that owns the generated systemd service:
 
 - [NixOS system-container quickstart](quickstart/nixos.md) — system manager,
   rootful Podman;
-- [Home Manager user-container quickstart](quickstart/home-manager.md) — user
-  manager, rootless Podman.
+- [Home Manager user-container quickstart](quickstart/home-manager.md) —
+  non-root user manager and rootless Podman.
 
 Both paths include flake wiring, host prerequisites, a public package-only TOML
 workload, Git tracking, activation, status, logs, stop, cleanup, expected
@@ -65,10 +66,12 @@ Graft materialises workload output; it does not silently enable Podman, rootless
 overlay support, user linger, firewall/DNS policy, accounts, or other host
 configuration.
 
-NixOS owns system/rootful materialisation. Home Manager owns user/rootless
-materialisation. Rootless is the preferred direction for unattended server
-workloads, but containers still share the host kernel and are not a
-VM-equivalent isolation boundary. Review the current
+NixOS owns system/rootful materialisation. Home Manager owns the current
+account's user-manager materialisation. Podman is rootless only for a non-root
+account; a root-owned user manager retains root authority, and Graft does not
+enforce the UID. Rootless under a non-root account is the preferred direction
+for unattended server workloads, but containers still share the host kernel and
+are not a VM-equivalent isolation boundary. Review the current
 [Threat model and trust boundaries](threat-model.md) before selecting a target
 or config source.
 

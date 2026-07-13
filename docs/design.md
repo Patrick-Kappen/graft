@@ -199,9 +199,10 @@ Important details:
   inside the container.
 - No downloads happen at container runtime.
 
-System containers use rootful Podman and kernel overlayfs through `:O`. User
-containers use rootless Podman and rootless overlay support such as
-`fuse-overlayfs`.
+System containers use rootful Podman and kernel overlayfs through `:O`.
+User-target containers run in the current Home Manager account's user manager;
+Podman and rootless overlay support such as `fuse-overlayfs` apply only for a
+non-root account. A root-owned user manager remains rootful.
 
 ## Build and cache behaviour
 
@@ -232,7 +233,7 @@ Currently proven:
 - NixOS IFD materialisation
 - Home Manager IFD materialisation
 - system/rootful Quadlet runtime
-- user/rootless Quadlet runtime
+- non-root Home Manager user/rootless Quadlet runtime
 - useful Quadlet rendering for container identity, working directory,
   environment, environment files, published ports, volumes, and service timing
 - clean keep-alive shutdown

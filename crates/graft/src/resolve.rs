@@ -78,7 +78,7 @@ pub struct ResolvedDeploy {
 pub enum ResolvedDeployTarget {
     /// Rootful/system Quadlet container.
     System,
-    /// Rootless/user Quadlet container.
+    /// Home Manager user-manager container; rootless only for a non-root account.
     User,
 }
 

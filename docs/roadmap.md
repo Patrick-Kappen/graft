@@ -15,7 +15,8 @@ The current implementation proves the core rootfs-store path:
 - Nix builds a rootfs from Nix packages.
 - The modules render Podman Quadlet `.container` files.
 - `target = "system"` renders system/rootful containers.
-- `target = "user"` renders user/rootless containers.
+- `target = "user"` renders into the current Home Manager account's user
+  manager; Podman is rootless only for a non-root account.
 - Containers start and stop through systemd.
 - `graft-pause` provides a tiny default keep-alive command.
 - Common Quadlet fields are rendered for container identity, working directory,
@@ -43,8 +44,8 @@ Quadlet services
 local dev or server deploy
 ```
 
-The same Graft language should describe a local dev container, a user/rootless
-workspace, and a system/rootful service on a server. This roadmap first treats
+The same Graft language should describe a local dev container, a non-root
+user/rootless workspace, and a system/rootful service on a server. This roadmap first treats
 those as independently materialised workloads on explicit targets. A later
 workload graph that deliberately spreads components across local, remote, and
 temporary placements is direction only; see [Long-term vision](vision.md).
@@ -57,7 +58,8 @@ Goals:
 
 - A repository can contain Graft TOML describing its dev environment.
 - Developers can bring that environment up without hand-written Quadlet files.
-- User/rootless containers should be a natural fit for local development.
+- Non-root user/rootless containers should be a natural fit for local
+  development.
 - Packages are declared in TOML and realised by Nix, not installed ad-hoc inside
   the container.
 - Explicit startup activation is available for manager-started workloads, but

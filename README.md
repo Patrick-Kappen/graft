@@ -19,9 +19,10 @@ NixOS system containers and Home Manager user containers, without requiring a
 Dockerfile or hand-written Quadlet file for the current `rootfs-store` backend.
 
 > **Early MVP:** the rootfs-store path is working and has been validated for
-> system/rootful and user/rootless workloads. Lifecycle commands, secure
-> defaults, temporary agents, and multi-host control remain active roadmap
-> work. Start with the [NixOS quickstart](docs/quickstart/nixos.md) or
+> system/rootful and Home Manager user-manager workloads. Podman is rootless
+> only when that user manager belongs to a non-root account. Lifecycle commands,
+> secure defaults, temporary agents, and multi-host control remain active
+> roadmap work. Start with the [NixOS quickstart](docs/quickstart/nixos.md) or
 > [Home Manager quickstart](docs/quickstart/home-manager.md).
 
 [Published manual](https://patrick-kappen.github.io/graft/) ·
@@ -68,7 +69,7 @@ activation, status, logs, stop, cleanup, rendered output, and automated drift
 checks:
 
 - [NixOS system/rootful example](docs/quickstart/nixos.md)
-- [Home Manager user/rootless example](docs/quickstart/home-manager.md)
+- [Home Manager non-root user/rootless example](docs/quickstart/home-manager.md)
 
 ## Why Graft?
 
@@ -81,8 +82,8 @@ checks:
 - **Typed dependencies:** validated workload and explicit external-unit
   relationships cover common activation, ordering, and lifecycle coupling without
   raw `[Unit]` maps.
-- **System and user scope:** one intent model targets NixOS system/rootful or
-  Home Manager user/rootless materialisation.
+- **System and user scope:** one intent model targets the NixOS system manager
+  or the current Home Manager account's user manager.
 - **Explicit host policy:** apart from the generated read-only `/nix/store`
   mount required by `rootfs-store`, Graft does not silently enable Podman,
   linger, firewall rules, accounts, user-specified host mounts, or privileged
@@ -124,13 +125,16 @@ the explicitly non-committed endgame.
 ## Requirements and security status
 
 Graft currently targets Linux hosts with Nix, systemd, and Podman with Quadlet
-support. NixOS handles system/rootful materialisation; Home Manager handles
-user/rootless materialisation. The host remains responsible for Podman setup,
-rootless prerequisites, user linger, firewall/DNS policy, accounts, and other
-host configuration.
+support. NixOS handles system/rootful materialisation; Home Manager handles the
+current account's user-manager materialisation. Podman is rootless only for a
+non-root Home Manager account; a root-owned user manager retains root authority.
+Graft does not enforce the account UID. The host remains responsible for Podman
+setup, rootless prerequisites, user linger, firewall/DNS policy, accounts, and
+other host configuration.
 
-Rootless is the preferred direction for unattended server workloads. System
-targets are rootful, and containers share the host kernel: they are not
+Rootless under a non-root account is the preferred direction for unattended
+server workloads. System targets and root-owned user targets are rootful, and
+containers share the host kernel: they are not
 presented as VM-equivalent isolation. Read the current
 [Threat model and trust boundaries](docs/threat-model.md) before selecting a
 target or config source. Secure defaults remain active work in

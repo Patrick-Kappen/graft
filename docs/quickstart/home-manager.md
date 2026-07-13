@@ -1,16 +1,18 @@
 # Home Manager user-container quickstart
 
-This example adds one rootless, user-scoped Graft container to an existing Home
-Manager configuration. The reusable files for this path are under
+This example adds one rootless, user-scoped Graft container to an existing
+non-root Home Manager configuration. The reusable files for this path are under
 `examples/quickstart/home-manager/`: `module.nix` and
 `containers/graft-example.toml`. Copy them into that configuration, or use them
 as a reference for an existing Home Manager module.
 
 ## Prerequisites
 
-The host must already provide Linux, systemd user services, and a Podman package
-with Quadlet support for rootless containers. Rootless overlay support such as
-`fuse-overlayfs` may also be required by the host's Podman setup.
+The host must already provide Linux, a non-root Home Manager account, systemd
+user services, and a Podman package with Quadlet support for rootless containers.
+Rootless overlay support such as `fuse-overlayfs` may also be required by the
+host's Podman setup. Graft's user target does not reject UID 0; a root-owned user
+manager runs Podman rootful and is outside this rootless quickstart.
 
 Graft does not enable Podman, install `fuse-overlayfs`, enable user linger,
 configure firewall/DNS rules, or mutate other host policy. The generated service

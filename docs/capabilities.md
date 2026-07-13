@@ -38,9 +38,11 @@ parsing or schema validation earlier.
 ## Current Graft v1 fields
 
 Every supported semantic field path below is accepted by the generated v1
-schema. Structural parent tables carry no independent intent. **Both** means NixOS
-system/rootful and Home Manager user/rootless targets. A dash means the field is
-consumed before that pipeline stage and intentionally has no output there.
+schema. Structural parent tables carry no independent intent. **Both** means
+NixOS system-manager and Home Manager user-manager targets. The system target is
+rootful; the user target is rootless only when Home Manager runs for a non-root
+account. A dash means the field is consumed before that pipeline stage and
+intentionally has no output there.
 
 <!-- supported-schema-fields:start -->
 | TOML field | Input and semantic validation | Resolved JSON | Nix materialisation | Quadlet/systemd output | Targets | Status |
