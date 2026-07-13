@@ -104,6 +104,7 @@
 # timezone =                     # local | UTC | Europe/Amsterdam | ...
 # notify =                       # container | healthy
 # runInit =                      # true | false
+# environmentHost =              # true | false
 # podmanArgs =                   # ["--arg"]
 # globalArgs =                   # ["--arg"]
 # ip =                           # string (IPv4)
@@ -166,12 +167,16 @@
 # ipRange =                      # string
 # dns =                          # ["1.1.1.1"]
 # options =                      # string
+# labels =                       # { role = "private" }
+# quadlet =                      # { Key = ["value"] }; raw map
 
 # [[config.volumes]]
 # name =                         # string
 # driver =                       # string
 # copy =                         # true | false
 # options =                      # string
+# labels =                       # { role = "data" }
+# quadlet =                      # { Key = ["value"] }; raw map
 
 # [config.security] - advanced
 # addCapabilities =              # ["NET_BIND_SERVICE"]
@@ -219,6 +224,7 @@
 # target =                       # string (default: "/home/user")
 # review =                       # diff
 # promote =                      # auto | prompt | never
+# ephemeral =                    # true | false
 
 # [[config.home.shadow]]
 # container =                    # string (path inside container)
@@ -229,7 +235,9 @@
 # shell =                        # string (default: "sh")
 # startDelay =                   # string (e.g. "500ms", "2s")
 
-# [config.service] - remaining option
+# [config.service] - remaining options
+# type =                         # rejected; use lifecycle
+# remainAfterExit =              # rejected; use lifecycle
 # restartIfChanged =             # reserved; normal resolution rejects it
 
 # [config.quadlet.container]    # rejected; raw passthrough is not supported
