@@ -202,7 +202,8 @@ no separate shell-container concept in the current config model. A container
 stays alive as long as its resolved `Exec=` process stays alive.
 
 Other systemd units can trigger a generated service. An external non-root user
-timer may trigger a rootless workload with `service.lifecycle = "job"`; native
+timer may trigger a rootless workload with `config.service.lifecycle = "job"`;
+native
 typed timer
 generation remains in [#134](https://github.com/Patrick-Kappen/graft/issues/134).
 See [Workload lifecycle semantics](lifecycle.md) for finite and retained-job

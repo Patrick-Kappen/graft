@@ -27,11 +27,13 @@ lifecycle = "long-running"
 | `job` | finite or timer-triggered work | `Type=oneshot`, `RemainAfterExit=no` | inactive | yes |
 | `setup` | finite work whose completed state remains active | `Type=oneshot`, `RemainAfterExit=yes` | active/exited | no |
 
-When `service.lifecycle` is absent, `long-running` is the default. Graft does not
-infer lifecycle from `runtime.command`: the same executable can be a daemon, a
+When `config.service.lifecycle` is absent, `long-running` is the default. Graft
+does not infer lifecycle from `config.runtime.command`: the same executable can
+be a daemon, a
 finite job, or a setup action depending on its arguments and purpose.
 
-The reserved parser fields `service.type` and `service.remainAfterExit` are raw
+The reserved parser fields `config.service.type` and
+`config.service.remainAfterExit` are raw
 systemd-shaped and are not the public lifecycle contract. Resolution rejects
 them with an actionable migration diagnostic instead of preserving a second way
 to express the same intent.
@@ -103,7 +105,8 @@ activating → explicit stop → deactivating → inactive
 
 `systemctl start` remains synchronous until the foreground container command
 finishes. The `podman run` result therefore determines whether the unit succeeds
-or fails. A job requires an explicit non-empty `runtime.command`; allowing the
+or fails. A job requires an explicit non-empty `config.runtime.command`;
+allowing the
 implicit `/bin/graft-pause` command would create a job that never completes.
 
 Normalized Podman 5.8.2 generated-service fixture:
