@@ -138,7 +138,8 @@ fails closed.
 | --- | --- | --- | --- |
 | Qualified CDI resource name without remapping or permissions | Field-specific `config.filesystem.devices` error | First-class | Planned in [#203] |
 | Direct host devices, device directories, target remapping, and permissions | Field-specific `config.filesystem.devices` error | Dangerous | Deferred to [#142] and [#164] |
-| Host networking and other host namespace sharing | Unsupported enum or field-specific error | Dangerous | Deferred to typed policy such as [#193] |
+| Host network namespace sharing | Unsupported `config.network.mode` value | Dangerous | Planned in [#193] |
+| PID, IPC, UTS, user, or cgroup namespace sharing | Unsupported enum, unknown field, or field-specific error | Dangerous | Deferred until namespace-specific intent and target rules have an approved implementation issue |
 | `privileged` | Field-specific error | Dangerous | Deferred; [#163] keeps unsupported privileged intent rejected |
 | Capability additions and unconfined seccomp/labels | Field-specific error | Dangerous | Policy in [#139], approved controls in [#163] |
 | Automatic per-container user namespaces | Field-specific error | First-class | Planned in [#139] and [#141] |
