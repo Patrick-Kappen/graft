@@ -3,10 +3,21 @@ name = "graft-cdi-runtime"
 
 [config.runtime]
 packages = ["busybox"]
-command = ["/bin/sh", "-c", "test \"$GRAFT_CDI_TEST\" = injected"]
+command = [
+  "/bin/sh",
+  "-c",
+  "test \"$GRAFT_CDI_TEST\" = injected && grep -Eq '^NoNewPrivs:[[:space:]]+1$' /proc/self/status && grep -Eq '^CapEff:[[:space:]]+0+$' /proc/self/status && ! touch /graft-write-test 2>/dev/null",
+]
+
+[config.filesystem]
+readOnly = true
 
 [[config.filesystem.devices]]
 source = "graft.test/device=fake"
+
+[config.security]
+dropCapabilities = ["all"]
+noNewPrivileges = true
 
 [config.service]
 lifecycle = "job"

@@ -191,7 +191,7 @@ pub struct Config {
     /// Extra Quadlet `.volume` units (`[[config.volumes]]`).
     #[schemars(skip)]
     pub volumes: Option<Vec<VolumeUnit>>,
-    #[schemars(skip)]
+    /// Explicit non-relaxing container hardening controls.
     pub security: Option<Security>,
     #[schemars(skip)]
     pub resources: Option<Resources>,
@@ -340,7 +340,8 @@ pub struct Health {
 #[derive(Debug, Clone, Deserialize, Default, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct Filesystem {
-    #[schemars(skip)]
+    /// Make the container root filesystem read-only. Only `true` is supported.
+    #[schemars(extend("const" = true))]
     pub read_only: Option<bool>,
     #[schemars(skip)]
     pub read_only_tmpfs: Option<bool>,
@@ -472,20 +473,37 @@ pub struct VolumeUnit {
 }
 
 /// Security settings (`[config.security]`).
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Default, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct Security {
+    /// Ordered non-empty list of `all` or canonical `CAP_*` capability names.
+    #[schemars(
+        length(min = 1),
+        inner(regex(pattern = r"^(all|CAP_[A-Z][A-Z0-9_]*)$"))
+    )]
     pub drop_capabilities: Option<Vec<String>>,
+    #[schemars(skip)]
     pub add_capabilities: Option<Vec<String>>,
+    /// Prevent processes from gaining privileges. Only `true` is supported.
+    #[schemars(extend("const" = true))]
     pub no_new_privileges: Option<bool>,
+    #[schemars(skip)]
     pub privileged: Option<bool>,
+    #[schemars(skip)]
     pub seccomp_profile: Option<String>,
+    #[schemars(skip)]
     pub security_label_disable: Option<bool>,
+    #[schemars(skip)]
     pub security_label_file_type: Option<String>,
+    #[schemars(skip)]
     pub security_label_level: Option<String>,
+    #[schemars(skip)]
     pub security_label_nested: Option<bool>,
+    #[schemars(skip)]
     pub security_label_type: Option<String>,
+    #[schemars(skip)]
     pub security_opt: Option<Vec<String>>,
+    #[schemars(skip)]
     pub userns: Option<String>,
 }
 
@@ -753,6 +771,31 @@ mod tests {
             runtime.command.as_deref(),
             Some(&["bash".to_string(), "-l".to_string()][..])
         );
+    }
+
+    #[test]
+    fn parses_explicit_hardening_controls() {
+        let config = parse_toml(
+            r#"
+                [config.filesystem]
+                readOnly = true
+
+                [config.security]
+                dropCapabilities = ["all"]
+                noNewPrivileges = true
+            "#,
+        )
+        .unwrap()
+        .config
+        .unwrap();
+
+        assert_eq!(config.filesystem.unwrap().read_only, Some(true));
+        let security = config.security.unwrap();
+        assert_eq!(
+            security.drop_capabilities.as_deref(),
+            Some(&["all".to_string()][..])
+        );
+        assert_eq!(security.no_new_privileges, Some(true));
     }
 
     #[test]

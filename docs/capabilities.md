@@ -79,6 +79,7 @@ intentionally has no output there.
 | `config.container.workingDir` | Optional non-empty, control-free literal; no existence check | `container.workingDir` | Passed through mechanically | `WorkingDir=` | Both | Current |
 | `config.container.environment` | Optional map; keys are non-empty, control-free, contain no whitespace or `=`; values are control-free | Sorted `container.environment` map | Passed to the shared renderer | Quoted, sorted `Environment="KEY=value"` | Both | Current |
 | `config.container.environmentFile` | Optional ordered list of non-empty, control-free absolute or relative path values; existence and path safety are not checked | `container.environmentFile` | Passed to the shared renderer | Ordered, quoted `EnvironmentFile=`; Quadlet resolves relative paths against the source-unit directory | Both | Current |
+| `config.filesystem.readOnly` | Optional; only `true`; `false` fails until secure defaults define relaxation policy | `filesystem.readOnly` when configured; no default | Passed to the shared renderer | `ReadOnly=true`; tested upstream default remains absent/false when omitted | Both | Current through partial [#163] |
 | `config.filesystem.volumes` | Optional ordered list; empty is omitted; no path, mode, or target-overlap policy | `filesystem.volumes` | Passed to the shared renderer after the fixed store bind | Ordered `Volume=`; may overlap `/nix/store` or expose store paths elsewhere | Both | Current |
 | `config.filesystem.volumes[].source` | Optional non-empty, control-free literal without `:` | `filesystem.volumes[].source` | Joined mechanically with target and mode | Source component of `Volume=` | Both | Current |
 | `config.filesystem.volumes[].target` | Required non-empty, control-free literal without `:` | `filesystem.volumes[].target` | Joined mechanically with source and mode | Target component of `Volume=` | Both | Current |
@@ -88,6 +89,8 @@ intentionally has no output there.
 | `config.network.mode` | Optional `none` or `container`; absence preserves the Podman default; incompatible with `publish` when set | Optional typed `network.namespace` | Passed to the shared renderer | No line, `Network=none`, or a resolved `.container` reference | Both | Current |
 | `config.network.container` | Required safe Graft workload name for container mode; validates existence, target, lifecycle, enablement, self-reference, and cycles | `network.namespace.unit` | Passed to the shared renderer | `Network=<source>.container`; Quadlet adds dependencies | Both | Current |
 | `config.network.publish` | Optional ordered non-empty, control-free literals; only with implicit default mode | `network.publish` | Passed to the shared renderer | Ordered `PublishPort=` | Both | Current |
+| `config.security.dropCapabilities` | Optional non-empty ordered list containing `all` alone or canonical `CAP_*` names; duplicates and mixed `all` fail | `security.dropCapabilities` when configured; no default | Passed to the shared renderer | One ordered `DropCapability=` per entry | Both | Current through partial [#163] |
+| `config.security.noNewPrivileges` | Optional; only `true`; `false` fails until secure defaults define relaxation policy | `security.noNewPrivileges` when configured; no default | Passed to the shared renderer | `NoNewPrivileges=true`; tested upstream default remains absent/false when omitted | Both | Current through partial [#163] |
 | `config.service.lifecycle` | Optional `long-running`, `job`, or `setup`; finite modes require an explicit command and restrict restart policy | Optional `service.type` and `service.remainAfterExit` | Passed to the shared renderer | `Type=` and finite `RemainAfterExit=` | Both | Current |
 | `config.service.restart` | Optional supported systemd restart policy; finite lifecycle restrictions apply | `service.restart` | Passed to the shared renderer | `Restart=` | Both | Current |
 | `config.service.restartSec` | Optional non-empty, control-free literal; requires restart other than `no` | `service.restartSec` | Passed to the shared renderer | `RestartSec=` | Both | Current |
@@ -98,8 +101,9 @@ intentionally has no output there.
 Detailed lifecycle, startup, and namespace combinations live in
 [Workload lifecycle semantics](lifecycle.md),
 [Workload startup activation](activation.md),
-[Container network intent](networking.md), and
-[Container Device Interface references](cdi.md). Renderer quoting and generator-owned
+[Container network intent](networking.md),
+[Container Device Interface references](cdi.md), and
+[Explicit container hardening](hardening.md). Renderer quoting and generator-owned
 behavior live in [Quadlet output](quadlet.md).
 
 ## Reserved parser fields
@@ -118,12 +122,12 @@ yet.
 | `config.container.pod`, `entrypoint`, `stopSignal`, `stopTimeout`, `timezone`, `notify`, `runInit`, `environmentHost`, and `health.*` | Field-specific resolver error | Planned health/graceful behavior: [#146]; pod and host-environment contracts remain deferred |
 | `config.container.annotations`, `ip`, `ip6`, `networkAlias`, `exposeHostPort`, `uidMap`, `gidMap`, `subUidMap`, `subGidMap`, `shmSize`, `mask`, `unmaskPaths`, `sysctl`, and `logDriver` | Field-specific resolver error | Planned or deferred through [#141], [#145], [#146], and [#193] |
 | `config.container.podmanArgs` and `globalArgs` | Field-specific resolver error | Forbidden raw runtime passthrough; future needs require typed intent |
-| `config.filesystem.readOnly`, `readOnlyTmpfs`, `tmpfs`, and `mounts` | Field-specific resolver error | Direct devices and broader mount policy remain in [#142] and [#164] |
+| `config.filesystem.readOnlyTmpfs`, `tmpfs`, and `mounts` | Field-specific resolver error | Broader mount and root-filesystem policy remain in [#142], [#163], and [#164] |
 | `config.filesystem.devices[].target` and `config.filesystem.devices[].permissions` | Indexed field-specific resolver error | Direct-device remapping and permissions remain deferred to [#142] and [#164] |
 | `config.network.dns`, `dnsOption`, `dnsSearch`, and `addHost` | Field-specific resolver error | Planned network Phase B: [#193] |
 | `config.networks`, including nested labels and raw maps | Field-specific resolver error | Planned typed `.network` resources: [#147] |
 | `config.volumes`, including nested labels and raw maps | Field-specific resolver error | Planned typed `.volume` resources: [#148] |
-| `config.security.*` | Field-specific resolver error | Current boundary: [Threat model](threat-model.md); classification: [Capability policy](capability-policy.md); defaults and controls: [#139] and [#163] |
+| `config.security.addCapabilities`, `privileged`, `seccompProfile`, `securityLabelDisable`, `securityLabelFileType`, `securityLabelLevel`, `securityLabelNested`, `securityLabelType`, `securityOpt`, and `userns` | Field-specific resolver error | Current boundary: [Threat model](threat-model.md); classification: [Capability policy](capability-policy.md); defaults and remaining controls: [#139] and [#163] |
 | `config.resources.*` | Field-specific resolver error | Planned limits: [#145] |
 | `config.secrets` | Field-specific resolver error | Planned credential pipeline: [#143] and [#166] |
 | `config.workspace.*`, `config.home.*`, and `config.attach.*` | Field-specific resolver error | Deferred workspace/instance design: [#151], [#153], and [#160] |
@@ -140,12 +144,13 @@ fails closed.
 
 | Capability | Current input result | Class | Availability and owner |
 | --- | --- | --- | --- |
+| Explicit capability drops, no-new-privileges, and read-only rootfs | Non-relaxing typed values are accepted and rendered only when configured; no secure defaults or `false` relaxation values exist yet | First-class | Current through partial [#163]; defaults remain in [#139] and [#163] |
 | Qualified CDI resource name without remapping or permissions | Colon-free qualified `source` is accepted, ordered, and rendered as `AddDevice=`; host registry/spec is not inspected | First-class | Current through [#203] |
 | Direct host devices, device directories, target remapping, and permissions | Direct paths fail source validation; parser-reserved `target` and `permissions` return indexed field errors | Dangerous | Deferred to [#142] and [#164] |
 | Host network namespace sharing | Unsupported `config.network.mode` value | Dangerous | Planned in [#193] |
 | PID, IPC, UTS, user, or cgroup namespace sharing | Unsupported enum, unknown field, or field-specific error | Dangerous | Deferred until namespace-specific intent and target rules have an approved implementation issue |
 | `privileged` | Field-specific error | Dangerous | Deferred; [#163] keeps unsupported privileged intent rejected |
-| Capability additions and unconfined seccomp/labels | Field-specific error | Dangerous | Policy in [#139], approved controls in [#163] |
+| Capability additions and unconfined seccomp/labels | Field-specific error | Dangerous | Policy in [#139], remaining controls in [#163] |
 | Automatic per-container user namespaces | Field-specific error | First-class | Planned in [#139] and [#141] |
 | Custom UID/GID maps and subordinate-ID selection | Field-specific error | Dangerous | Deferred within [#140] and [#141] |
 | Host-path, sensitive-source, or writable-host mounts | Literal `config.filesystem.volumes` parts are delimiter- and line-safe but have no semantic source/path/mode, existence, or target-overlap policy; omitting `mode = "ro"` on a source-backed volume can select an upstream writable default | Dangerous | Current legacy exception to explicit-dangerous-intent policy; [#142] and [#163] must make writable authority explicit or reject it with migration diagnostics |

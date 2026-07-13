@@ -342,6 +342,9 @@
             "EnvironmentFile="
             "PublishPort="
             "Network="
+            "ReadOnly="
+            "DropCapability="
+            "NoNewPrivileges="
             "Type="
             "RemainAfterExit="
             "Restart="
@@ -915,6 +918,11 @@
                 test "$(grep -c '^AddDevice=' "$source")" = 2
                 test "$(grep -n '^AddDevice=' "$source" | cut -d: -f2-)" = \
                   $'AddDevice=nvidia.com/gpu=all\nAddDevice=vendor.example/device_class=device-1.2'
+                grep -Fx "ReadOnly=true" "$source"
+                test "$(grep -c '^DropCapability=' "$source")" = 2
+                test "$(grep -n '^DropCapability=' "$source" | cut -d: -f2-)" = \
+                  $'DropCapability=CAP_NET_BIND_SERVICE\nDropCapability=CAP_CHOWN'
+                grep -Fx "NoNewPrivileges=true" "$source"
               done
 
               QUADLET_UNIT_DIRS="$PWD/source-system" \
@@ -929,6 +937,11 @@
                 grep -F -- \
                   "--device nvidia.com/gpu=all --device vendor.example/device_class=device-1.2" \
                   "$service"
+                grep -E -- "^ExecStart=.* --security-opt=no-new-privileges( |$)" "$service"
+                grep -F -- \
+                  "--cap-drop cap_net_bind_service --cap-drop cap_chown" \
+                  "$service"
+                grep -E -- "^ExecStart=.* --read-only( |$)" "$service"
               done
 
               mkdir -p runtime/systemd

@@ -62,6 +62,13 @@ selected CDI spec can inject devices, mounts, environment values, and hooks into
 the OCI configuration, so review of the host-provided spec remains outside
 Graft's build-time validation.
 
+Explicit capability drops, no-new-privileges, and a read-only root filesystem
+are current first-class controls implemented through part of [#163]. They can
+only narrow the tested upstream defaults: boolean values accept only `true`,
+capability drops must be non-empty, and omission renders no hardening key.
+Target-specific secure defaults and any future relaxation syntax still require
+the policy in [#139].
+
 ## Dangerous requirements
 
 Dangerous intent must satisfy all first-class requirements and also:
@@ -121,13 +128,14 @@ but it does not make the original escape hatch acceptable.
 | --- | --- | --- | --- |
 | Current typed identity, package, command, lifecycle, startup, workload-dependency, and safe namespace intent | First-class | Current | Keep schema-backed, resolved, and mechanically rendered. Individual host crossings retain their documented boundaries. |
 | System versus user manager target selection | First-class | Current | This selects authority context, not guaranteed privilege: system and root-owned user managers are rootful; secure target defaults remain in [#139]. |
+| Explicit capability drops, no-new-privileges, and read-only rootfs | First-class | Current through partial [#163] | Only non-relaxing explicit values are available; omission preserves tested upstream defaults until [#139] approves target-specific secure defaults and relaxations. |
 | Qualified CDI resource name without target remapping or permissions | First-class | Current through [#203] | Host registry/spec is trusted; Graft validates and renders only the colon-free qualified name. |
 | Direct host device paths or directories, optional-device prefixes, target remapping, and permission modes | Dangerous | Deferred to [#142] and [#164] | Requires explicit device policy, target-specific behavior, and runtime authorization tests. |
 | Host-path, sensitive-source, or writable-host mounts, recursive propagation, and host sockets | Dangerous | Partly current; policy planned in [#142] and [#163] | Omitting `mode = "ro"` on a source-backed current volume can select an upstream writable default. This legacy exception violates dangerous requirement 2 and must become explicit or fail closed; it is not precedent for broader passthrough. |
 | Host environment-file path references | Dangerous | Current; credential replacement planned in [#143] and [#166] | One ordered non-empty, control-free path value per entry; Quadlet resolves relative paths against the source-unit directory. Graft does not attest traversal, symlinks, existence, ownership, permissions, lifecycle, or disclosure. |
 | Exact external systemd unit relationships | Dangerous | Current | Exact validated names only; implementation and authorization of the selected-manager unit remain host responsibility. |
 | Privileged containers | Dangerous | Deferred; [#163] keeps unsupported privileged intent rejected | No generic runtime argument path or implied opt-in is permitted. |
-| Capability additions | Dangerous | Policy planned in [#139], approved controls implemented by [#163] | Capability drops and secure defaults are separate first-class controls. |
+| Capability additions | Dangerous | Policy planned in [#139], remaining controls implemented by [#163] | Explicit capability drops are a separate current first-class control; additions remain unavailable. |
 | Host network namespace sharing | Dangerous | Planned in [#193] | Explicit typed host mode and target-specific exposure rules are required. |
 | PID, IPC, UTS, user, or cgroup namespace sharing | Dangerous | Deferred | Namespace-specific intent and target rules are required before an implementation issue is approved. |
 | Unconfined seccomp, disabled labels, unmasked host paths, and equivalent sandbox relaxations | Dangerous | Policy planned in [#139], approved controls implemented by [#163] | Relaxations must be explicit and visible beside effective secure controls. Additional confinement remains first-class. |

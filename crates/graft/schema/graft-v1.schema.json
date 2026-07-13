@@ -104,6 +104,17 @@
             }
           ]
         },
+        "security": {
+          "description": "Explicit non-relaxing container hardening controls.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Security"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "service": {
           "description": "Supported systemd service settings.",
           "anyOf": [
@@ -389,6 +400,14 @@
             "$ref": "#/$defs/Device"
           }
         },
+        "readOnly": {
+          "description": "Make the container root filesystem read-only. Only `true` is supported.",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "const": true
+        },
         "volumes": {
           "description": "Ordered literal Quadlet `Volume=` entries.",
           "type": [
@@ -519,6 +538,33 @@
             "type": "string",
             "minLength": 1
           }
+        }
+      },
+      "additionalProperties": false
+    },
+    "Security": {
+      "description": "Security settings (`[config.security]`).",
+      "type": "object",
+      "properties": {
+        "dropCapabilities": {
+          "description": "Ordered non-empty list of `all` or canonical `CAP_*` capability names.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string",
+            "pattern": "^(all|CAP_[A-Z][A-Z0-9_]*)$"
+          },
+          "minItems": 1
+        },
+        "noNewPrivileges": {
+          "description": "Prevent processes from gaining privileges. Only `true` is supported.",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "const": true
         }
       },
       "additionalProperties": false
