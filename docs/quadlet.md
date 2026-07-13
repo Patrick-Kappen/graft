@@ -38,6 +38,7 @@ The CLI translates TOML to resolved JSON:
 - command / `Exec=`
 - deploy target
 - optional service settings
+- explicit root-filesystem and process hardening
 - typed concrete dependency identities
 - Graft defaults and automatic resource references
 
@@ -55,6 +56,7 @@ JSON:
 - `Exec=` comes from resolved `runtime.command`.
 - `Volume=/nix/store:/nix/store:ro` is always rendered for store symlinks.
 - Qualified resolved CDI references render as ordered `AddDevice=` lines.
+- Explicit root-filesystem and process hardening renders as fixed `ReadOnly=`, `DropCapability=`, and `NoNewPrivileges=` keys.
 - Optional `[Unit]` dependency keys are rendered only from concrete resolved identities.
 - Optional `[Service]` keys are rendered only when resolved JSON contains them.
 - `[Container]` values that become generated command-line arguments escape `%` specifiers and `$` variables.
@@ -74,6 +76,9 @@ promised.
 | `Exec=` | resolved `runtime.command` |
 | `Volume=/nix/store:/nix/store:ro` | required for Nix store symlinks |
 | `AddDevice=` | each ordered resolved `filesystem.devices[].source` value |
+| `ReadOnly=` | explicit resolved `filesystem.readOnly` value |
+| `DropCapability=` | each ordered resolved `security.dropCapabilities` value |
+| `NoNewPrivileges=` | explicit resolved `security.noNewPrivileges` value |
 
 Example with implicit or long-running lifecycle and no user command:
 
@@ -136,10 +141,24 @@ Quadlet translates each line to one Podman `--device` argument. The host CDI
 registry owns the resulting OCI edits; see
 [Container Device Interface references](cdi.md).
 
-Environment files, published ports, volumes, and CDI references preserve user
-order. Environment variables are sorted by key. Environment-file path values
-and command argv are quoted for systemd argument parsing. Quadlet resolves relative environment-file
-paths against the source-unit directory and passes each as one Podman
+Explicit hardening renders without an alternate raw-security path:
+
+```ini
+ReadOnly=true
+DropCapability=all
+NoNewPrivileges=true
+```
+
+Quadlet translates these keys to Podman's read-only rootfs, capability-drop,
+and no-new-privileges controls. Graft currently accepts only non-relaxing
+values and adds no implicit hardening defaults. See
+[Explicit container hardening](hardening.md).
+
+Environment files, published ports, volumes, CDI references, and capability
+drops preserve user order. Environment variables are sorted by key.
+Environment-file path values and command argv are quoted for systemd argument
+parsing. Quadlet resolves relative environment-file paths against the
+source-unit directory and passes each as one Podman
 `--env-file` argument; this is not systemd service `EnvironmentFile=` wildcard
 or optional-file syntax. Container values render literal `%` as `%%` and
 literal `$` as `$$` when they become generated command-line arguments.
@@ -219,16 +238,21 @@ never invokes `systemctl enable` during build or materialisation.
 
 ## Overlay
 
-Rootfs-store containers use a writable overlay above the read-only store rootfs:
+By default, rootfs-store containers use a writable overlay above the read-only
+store rootfs:
 
 ```text
 lowerdir = /nix/store/xxx-graft-env   (read-only)
-upperdir = container storage          (writable)
+upperdir = container storage          (writable by default)
 ```
 
 For paths backed by `Rootfs=` rather than another runtime or explicit mount,
-writes go to the upperdir. The renderer's `/nix/store` bind is read-only, but
-later explicit volumes can overlap it or expose a store path elsewhere. The
+writes normally go to the upperdir. Explicit `config.filesystem.readOnly = true`
+makes those container rootfs paths read-only through Podman. The tested upstream
+`ReadOnlyTmpfs=true` default still provides read-write tmpfs mounts, although
+path modes and dropped capabilities can deny process writes. Explicit volumes
+or CDI specs can add other writable mounts. The renderer's `/nix/store` bind is
+read-only, but later explicit volumes can overlap it or expose a store path elsewhere. The
 current `Rootfs=...:O` mode does not configure a persistent, inspectable
 upperdir, so users must not rely on overlay writes after the runtime container
 is removed. It is not a promote flow.

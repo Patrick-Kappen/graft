@@ -67,7 +67,14 @@ fn schema_exposes_only_supported_fields() {
         ),
         (
             "Config",
-            &["container", "filesystem", "network", "runtime", "service"][..],
+            &[
+                "container",
+                "filesystem",
+                "network",
+                "runtime",
+                "security",
+                "service",
+            ][..],
         ),
         (
             "Container",
@@ -87,10 +94,11 @@ fn schema_exposes_only_supported_fields() {
         ("Deploy", &["activation", "enable", "target"][..]),
         ("Device", &["source"][..]),
         ("ExternalUnitDependencyTarget", &["externalUnit"][..]),
-        ("Filesystem", &["devices", "volumes"][..]),
+        ("Filesystem", &["devices", "readOnly", "volumes"][..]),
         ("FilesystemVolume", &["mode", "source", "target"][..]),
         ("Network", &["container", "mode", "publish"][..]),
         ("Runtime", &["command", "mode", "packages"][..]),
+        ("Security", &["dropCapabilities", "noNewPrivileges"][..]),
         (
             "Service",
             &[
@@ -140,4 +148,27 @@ fn schema_exposes_only_supported_fields() {
         "^[A-Za-z][A-Za-z0-9._-]*[A-Za-z0-9]/[A-Za-z][A-Za-z0-9._-]*[A-Za-z0-9]=[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
     );
     assert_eq!(schema["$defs"]["Device"]["required"][0], "source");
+}
+
+#[test]
+fn schema_constrains_hardening_to_non_relaxing_values() {
+    let schema: Value =
+        serde_json::from_str(TRACKED_SCHEMA).expect("tracked Graft schema should be valid JSON");
+
+    assert_eq!(
+        schema["$defs"]["Security"]["properties"]["dropCapabilities"]["minItems"],
+        1
+    );
+    assert_eq!(
+        schema["$defs"]["Security"]["properties"]["dropCapabilities"]["items"]["pattern"],
+        "^(all|CAP_[A-Z][A-Z0-9_]*)$"
+    );
+    assert_eq!(
+        schema["$defs"]["Security"]["properties"]["noNewPrivileges"]["const"],
+        true
+    );
+    assert_eq!(
+        schema["$defs"]["Filesystem"]["properties"]["readOnly"]["const"],
+        true
+    );
 }

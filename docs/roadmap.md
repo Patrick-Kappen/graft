@@ -22,7 +22,8 @@ The current implementation proves the core rootfs-store path:
   long-running lifecycle intent; finite workloads require a command.
 - Common Quadlet fields are rendered for container identity, working directory,
   quoted environment, environment files, published ports, volumes, qualified
-  CDI references, service timing, and typed systemd dependency relationships.
+  CDI references, explicit non-relaxing hardening, service timing, and typed
+  systemd dependency relationships.
 
 The generated TOML schema intentionally exposes only the implemented MVP
 contract. Additional parser-recognised roadmap fields fail closed; their status
@@ -163,6 +164,18 @@ the MVP protects and trusts. The [Capability policy](capability-policy.md)
 classifies first-class intent, dangerous authority, and forbidden escape
 hatches. The current implementation proves the flow, not the final isolation
 model.
+
+Current hardening is deliberately explicit and non-relaxing:
+
+- capability drops, including `all`
+- no-new-privileges
+- a read-only container root filesystem
+
+Omission preserves tested upstream defaults; target-specific secure defaults
+and relaxation policy remain in [#139](https://github.com/Patrick-Kappen/graft/issues/139)
+and the remaining scope of
+[#163](https://github.com/Patrick-Kappen/graft/issues/163). See
+[Explicit container hardening](hardening.md).
 
 Planned hardening:
 

@@ -10,6 +10,7 @@ Related authoritative sources:
 - [Graft v1 JSON Schema](https://github.com/Patrick-Kappen/graft/blob/main/crates/graft/schema/graft-v1.schema.json) — accepted current TOML shape;
 - [Capability status](capabilities.md) — each field's parser, resolver, Nix, and Quadlet stages plus deferred and forbidden boundaries;
 - [Container Device Interface references](cdi.md) — qualified device-name syntax and host registry trust boundary;
+- [Explicit container hardening](hardening.md) — current non-relaxing security controls and their limits;
 - [Roadmap](roadmap.md) — planned implementation direction;
 - [Non-goals and deferred scope](non-goals.md) — deliberate current exclusions.
 
@@ -38,7 +39,7 @@ for the complete status boundary.
 | `name` | string | required | Must match `^[A-Za-z0-9][A-Za-z0-9._-]*$`. |
 | `dependencies` | list of tables | optional | Typed activation, ordering, and lifecycle relationships. |
 | `deploy` | table | optional | Materialisation target, enable state, and startup intent. |
-| `config` | table | optional | Runtime, container, filesystem, network, and service intent. |
+| `config` | table | optional | Runtime, container, filesystem, network, security, and service intent. |
 
 The generated `.container` filename and systemd service stem currently come
 from the TOML filename, while `ContainerName=` comes from `name`. Keep the file
@@ -152,6 +153,37 @@ environment. Quoting preserves each value as one Quadlet argument. Quadlet
 resolves a relative value against the source-unit directory and passes one
 `--env-file` path to Podman; this is not systemd service
 `EnvironmentFile=` optional-file or wildcard syntax.
+
+## Explicit hardening
+
+```toml
+[config.filesystem]
+readOnly = true
+
+[config.security]
+dropCapabilities = ["all"]
+noNewPrivileges = true
+```
+
+| Field | Accepted values | Default | Quadlet output |
+| --- | --- | --- | --- |
+| `config.filesystem.readOnly` | `true` only | absent | `ReadOnly=true` |
+| `config.security.dropCapabilities` | Non-empty ordered list containing `all` alone or canonical names matching `CAP_[A-Z][A-Z0-9_]*` | absent | One ordered `DropCapability=` line per entry |
+| `config.security.noNewPrivileges` | `true` only | absent | `NoNewPrivileges=true` |
+
+`false` is not a supported relaxation value; omit a boolean field when its
+hardening is not requested. Duplicate capability names and combining `all` with
+another capability fail resolution. Graft validates capability-name syntax but
+does not inspect whether the host runtime recognizes a particular canonical
+name.
+
+Graft does not yet apply implicit secure defaults. With the tested upstream
+`ReadOnlyTmpfs=true` default, a read-only root filesystem still receives
+read-write tmpfs mounts at `/dev`, `/dev/shm`, `/run`, `/tmp`, and `/var/tmp`;
+mountpoint modes and dropped capabilities can still deny process writes.
+Explicit volumes and host CDI specs can also introduce writable paths. See
+[Explicit container hardening](hardening.md) for the process, mount, target, and
+future-relaxation boundaries.
 
 ## Filesystem volumes
 

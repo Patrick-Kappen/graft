@@ -150,6 +150,16 @@ nix build .#packages.x86_64-linux.activation-runtime-test --no-link --print-buil
 This expensive test is an advisory `activation-runtime` CI job and is not part
 of the aggregate required checks while runner stability is evaluated.
 
+A second isolated x86_64 VM uses a controlled fake CDI spec to exercise CDI and
+explicit hardening together. It verifies effective no-new-privileges, an empty
+capability set, and blocked rootfs writes without physical device hardware:
+
+```bash
+nix build .#packages.x86_64-linux.cdi-runtime-test --no-link --print-build-logs
+```
+
+This remains an advisory `cdi-runtime` CI job.
+
 ## Dead-code and module-boundary hygiene
 
 The baseline already has several hard gates for unused or dead code:

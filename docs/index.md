@@ -79,7 +79,7 @@ or config source.
 
 | Horizon | Status |
 | --- | --- |
-| **Available now** | Rootfs-store materialisation for NixOS and Home Manager, selected typed container fields, typed dependencies, and manual or explicit startup lifecycle. |
+| **Available now** | Rootfs-store materialisation for NixOS and Home Manager, selected typed container fields, explicit non-relaxing hardening, typed dependencies, and manual or explicit startup lifecycle. |
 | **Active roadmap** | Contract hardening, typed timers, lifecycle CLI, secure rootless policy, temporary instances, deterministic merging, and explicit multi-host deployment. |
 | **Long-term vision** | Portable repository environments with deliberate local, remote, or temporary placement and possible additional artifact/control integrations. |
 
@@ -92,6 +92,7 @@ promised syntax or schedule.
 - **Configure workloads:** [Reference](reference.md),
   [Typed workload dependencies](dependencies.md),
   [Container Device Interface references](cdi.md),
+  [Explicit container hardening](hardening.md),
   [Capability status](capabilities.md), and the generated supported schema at
   `crates/graft/schema/graft-v1.schema.json`
 - **Understand output:** [Overview](overview.md), [Design](design.md), and

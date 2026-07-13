@@ -85,6 +85,9 @@ checks:
   raw `[Unit]` maps.
 - **System and user scope:** one intent model targets the NixOS system manager
   or the current Home Manager account's user manager.
+- **Explicit hardening:** optional capability drops, no-new-privileges, and a
+  read-only container rootfs narrow upstream defaults without hidden
+  relaxations.
 - **Explicit host policy:** Graft generates a read-only `/nix/store` bind for
   `rootfs-store`, but explicit volumes may overlap it. Graft does not silently
   enable Podman, linger, firewall rules, accounts, user-specified host mounts,
@@ -117,7 +120,7 @@ Podman runs the containers. See [Design](docs/design.md) and
 
 | Horizon | Status |
 | --- | --- |
-| **Available now** | Fail-closed TOML-to-JSON resolution; Nix-store rootfs; NixOS system and Home Manager user materialisation; explicit packages and commands; selected identity, environment, filesystem, network, lifecycle, startup, and typed dependency fields. |
+| **Available now** | Fail-closed TOML-to-JSON resolution; Nix-store rootfs; NixOS system and Home Manager user materialisation; explicit packages and commands; selected identity, environment, filesystem, network, non-relaxing hardening, lifecycle, startup, and typed dependency fields. |
 | **Active roadmap** | Typed timers; `up`/`down`, status and logs; secure rootless defaults; secrets, mounts, networking, limits, temporary instances, deterministic merging, and explicit multi-host deployment. |
 | **Long-term vision** | Repository-defined environments whose components may be placed locally, on explicit remote hosts, or in temporary instances; reviewed OCI and development-environment integrations; possible TUI or optional web control surface. |
 
@@ -180,6 +183,7 @@ recorded separately rather than advertised as implemented.
   [Design](docs/design.md) · [Quadlet output](docs/quadlet.md) ·
   [Typed dependencies](docs/dependencies.md)
 - **Configure it:** [Reference](docs/reference.md) ·
+  [Explicit hardening](docs/hardening.md) ·
   [Capability status](docs/capabilities.md) ·
   [Supported JSON Schema](crates/graft/schema/graft-v1.schema.json)
 - **Track direction:** [Roadmap](docs/roadmap.md) ·

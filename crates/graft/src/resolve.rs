@@ -56,6 +56,9 @@ pub struct ResolvedContainer {
     /// Optional network settings rendered into Quadlet `[Container]`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub network: Option<ResolvedNetwork>,
+    /// Optional explicit non-relaxing security controls.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub security: Option<ResolvedSecurity>,
     /// Optional systemd service settings.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub service: Option<ResolvedService>,
@@ -165,6 +168,9 @@ pub struct ResolvedContainerSettings {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResolvedFilesystem {
+    /// Optional read-only root filesystem hardening.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub read_only: Option<bool>,
     /// Optional volume mounts rendered as Quadlet `Volume=`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub volumes: Option<Vec<ResolvedFilesystemVolume>>,
@@ -179,6 +185,18 @@ pub struct ResolvedFilesystem {
 pub struct ResolvedDevice {
     /// Validated colon-free CDI qualified name.
     pub source: String,
+}
+
+/// Resolved explicit non-relaxing security controls.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolvedSecurity {
+    /// Ordered capabilities removed from the runtime default set.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub drop_capabilities: Option<Vec<String>>,
+    /// Explicit no-new-privileges hardening.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub no_new_privileges: Option<bool>,
 }
 
 /// Resolved filesystem volume mount.
@@ -621,7 +639,7 @@ fn validate_unsupported_health_intent(health: Option<&Health>) -> Result<()> {
 
 fn validate_unsupported_filesystem_intent(filesystem: Option<&Filesystem>) -> Result<()> {
     let Some(Filesystem {
-        read_only,
+        read_only: _,
         read_only_tmpfs,
         tmpfs,
         mounts,
@@ -632,7 +650,6 @@ fn validate_unsupported_filesystem_intent(filesystem: Option<&Filesystem>) -> Re
         return Ok(());
     };
 
-    reject!(read_only, "config.filesystem.readOnly");
     reject!(read_only_tmpfs, "config.filesystem.readOnlyTmpfs");
     reject!(tmpfs, "config.filesystem.tmpfs");
     reject!(mounts, "config.filesystem.mounts");
@@ -664,9 +681,9 @@ fn validate_unsupported_network_intent(network: Option<&Network>) -> Result<()> 
 
 fn validate_unsupported_security_intent(security: Option<&Security>) -> Result<()> {
     let Some(Security {
-        drop_capabilities,
+        drop_capabilities: _,
         add_capabilities,
-        no_new_privileges,
+        no_new_privileges: _,
         privileged,
         seccomp_profile,
         security_label_disable,
@@ -681,9 +698,7 @@ fn validate_unsupported_security_intent(security: Option<&Security>) -> Result<(
         return Ok(());
     };
 
-    reject!(drop_capabilities, "config.security.dropCapabilities");
     reject!(add_capabilities, "config.security.addCapabilities");
-    reject!(no_new_privileges, "config.security.noNewPrivileges");
     reject!(privileged, "config.security.privileged");
     reject!(seccomp_profile, "config.security.seccompProfile");
     reject!(
@@ -865,6 +880,7 @@ fn resolve_internal(
         container: resolve_container(config)?,
         filesystem: resolve_filesystem(config)?,
         network: resolve_network(config, context)?,
+        security: resolve_security(config)?,
         service: resolve_service(config)?,
     })
 }
@@ -1009,14 +1025,81 @@ fn resolve_filesystem(config: &ContainerConfig) -> Result<Option<ResolvedFilesys
         .config
         .as_ref()
         .and_then(|config| config.filesystem.as_ref());
+    let read_only = filesystem.and_then(|filesystem| filesystem.read_only);
+    if matches!(read_only, Some(false)) {
+        bail!(
+            "config.filesystem.readOnly = false is not supported; omit it until secure defaults and relaxations are defined"
+        );
+    }
     let volumes = resolve_volumes(filesystem)?;
     let devices = resolve_devices(filesystem)?;
 
-    if volumes.is_none() && devices.is_none() {
+    if read_only.is_none() && volumes.is_none() && devices.is_none() {
         return Ok(None);
     }
 
-    Ok(Some(ResolvedFilesystem { volumes, devices }))
+    Ok(Some(ResolvedFilesystem {
+        read_only,
+        volumes,
+        devices,
+    }))
+}
+
+fn resolve_security(config: &ContainerConfig) -> Result<Option<ResolvedSecurity>> {
+    let Some(security) = config
+        .config
+        .as_ref()
+        .and_then(|config| config.security.as_ref())
+    else {
+        return Ok(None);
+    };
+
+    if let Some(drop_capabilities) = &security.drop_capabilities {
+        if drop_capabilities.is_empty() {
+            bail!("config.security.dropCapabilities cannot be empty");
+        }
+        if drop_capabilities.len() > 1
+            && drop_capabilities
+                .iter()
+                .any(|capability| capability == "all")
+        {
+            bail!("config.security.dropCapabilities cannot combine 'all' with other capabilities");
+        }
+
+        let mut seen = BTreeSet::new();
+        for (index, capability) in drop_capabilities.iter().enumerate() {
+            let field_name = format!("config.security.dropCapabilities[{index}]");
+            validate_non_empty_no_control(&field_name, capability)?;
+
+            let is_canonical = capability == "all"
+                || capability.strip_prefix("CAP_").is_some_and(|name| {
+                    let mut chars = name.chars();
+                    chars.next().is_some_and(|first| first.is_ascii_uppercase())
+                        && chars
+                            .all(|ch| ch.is_ascii_uppercase() || ch.is_ascii_digit() || ch == '_')
+                });
+            if !is_canonical {
+                bail!("{field_name} must be 'all' or a canonical CAP_* name");
+            }
+            if !seen.insert(capability) {
+                bail!("{field_name} duplicates an earlier capability");
+            }
+        }
+    }
+    if matches!(security.no_new_privileges, Some(false)) {
+        bail!(
+            "config.security.noNewPrivileges = false is not supported; omit it until secure defaults and relaxations are defined"
+        );
+    }
+
+    if security.drop_capabilities.is_none() && security.no_new_privileges.is_none() {
+        return Ok(None);
+    }
+
+    Ok(Some(ResolvedSecurity {
+        drop_capabilities: security.drop_capabilities.clone(),
+        no_new_privileges: security.no_new_privileges,
+    }))
 }
 
 fn resolve_volumes(
@@ -2367,10 +2450,6 @@ mod tests {
             "config.container.health.startupTimeout",
         ),
         (
-            "[config.filesystem]\nreadOnly = false",
-            "config.filesystem.readOnly",
-        ),
-        (
             "[config.filesystem]\nreadOnlyTmpfs = false",
             "config.filesystem.readOnlyTmpfs",
         ),
@@ -2399,16 +2478,8 @@ mod tests {
             "config.network.addHost",
         ),
         (
-            "[config.security]\ndropCapabilities = [\"all\"]",
-            "config.security.dropCapabilities",
-        ),
-        (
             "[config.security]\naddCapabilities = [\"NET_BIND_SERVICE\"]",
             "config.security.addCapabilities",
-        ),
-        (
-            "[config.security]\nnoNewPrivileges = false",
-            "config.security.noNewPrivileges",
         ),
         (
             "[config.security]\nprivileged = false",
@@ -2574,10 +2645,6 @@ mod tests {
             (
                 "[config.container]\nannotations = {}",
                 "config.container.annotations",
-            ),
-            (
-                "[config.security]\ndropCapabilities = []",
-                "config.security.dropCapabilities",
             ),
             ("[config.quadlet.container]", "config.quadlet.container"),
         ];
@@ -3398,6 +3465,7 @@ mod tests {
         assert_eq!(
             resolved.filesystem,
             Some(ResolvedFilesystem {
+                read_only: None,
                 volumes: Some(vec![ResolvedFilesystemVolume {
                     source: None,
                     target: "/data".to_string(),
@@ -3429,6 +3497,7 @@ mod tests {
         assert_eq!(
             resolved.filesystem,
             Some(ResolvedFilesystem {
+                read_only: None,
                 volumes: Some(vec![ResolvedFilesystemVolume {
                     source: Some("/host/data".to_string()),
                     target: "/data".to_string(),
@@ -3455,6 +3524,7 @@ mod tests {
         assert_eq!(
             resolved.filesystem,
             Some(ResolvedFilesystem {
+                read_only: None,
                 volumes: Some(vec![ResolvedFilesystemVolume {
                     source: Some("/host/config".to_string()),
                     target: "/config".to_string(),
@@ -3717,6 +3787,7 @@ mod tests {
         assert_eq!(
             resolved.filesystem,
             Some(ResolvedFilesystem {
+                read_only: None,
                 volumes: None,
                 devices: Some(vec![
                     ResolvedDevice {
@@ -3742,8 +3813,9 @@ mod tests {
     }
 
     #[test]
-    fn volumes_and_cdi_devices_resolve_together() {
+    fn read_only_volumes_and_cdi_devices_resolve_together() {
         let config = filesystem_config(Filesystem {
+            read_only: Some(true),
             volumes: Some(vec![FilesystemVolume {
                 source: None,
                 target: "/data".to_string(),
@@ -3762,6 +3834,7 @@ mod tests {
         assert_eq!(
             resolved.filesystem,
             Some(ResolvedFilesystem {
+                read_only: Some(true),
                 volumes: Some(vec![ResolvedFilesystemVolume {
                     source: None,
                     target: "/data".to_string(),
@@ -3915,6 +3988,135 @@ mod tests {
             error.to_string(),
             "config.filesystem.devices[0].permissions is configured but CDI permissions are not supported"
         );
+    }
+
+    #[test]
+    fn hardening_controls_have_no_defaults() {
+        let resolved = resolve(&named_config()).unwrap();
+
+        assert_eq!(resolved.security, None);
+        assert_eq!(resolved.filesystem, None);
+    }
+
+    #[test]
+    fn explicit_hardening_controls_are_resolved() {
+        let config = config_with_toml(
+            "[config.filesystem]\nreadOnly = true\n\n\
+             [config.security]\ndropCapabilities = [\"all\"]\nnoNewPrivileges = true",
+        );
+
+        let resolved = resolve(&config).unwrap();
+
+        assert_eq!(
+            resolved.filesystem,
+            Some(ResolvedFilesystem {
+                read_only: Some(true),
+                volumes: None,
+                devices: None,
+            })
+        );
+        assert_eq!(
+            resolved.security,
+            Some(ResolvedSecurity {
+                drop_capabilities: Some(vec!["all".to_string()]),
+                no_new_privileges: Some(true),
+            })
+        );
+        let json = serde_json::to_value(&resolved).unwrap();
+        assert_eq!(json["filesystem"]["readOnly"], true);
+        assert_eq!(json["security"]["dropCapabilities"][0], "all");
+        assert_eq!(json["security"]["noNewPrivileges"], true);
+    }
+
+    #[test]
+    fn capability_drop_order_is_preserved() {
+        let config = config_with_toml(
+            "[config.security]\n\
+             dropCapabilities = [\"CAP_NET_BIND_SERVICE\", \"CAP_CHOWN\"]",
+        );
+
+        let resolved = resolve(&config).unwrap();
+
+        assert_eq!(
+            resolved.security,
+            Some(ResolvedSecurity {
+                drop_capabilities: Some(vec![
+                    "CAP_NET_BIND_SERVICE".to_string(),
+                    "CAP_CHOWN".to_string(),
+                ]),
+                no_new_privileges: None,
+            })
+        );
+    }
+
+    #[test]
+    fn false_hardening_booleans_return_relaxation_errors() {
+        let cases = [
+            (
+                "[config.filesystem]\nreadOnly = false",
+                "config.filesystem.readOnly = false is not supported; omit it until secure defaults and relaxations are defined",
+            ),
+            (
+                "[config.security]\nnoNewPrivileges = false",
+                "config.security.noNewPrivileges = false is not supported; omit it until secure defaults and relaxations are defined",
+            ),
+        ];
+
+        for (snippet, expected) in cases {
+            let config = config_with_toml(snippet);
+
+            let error = resolve(&config).unwrap_err();
+
+            assert_eq!(error.to_string(), expected);
+        }
+    }
+
+    #[test]
+    fn invalid_capability_drop_entries_return_specific_errors() {
+        let cases = [
+            ("[]", "config.security.dropCapabilities cannot be empty"),
+            (
+                "[\"\"]",
+                "config.security.dropCapabilities[0] cannot be empty",
+            ),
+            (
+                "[\"cap_net_admin\"]",
+                "config.security.dropCapabilities[0] must be 'all' or a canonical CAP_* name",
+            ),
+            (
+                "[\"CAP_\"]",
+                "config.security.dropCapabilities[0] must be 'all' or a canonical CAP_* name",
+            ),
+            (
+                "[\"CAP_NET-ADMIN\"]",
+                "config.security.dropCapabilities[0] must be 'all' or a canonical CAP_* name",
+            ),
+            (
+                "[\"CAP_NET\\nADMIN\"]",
+                "config.security.dropCapabilities[0] cannot contain control characters",
+            ),
+            (
+                "[\"all\", \"CAP_CHOWN\"]",
+                "config.security.dropCapabilities cannot combine 'all' with other capabilities",
+            ),
+            (
+                "[\"CAP_CHOWN\", \"CAP_CHOWN\"]",
+                "config.security.dropCapabilities[1] duplicates an earlier capability",
+            ),
+        ];
+
+        for (entries, expected) in cases {
+            let config =
+                config_with_toml(&format!("[config.security]\ndropCapabilities = {entries}"));
+
+            let error = resolve(&config).unwrap_err();
+
+            assert_eq!(
+                error.to_string(),
+                expected,
+                "unexpected diagnostic for {entries}"
+            );
+        }
     }
 
     #[test]
@@ -5402,6 +5604,7 @@ mod tests {
         assert_eq!(json.get("container"), None);
         assert_eq!(json.get("filesystem"), None);
         assert_eq!(json.get("network"), None);
+        assert_eq!(json.get("security"), None);
         assert_eq!(json.get("service"), None);
         assert_eq!(json["deploy"].get("enable"), None);
     }

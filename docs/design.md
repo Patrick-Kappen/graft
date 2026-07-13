@@ -22,9 +22,11 @@ is defined separately in [Workload startup activation](activation.md). The
 approved typed namespace, shared-container reference, and network security
 boundaries are defined in [Container network intent](networking.md). Qualified
 host-managed resource references are defined in
-[Container Device Interface references](cdi.md). Security assumptions, target
-authority, and current invariant evidence are defined in
-[Threat model and trust boundaries](threat-model.md). The boundary between
+[Container Device Interface references](cdi.md). Current non-relaxing process
+and rootfs controls are defined in [Explicit container hardening](hardening.md).
+Security assumptions, target authority, and current invariant evidence are
+defined in [Threat model and trust boundaries](threat-model.md). The boundary
+between
 first-class typed intent, dangerous explicit authority, and forbidden escape
 hatches is defined in [Capability policy](capability-policy.md).
 
@@ -149,6 +151,7 @@ The CLI may only add defaults that belong to Graft semantics.
 | `config.runtime.mode` | currently only `rootfs-store` |
 | supported container fields | no defaults; include only if user sets them |
 | environment, publish, volumes, CDI devices | no defaults; preserve deterministic ordering rules |
+| explicit capability drops, no-new-privileges, and read-only rootfs | no defaults; only non-relaxing values; include only when configured |
 | `dependencies` | no defaults; typed relations resolve to sorted concrete source-unit or external-unit identities |
 | `config.network.mode` | absent preserves Quadlet's target-specific default; `none` and typed container references are supported |
 | `config.service.lifecycle` | absent means Quadlet's long-running notify default; explicit intent resolves to typed service fields |
@@ -199,7 +202,10 @@ Volume=/nix/store:/nix/store:ro
 Important details:
 
 - `Image=` is not used for `rootfs-store` containers.
-- `Rootfs=...:O` gives Podman a writable overlay above the read-only store rootfs.
+- `Rootfs=...:O` gives Podman a writable overlay above the read-only store rootfs
+  by default. Explicit `config.filesystem.readOnly = true` makes container
+  rootfs paths read-only while preserving the tested upstream read-write-tmpfs
+  mount default.
 - The current mode configures no persistent, inspectable upperdir. Do not rely
   on overlay writes after the runtime container is removed; reviewable
   diff/promote is future work tracked by [#160](https://github.com/Patrick-Kappen/graft/issues/160).
@@ -248,8 +254,9 @@ Currently proven:
 - non-root Home Manager user/rootless Quadlet runtime
 - useful Quadlet rendering for container identity, working directory,
   environment, environment files, published ports, volumes, qualified CDI
-  references, and service timing
-- fake-spec CDI runtime translation without physical device hardware
+  references, explicit hardening, and service timing
+- fake-spec CDI runtime translation without physical device hardware, combined
+  with effective capability, no-new-privileges, and rootfs-write assertions
 - clean keep-alive shutdown
 
 Typed long-running, finite-job, and retained setup-job behavior is defined in

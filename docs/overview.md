@@ -72,8 +72,10 @@ Current CLI rules:
 - preserve user commands exactly
 - default `deploy.target` to `system`
 - support only `rootfs-store` today
-- include supported container, environment, filesystem, network, and service
-  fields only when explicitly set
+- include supported container, environment, filesystem, network, security, and
+  service fields only when explicitly set
+- validate explicit non-relaxing capability-drop, no-new-privileges, and
+  read-only-rootfs intent without adding hidden defaults
 - validate colon-free qualified CDI resource names while leaving host registry
   policy to Podman and the operator
 - resolve typed workload dependencies through the explicit source set and
@@ -175,6 +177,9 @@ Environment="GREETING=hello world"
 EnvironmentFile="/run/graft/node-dev.env"
 PublishPort=127.0.0.1:8080:8080
 Volume=/home/me/project:/workspace
+ReadOnly=true
+DropCapability=all
+NoNewPrivileges=true
 
 [Service]
 Restart=on-failure
@@ -193,7 +198,9 @@ renders the corresponding `[Install]` relationship; see
 
 - Graft uses `Rootfs=`, not `Image=`, for store-based containers.
 - The rootfs is a store path built from Nix packages.
-- `Rootfs=...:O` gives Podman a writable overlay above the read-only store rootfs.
+- `Rootfs=...:O` gives Podman a writable overlay above the read-only store rootfs
+  by default; explicit `config.filesystem.readOnly = true` makes container
+  rootfs paths read-only while preserving upstream read-write tmpfs mounts.
 - The current mode configures no persistent, inspectable upperdir. Do not rely
   on overlay writes after the runtime container is removed; diff/promote is
   future work tracked by [#160](https://github.com/Patrick-Kappen/graft/issues/160).
@@ -263,6 +270,7 @@ graft/
     overview.md        # this file
     reference.md       # current configuration contract
     capabilities.md    # authoritative pipeline and status matrix
+    hardening.md       # current explicit hardening controls and boundaries
     threat-model.md    # security assumptions, invariants, and residual risks
     vision.md          # long-term product direction
     quadlet.md         # Quadlet output notes

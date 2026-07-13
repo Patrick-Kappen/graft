@@ -13,6 +13,7 @@
 - [Typed workload dependencies](dependencies.md)
 - [Container network intent](networking.md)
 - [Container Device Interface references](cdi.md)
+- [Explicit container hardening](hardening.md)
 - [Quadlet output](quadlet.md)
 - [Roadmap](roadmap.md)
 - [Non-goals and deferred scope](non-goals.md)

@@ -46,6 +46,7 @@ let
         file: "EnvironmentFile=${quoteSystemdExecArg file}\n"
       ) environmentFile;
       filesystem = ctr.filesystem or { };
+      readOnly = filesystem.readOnly or null;
       volumes = filesystem.volumes or [ ];
       volumeLines = lib.concatMapStrings (
         volume:
@@ -67,6 +68,16 @@ let
       deviceLines = lib.concatMapStrings (
         device: "AddDevice=${escapeSystemdExecArg device.source}\n"
       ) devices;
+      readOnlyLine = lib.optionalString (readOnly != null) "ReadOnly=${lib.boolToString readOnly}\n";
+      security = ctr.security or { };
+      dropCapabilities = security.dropCapabilities or [ ];
+      dropCapabilityLines = lib.concatMapStrings (
+        capability: "DropCapability=${escapeSystemdExecArg capability}\n"
+      ) dropCapabilities;
+      noNewPrivileges = security.noNewPrivileges or null;
+      noNewPrivilegesLine = lib.optionalString (
+        noNewPrivileges != null
+      ) "NoNewPrivileges=${lib.boolToString noNewPrivileges}\n";
       network = ctr.network or { };
       namespace = network.namespace or null;
       networkLine =
@@ -127,6 +138,9 @@ let
     + environmentFileLines
     + volumeLines
     + deviceLines
+    + readOnlyLine
+    + dropCapabilityLines
+    + noNewPrivilegesLine
     + networkLine
     + publishLines
     + serviceSection

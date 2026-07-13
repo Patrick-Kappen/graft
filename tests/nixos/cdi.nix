@@ -34,13 +34,14 @@
     machine.start()
     machine.wait_for_unit("multi-user.target")
 
-    with subtest("resolved Quadlet contains the qualified CDI reference"):
-        machine.succeed(
-            "grep -Fx 'AddDevice=graft.test/device=fake' "
-            "/etc/containers/systemd/cdi-runtime-system.container"
-        )
+    with subtest("resolved Quadlet contains CDI and hardening intent"):
+        source = "/etc/containers/systemd/cdi-runtime-system.container"
+        machine.succeed(f"grep -Fx 'AddDevice=graft.test/device=fake' {source}")
+        machine.succeed(f"grep -Fx 'ReadOnly=true' {source}")
+        machine.succeed(f"grep -Fx 'DropCapability=all' {source}")
+        machine.succeed(f"grep -Fx 'NoNewPrivileges=true' {source}")
 
-    with subtest("fake CDI registry edits reach the container"):
+    with subtest("CDI and hardening reach the container"):
         machine.succeed("systemctl start cdi-runtime-system.service")
         machine.succeed("test $(systemctl show cdi-runtime-system.service -P Result) = success")
         machine.succeed("test $(systemctl show cdi-runtime-system.service -P ActiveState) = inactive")
