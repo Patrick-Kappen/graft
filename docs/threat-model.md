@@ -266,9 +266,10 @@ not currently inspect, diff, promote, back up, or securely erase it.
 Do not put secrets in TOML, `config.container.environment`, command arguments,
 or generated text. Resolved JSON and generated source can be stored in readable
 Nix-store paths, and process environments or runtime metadata are not a robust
-secret boundary. `environmentFile` names a host path but Graft neither
-provisions it nor attests its permissions, ownership, lifecycle, or disclosure
-behavior.
+secret boundary. Each `environmentFile` entry passes one host path value to
+Quadlet, which resolves relative paths against the source-unit directory before
+passing them to Podman. Graft neither provisions the file nor attests traversal,
+symlinks, existence, permissions, ownership, lifecycle, or disclosure behavior.
 
 Typed secret and credential materialisation is unavailable; `config.secrets`
 fails closed. Design and implementation remain in [#143] and [#166]. Until then,

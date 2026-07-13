@@ -171,8 +171,9 @@ the same source-reference rule in their own contracts.
   target and relationship axes above.
 - **Dangerous and unavailable:** `Conflicts=`, `Upholds=`, `OnFailure=`,
   `OnSuccess=`, and stop propagation to external units can activate, retain, or
-  stop manager units outside the ordinary dependency direction. They require a
-  separate classification under the [Capability policy](capability-policy.md).
+  stop manager units outside the ordinary dependency direction. They are
+  classified as dangerous by the [Capability policy](capability-policy.md) and
+  still require a typed graph and implementation contract.
 - **Deferred:** `Requisite=` and reload propagation are not accepted without a
   concrete use case and contract.
 - **Forbidden:** raw `[Unit]`, host commands, and arbitrary systemd maps are not

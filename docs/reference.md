@@ -142,12 +142,15 @@ GREETING = "hello world"
 | `config.container.group` | string | Requires `user`; non-empty; no control characters; no GID syntax validation. | `Group=` |
 | `config.container.workingDir` | string | Non-empty; no control characters; no existence or creation check. | `WorkingDir=` |
 | `config.container.environment` | string map | Keys are non-empty, contain no control characters, whitespace, or `=`; values contain no control characters. | Sorted, quoted `Environment="KEY=value"` lines. |
-| `config.container.environmentFile` | list of strings | Ordered entries are non-empty and contain no control characters; files are not generated or checked. | Ordered, quoted `EnvironmentFile=` lines. |
+| `config.container.environmentFile` | list of strings | Ordered entries are non-empty and contain no control characters. Values may be absolute or relative; Graft does not check traversal, symlinks, existence, ownership, or permissions, and does not generate the files. | Ordered, quoted `EnvironmentFile=` lines; Quadlet resolves relative paths against the source-unit directory. |
 
 `workingDir` sets only the process directory inside the container. It does not
 copy a workspace or create a host mount. Environment values are not a secret
 transport, and Graft does not generate environment files or import the host
-environment.
+environment. Quoting preserves each value as one Quadlet argument. Quadlet
+resolves a relative value against the source-unit directory and passes one
+`--env-file` path to Podman; this is not systemd service
+`EnvironmentFile=` optional-file or wildcard syntax.
 
 ## Filesystem volumes
 
