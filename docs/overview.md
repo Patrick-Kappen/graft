@@ -72,9 +72,12 @@ Current CLI rules:
 - preserve user commands exactly
 - default `deploy.target` to `system`
 - support only `rootfs-store` today
-- include supported container, environment, filesystem, network, and service fields only when explicitly set
-- resolve typed workload dependencies through the explicit source set and preserve
-  exact validated external-unit identities
+- include supported container, environment, filesystem, network, and service
+  fields only when explicitly set
+- validate colon-free qualified CDI resource names while leaving host registry
+  policy to Podman and the operator
+- resolve typed workload dependencies through the explicit source set and
+  preserve exact validated external-unit identities
 - include `deploy.enable` only when explicitly set
 - never invent autostart
 

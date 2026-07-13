@@ -54,12 +54,13 @@ Omitted first-class intent may use a documented Graft or upstream default only
 when that absence is unambiguous. Successful schema validation means current
 supported intent, not merely parser-recognised future syntax.
 
-A qualified Container Device Interface (CDI) name is a planned first-class
-resource reference under [#203]. Graft will accept only the qualified name; the
-host administrator owns the CDI registry and its specs. A selected CDI spec can
-inject devices, mounts, environment values, and hooks into the OCI
-configuration, so review of the host-provided spec remains outside Graft's
-build-time validation.
+A qualified Container Device Interface (CDI) name is a current first-class
+resource reference implemented through [#203]. Graft accepts only a validated,
+colon-free qualified name without direct paths, target remapping, or
+permissions. The host administrator owns the CDI registry and its specs. A
+selected CDI spec can inject devices, mounts, environment values, and hooks into
+the OCI configuration, so review of the host-provided spec remains outside
+Graft's build-time validation.
 
 ## Dangerous requirements
 
@@ -120,7 +121,7 @@ but it does not make the original escape hatch acceptable.
 | --- | --- | --- | --- |
 | Current typed identity, package, command, lifecycle, startup, workload-dependency, and safe namespace intent | First-class | Current | Keep schema-backed, resolved, and mechanically rendered. Individual host crossings retain their documented boundaries. |
 | System versus user manager target selection | First-class | Current | This selects authority context, not guaranteed privilege: system and root-owned user managers are rootful; secure target defaults remain in [#139]. |
-| Qualified CDI resource name without target remapping or permissions | First-class | Planned in [#203] | Host registry/spec is trusted; Graft validates and renders only the qualified name. |
+| Qualified CDI resource name without target remapping or permissions | First-class | Current through [#203] | Host registry/spec is trusted; Graft validates and renders only the colon-free qualified name. |
 | Direct host device paths or directories, optional-device prefixes, target remapping, and permission modes | Dangerous | Deferred to [#142] and [#164] | Requires explicit device policy, target-specific behavior, and runtime authorization tests. |
 | Host-path, sensitive-source, or writable-host mounts, recursive propagation, and host sockets | Dangerous | Partly current; policy planned in [#142] and [#163] | Omitting `mode = "ro"` on a source-backed current volume can select an upstream writable default. This legacy exception violates dangerous requirement 2 and must become explicit or fail closed; it is not precedent for broader passthrough. |
 | Host environment-file path references | Dangerous | Current; credential replacement planned in [#143] and [#166] | One ordered non-empty, control-free path value per entry; Quadlet resolves relative paths against the source-unit directory. Graft does not attest traversal, symlinks, existence, ownership, permissions, lifecycle, or disclosure. |

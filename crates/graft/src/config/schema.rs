@@ -181,7 +181,7 @@ pub struct Config {
     pub runtime: Option<Runtime>,
     /// Supported Quadlet container settings.
     pub container: Option<Container>,
-    /// Supported filesystem volume settings.
+    /// Supported filesystem volume and CDI device settings.
     pub filesystem: Option<Filesystem>,
     /// Supported network namespace and published-port settings.
     pub network: Option<Network>,
@@ -351,8 +351,7 @@ pub struct Filesystem {
     pub mounts: Option<Vec<String>>,
     /// Ordered literal Quadlet `Volume=` entries.
     pub volumes: Option<Vec<FilesystemVolume>>,
-    /// Device passthrough (`[[config.filesystem.devices]]`).
-    #[schemars(skip)]
+    /// Ordered qualified CDI device references.
     pub devices: Option<Vec<Device>>,
 }
 
@@ -372,12 +371,20 @@ pub struct FilesystemVolume {
     pub mode: Option<String>,
 }
 
-/// A device passthrough entry (`[[config.filesystem.devices]]`).
-#[derive(Debug, Clone, Deserialize)]
+/// A qualified CDI device reference (`[[config.filesystem.devices]]`).
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct Device {
+    /// Colon-free CDI qualified name in `vendor/class=device` form.
+    #[schemars(regex(
+        pattern = r"^[A-Za-z][A-Za-z0-9._-]*[A-Za-z0-9]/[A-Za-z][A-Za-z0-9._-]*[A-Za-z0-9]=[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+    ))]
     pub source: String,
+    /// Reserved direct-device target remapping.
+    #[schemars(skip)]
     pub target: Option<String>,
+    /// Reserved direct-device permissions.
+    #[schemars(skip)]
     pub permissions: Option<String>,
 }
 
@@ -746,6 +753,26 @@ mod tests {
             runtime.command.as_deref(),
             Some(&["bash".to_string(), "-l".to_string()][..])
         );
+    }
+
+    #[test]
+    fn parses_cdi_device_source_and_reserved_direct_device_fields() {
+        let config = parse_toml(
+            r#"
+                [[config.filesystem.devices]]
+                source = "nvidia.com/gpu=all"
+                target = "/dev/gpu0"
+                permissions = "rwm"
+            "#,
+        )
+        .unwrap();
+
+        let devices = config.config.unwrap().filesystem.unwrap().devices.unwrap();
+
+        assert_eq!(devices.len(), 1);
+        assert_eq!(devices[0].source, "nvidia.com/gpu=all");
+        assert_eq!(devices[0].target.as_deref(), Some("/dev/gpu0"));
+        assert_eq!(devices[0].permissions.as_deref(), Some("rwm"));
     }
 
     #[test]

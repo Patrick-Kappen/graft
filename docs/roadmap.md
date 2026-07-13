@@ -21,8 +21,8 @@ The current implementation proves the core rootfs-store path:
 - `graft-pause` provides the default keep-alive command for implicit and
   long-running lifecycle intent; finite workloads require a command.
 - Common Quadlet fields are rendered for container identity, working directory,
-  quoted environment, environment files, published ports, volumes, service
-  timing, and typed systemd dependency relationships.
+  quoted environment, environment files, published ports, volumes, qualified
+  CDI references, service timing, and typed systemd dependency relationships.
 
 The generated TOML schema intentionally exposes only the implemented MVP
 contract. Additional parser-recognised roadmap fields fail closed; their status
@@ -185,9 +185,10 @@ schema. The current renderer covers useful basics, and later phases may promote
 typed fields into the schema, resolved JSON, and Quadlet output only when their
 full contract is implemented.
 
-The next scoped addition is a qualified CDI resource reference backed by a
-host-owned spec in [#203](https://github.com/Patrick-Kappen/graft/issues/203).
-It does not include direct device paths, remapping, or permissions.
+Qualified CDI resource references backed by host-owned specs are current through
+[#203](https://github.com/Patrick-Kappen/graft/issues/203). The narrow contract
+does not include direct device paths, remapping, or permissions; see
+[Container Device Interface references](cdi.md).
 
 Remaining areas include:
 

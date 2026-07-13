@@ -54,6 +54,7 @@ JSON:
 - `Rootfs=` comes from the generated rootfs store path.
 - `Exec=` comes from resolved `runtime.command`.
 - `Volume=/nix/store:/nix/store:ro` is always rendered for store symlinks.
+- Qualified resolved CDI references render as ordered `AddDevice=` lines.
 - Optional `[Unit]` dependency keys are rendered only from concrete resolved identities.
 - Optional `[Service]` keys are rendered only when resolved JSON contains them.
 - `[Container]` values that become generated command-line arguments escape `%` specifiers and `$` variables.
@@ -72,6 +73,7 @@ promised.
 | `Rootfs=<path>:O` | rootfs built from resolved `runtime.packages` |
 | `Exec=` | resolved `runtime.command` |
 | `Volume=/nix/store:/nix/store:ro` | required for Nix store symlinks |
+| `AddDevice=` | each ordered resolved `filesystem.devices[].source` value |
 
 Example with implicit or long-running lifecycle and no user command:
 
@@ -123,9 +125,20 @@ Typed `Network=` output supports `none` and resolved `.container` source-unit
 references. The source-unit form lets Quadlet add automatic `Requires=` and
 `After=` relationships; see [Container network intent](networking.md).
 
-Environment files, published ports, and volumes preserve user order. Environment
-variables are sorted by key. Environment-file path values and command argv are
-quoted for systemd argument parsing. Quadlet resolves relative environment-file
+Qualified CDI references render mechanically without direct-device target or
+permission suffixes:
+
+```ini
+AddDevice=nvidia.com/gpu=all
+```
+
+Quadlet translates each line to one Podman `--device` argument. The host CDI
+registry owns the resulting OCI edits; see
+[Container Device Interface references](cdi.md).
+
+Environment files, published ports, volumes, and CDI references preserve user
+order. Environment variables are sorted by key. Environment-file path values
+and command argv are quoted for systemd argument parsing. Quadlet resolves relative environment-file
 paths against the source-unit directory and passes each as one Podman
 `--env-file` argument; this is not systemd service `EnvironmentFile=` wildcard
 or optional-file syntax. Container values render literal `%` as `%%` and

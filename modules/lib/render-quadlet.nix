@@ -63,6 +63,10 @@ let
         in
         "Volume=${escapeSystemdExecArg mount}\n"
       ) volumes;
+      devices = filesystem.devices or [ ];
+      deviceLines = lib.concatMapStrings (
+        device: "AddDevice=${escapeSystemdExecArg device.source}\n"
+      ) devices;
       network = ctr.network or { };
       namespace = network.namespace or null;
       networkLine =
@@ -122,6 +126,7 @@ let
     + environmentLines
     + environmentFileLines
     + volumeLines
+    + deviceLines
     + networkLine
     + publishLines
     + serviceSection

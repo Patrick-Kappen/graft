@@ -85,8 +85,9 @@ fn schema_exposes_only_supported_fields() {
             &["lifecycle", "ordering", "requirement", "target"][..],
         ),
         ("Deploy", &["activation", "enable", "target"][..]),
+        ("Device", &["source"][..]),
         ("ExternalUnitDependencyTarget", &["externalUnit"][..]),
-        ("Filesystem", &["volumes"][..]),
+        ("Filesystem", &["devices", "volumes"][..]),
         ("FilesystemVolume", &["mode", "source", "target"][..]),
         ("Network", &["container", "mode", "publish"][..]),
         ("Runtime", &["command", "mode", "packages"][..]),
@@ -133,4 +134,10 @@ fn schema_exposes_only_supported_fields() {
         &["job", "long-running", "setup"],
     );
     assert_enum_values(&schema, "NetworkMode", &["container", "none"]);
+
+    assert_eq!(
+        schema["$defs"]["Device"]["properties"]["source"]["pattern"],
+        "^[A-Za-z][A-Za-z0-9._-]*[A-Za-z0-9]/[A-Za-z][A-Za-z0-9._-]*[A-Za-z0-9]=[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+    );
+    assert_eq!(schema["$defs"]["Device"]["required"][0], "source");
 }

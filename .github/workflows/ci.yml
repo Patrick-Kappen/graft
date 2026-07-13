@@ -197,6 +197,7 @@ jobs:
             .#checks.x86_64-linux.nixos-module-eval \
             .#checks.x86_64-linux.home-manager-module-eval \
             .#checks.x86_64-linux.quadlet-activation \
+            .#checks.x86_64-linux.quadlet-cdi \
             .#checks.x86_64-linux.quadlet-dependencies \
             .#checks.x86_64-linux.quadlet-lifecycle \
             .#checks.x86_64-linux.quadlet-network \
@@ -223,6 +224,22 @@ jobs:
 
       - name: Startup activation runtime test
         run: nix build .#packages.x86_64-linux.activation-runtime-test --no-link --print-build-logs
+
+  cdi_runtime:
+    name: cdi-runtime
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - name: Setup Nix
+        uses: ./.github/actions/setup-nix
+
+      - name: CDI runtime test
+        run: nix build .#packages.x86_64-linux.cdi-runtime-test --no-link --print-build-logs
 
   checks:
     name: checks
