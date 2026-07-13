@@ -83,6 +83,8 @@ intentionally has no output there.
 | `config.filesystem.volumes[].source` | Optional non-empty, control-free literal without `:` | `filesystem.volumes[].source` | Joined mechanically with target and mode | Source component of `Volume=` | Both | Current |
 | `config.filesystem.volumes[].target` | Required non-empty, control-free literal without `:` | `filesystem.volumes[].target` | Joined mechanically with source and mode | Target component of `Volume=` | Both | Current |
 | `config.filesystem.volumes[].mode` | Optional non-empty, control-free literal without `:`; requires source | `filesystem.volumes[].mode` | Joined mechanically with source and target | Mode/options component of `Volume=` | Both | Current |
+| `config.filesystem.devices` | Optional ordered list; empty is omitted; duplicate sources fail | `filesystem.devices` | Passed to the shared renderer | Ordered `AddDevice=` lines | Both | Current |
+| `config.filesystem.devices[].source` | Required colon-free qualified CDI name in `vendor/class=device` form; direct paths, malformed names, colons, and control characters fail | `filesystem.devices[].source` | Passed through mechanically | One `AddDevice=<source>` line; Quadlet translates it to one Podman `--device` argument | Both | Current |
 | `config.network.mode` | Optional `none` or `container`; absence preserves the Podman default; incompatible with `publish` when set | Optional typed `network.namespace` | Passed to the shared renderer | No line, `Network=none`, or a resolved `.container` reference | Both | Current |
 | `config.network.container` | Required safe Graft workload name for container mode; validates existence, target, lifecycle, enablement, self-reference, and cycles | `network.namespace.unit` | Passed to the shared renderer | `Network=<source>.container`; Quadlet adds dependencies | Both | Current |
 | `config.network.publish` | Optional ordered non-empty, control-free literals; only with implicit default mode | `network.publish` | Passed to the shared renderer | Ordered `PublishPort=` | Both | Current |
@@ -95,8 +97,9 @@ intentionally has no output there.
 
 Detailed lifecycle, startup, and namespace combinations live in
 [Workload lifecycle semantics](lifecycle.md),
-[Workload startup activation](activation.md), and
-[Container network intent](networking.md). Renderer quoting and generator-owned
+[Workload startup activation](activation.md),
+[Container network intent](networking.md), and
+[Container Device Interface references](cdi.md). Renderer quoting and generator-owned
 behavior live in [Quadlet output](quadlet.md).
 
 ## Reserved parser fields
@@ -115,7 +118,8 @@ yet.
 | `config.container.pod`, `entrypoint`, `stopSignal`, `stopTimeout`, `timezone`, `notify`, `runInit`, `environmentHost`, and `health.*` | Field-specific resolver error | Planned health/graceful behavior: [#146]; pod and host-environment contracts remain deferred |
 | `config.container.annotations`, `ip`, `ip6`, `networkAlias`, `exposeHostPort`, `uidMap`, `gidMap`, `subUidMap`, `subGidMap`, `shmSize`, `mask`, `unmaskPaths`, `sysctl`, and `logDriver` | Field-specific resolver error | Planned or deferred through [#141], [#145], [#146], and [#193] |
 | `config.container.podmanArgs` and `globalArgs` | Field-specific resolver error | Forbidden raw runtime passthrough; future needs require typed intent |
-| `config.filesystem.readOnly`, `readOnlyTmpfs`, `tmpfs`, `mounts`, and `devices` | Field-specific resolver error | Qualified CDI-only references are planned in [#203]; direct devices and broader mount policy remain in [#142] and [#164] |
+| `config.filesystem.readOnly`, `readOnlyTmpfs`, `tmpfs`, and `mounts` | Field-specific resolver error | Direct devices and broader mount policy remain in [#142] and [#164] |
+| `config.filesystem.devices[].target` and `config.filesystem.devices[].permissions` | Indexed field-specific resolver error | Direct-device remapping and permissions remain deferred to [#142] and [#164] |
 | `config.network.dns`, `dnsOption`, `dnsSearch`, and `addHost` | Field-specific resolver error | Planned network Phase B: [#193] |
 | `config.networks`, including nested labels and raw maps | Field-specific resolver error | Planned typed `.network` resources: [#147] |
 | `config.volumes`, including nested labels and raw maps | Field-specific resolver error | Planned typed `.volume` resources: [#148] |
@@ -136,8 +140,8 @@ fails closed.
 
 | Capability | Current input result | Class | Availability and owner |
 | --- | --- | --- | --- |
-| Qualified CDI resource name without remapping or permissions | Field-specific `config.filesystem.devices` error | First-class | Planned in [#203] |
-| Direct host devices, device directories, target remapping, and permissions | Field-specific `config.filesystem.devices` error | Dangerous | Deferred to [#142] and [#164] |
+| Qualified CDI resource name without remapping or permissions | Colon-free qualified `source` is accepted, ordered, and rendered as `AddDevice=`; host registry/spec is not inspected | First-class | Current through [#203] |
+| Direct host devices, device directories, target remapping, and permissions | Direct paths fail source validation; parser-reserved `target` and `permissions` return indexed field errors | Dangerous | Deferred to [#142] and [#164] |
 | Host network namespace sharing | Unsupported `config.network.mode` value | Dangerous | Planned in [#193] |
 | PID, IPC, UTS, user, or cgroup namespace sharing | Unsupported enum, unknown field, or field-specific error | Dangerous | Deferred until namespace-specific intent and target rules have an approved implementation issue |
 | `privileged` | Field-specific error | Dangerous | Deferred; [#163] keeps unsupported privileged intent rejected |
@@ -170,8 +174,9 @@ Graft contract.
 
 ## Tested upstream context
 
-Current generator fixtures use **Podman/Quadlet 5.8.2** and **systemd 260** from
-the project's pinned Nix environment. These are tested versions, not yet a
+Current generator fixtures use **Podman/Quadlet 5.8.2**, its Container Device
+Interface library **1.0.1**, and **systemd 260** from the project's pinned Nix
+environment. These are tested versions, not yet a
 formal minimum-version promise. The maintained compatibility contract, upgrade
 diffs, cgroup v2 prerequisites, and unsupported-version diagnostics remain in
 [#129](https://github.com/Patrick-Kappen/graft/issues/129).
@@ -180,6 +185,7 @@ Authoritative references used by the current implementation:
 
 - [Podman 5.8.2 Quadlet documentation](https://github.com/containers/podman/blob/5b263b5f5b48004a87caac44e67349a8266d9ef4/docs/source/markdown/podman-systemd.unit.5.md)
 - [Podman 5.8.2 `.container` generator source](https://github.com/containers/podman/blob/5b263b5f5b48004a87caac44e67349a8266d9ef4/pkg/systemd/quadlet/quadlet.go)
+- [CDI 1.0.1 qualified-name parser](https://github.com/cncf-tags/container-device-interface/blob/79790445c2d70820f6824eb42832d2efd0f08dd2/pkg/parser/parser.go)
 - [systemd 260 service documentation](https://www.freedesktop.org/software/systemd/man/260/systemd.service.html)
 - [systemd 260 unit documentation](https://www.freedesktop.org/software/systemd/man/260/systemd.unit.html)
 - [systemd 260 timer documentation](https://www.freedesktop.org/software/systemd/man/260/systemd.timer.html)

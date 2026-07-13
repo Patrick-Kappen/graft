@@ -77,8 +77,10 @@ The current model trusts:
   permissions, Quadlet generator, systemd manager, Podman runtime, OCI runtime,
   and host kernel;
 - host account, linger, authentication, firewall, DNS, storage, backup, and
-  update policy; and
-- any external systemd unit deliberately named by trusted TOML.
+  update policy;
+- any external systemd unit deliberately named by trusted TOML; and
+- the host CDI registry, each referenced CDI spec, and the software that
+  produces those specs.
 
 A compromise of these trusted computing base components can bypass Graft's
 controls. Graft pins and tests some build inputs, but it is not an independent
@@ -122,7 +124,8 @@ NixOS system path or Home Manager user path
 system or user systemd service
   ↓ Podman + OCI runtime
 container process sharing the host kernel
-  ↕ explicit mounts, environment files, network, and unit relationships
+  ↕ explicit mounts, CDI resources, environment files,
+     network, and unit relationships
 host resources and other workloads
 ```
 
@@ -192,9 +195,11 @@ read-only. `:O` provides writable runtime overlay state, which is not a durable
 or reviewable persistence contract. Explicit volumes are rendered after the
 fixed bind and may overlap a path below `/nix/store` or expose a store path at
 another target; Graft therefore does not guarantee an effectively read-only
-store tree. Volumes, environment files, published ports, shared network
-namespaces, and external-unit dependencies cross back into host or manager
-resources and must be reviewed as such.
+store tree. Volumes, CDI references, environment files, published ports, shared
+network namespaces, and external-unit dependencies cross back into host or
+manager resources and must be reviewed as such. Graft validates a CDI qualified name but
+does not inspect the host spec that can inject device nodes, mounts, environment
+values, and OCI hooks.
 
 ## Current security invariants and evidence
 
@@ -215,6 +220,7 @@ invariant; it does not extend the invariant beyond its stated scope.
 | **GRAFT-TM-09** | Current declarative startup changes do not implicitly remove mounted state, workspace markers, or foreign units. | Modules replace managed source-unit declarations only; no Graft cleanup control plane exists. | Removal, reboot, restoration, and preservation scenarios in [`activation.nix`][activation-test]. |
 | **GRAFT-TM-10** | External-unit dependency intent remains an exact, validated, visible same-manager unit name rather than host command text. | Strict concrete unit-name validation and fixed dependency axes in [`resolve.rs`][resolve-source]. | External-name, identity-collision, module parity, real Quadlet translation, and `systemd-analyze verify` tests. Unit existence and safety are host review responsibilities. |
 | **GRAFT-TM-11** | Repository quality gates scan for known dependency advisories, configured dependency-policy violations, recognized secret patterns in the current tracked-file snapshot, and high-confidence workflow findings before merge. | Pinned Nix tools and commit-pinned GitHub Actions; gitleaks uses its configured signatures and zizmor runs at `high` minimum confidence. | `cargo-audit`, `cargo-deny`, the tracked-file gitleaks scan, zizmor, actionlint, named CI jobs, and coverage in [`ci.yml`][ci-source]. These checks do not scan removed secrets in Git history; advisory databases, patterns, rules, and confidence thresholds can produce false negatives. They reduce supply-chain risk without proving the snapshot or dependencies benign. |
+| **GRAFT-TM-12** | Device intent accepted by Graft is limited to ordered, colon-free qualified CDI names; direct paths, duplicate references, target remapping, permissions, and arbitrary runtime arguments remain unavailable. The host CDI spec is trusted policy rather than validated Graft input. | CDI grammar and indexed field validation in [`resolve.rs`][resolve-source]; fixed `AddDevice=` rendering in [`render-quadlet.nix`][renderer-source]. | Resolver positive and negative CDI tests; generated-schema parity; `quadlet-cdi` NixOS/Home Manager generator verification and the controlled fake-spec runtime test wired through [`flake.nix`][flake-source]. |
 
 ## Threats, controls, and residual risk
 
@@ -238,8 +244,14 @@ Manager account's authority: Podman is rootless for a non-root account and
 rootful under UID 0. Graft does not enforce that account UID or per-container
 subordinate identities, capability drops, no-new-privileges, read-only mode,
 seccomp policy, security labels, a mandatory non-root container user, or
-workdir-only writes. Typed host device mappings are unavailable and fail closed;
-the runtime's standard device set remains upstream policy.
+workdir-only writes. Direct host device paths, remapping, and permissions remain
+unavailable and fail closed. Qualified CDI references are current, but their
+host-managed specs are trusted policy and can widen the container's effective
+OCI resources. System targets and root-owned user targets consume those specs
+through rootful Podman; non-root user targets consume them through rootless
+Podman and remain limited by host and runtime authorization. See
+[Container Device Interface references](cdi.md). The runtime's standard device
+set remains upstream policy.
 
 All explicit `config.security.*` intent currently fails closed. Therefore the
 runtime receives upstream defaults, not Graft's future secure defaults.
@@ -255,7 +267,10 @@ existence, ownership, symlink traversal, source type, target overlap, read-only
 policy, or an approved host-path allowlist. A volume can overlap the generated
 `/nix/store` bind or expose a store source at another target. Writable mounts let
 a compromised workload alter host-owned data within its runtime authority.
-Mount and device policy belongs to [#142] and [#164].
+Broader mount and direct-device policy belongs to [#142] and [#164]. Qualified CDI
+references do not attest the effective resources in the host spec; a spec may
+add devices, mounts, environment values, or hooks with the selected target's
+runtime authority.
 
 Overlay writes are disposable runtime state. Explicitly mounted persistent data
 needs separate permissions, backup, integrity, and retention policy. Graft does
@@ -353,6 +368,7 @@ For the current alpha, Graft explicitly does not guarantee:
 - isolation from other processes running as the same rootless host account;
 - secure container defaults, per-container UID/GID isolation, mount policy,
   resource limits, secret transport, or egress control;
+- safety, availability, or contents of host-managed CDI specs and resources;
 - safety, existence, or behavior of explicitly named external systemd units;
 - protection from host-local Quadlet shadowing or systemd drop-ins;
 - confidentiality of TOML, resolved JSON, commands, environment values, or
@@ -381,12 +397,12 @@ A security-sensitive design or implementation must:
    incompatible combinations; and
 7. update this model when assumptions or accepted residual risks change.
 
-The immediate sequence is the scoped qualified-CDI implementation in [#203],
-[#139] secure user/system defaults, and [#163] enforcement. Direct device paths
-remain governed by [#142] and [#164]. Identity and rootfs-integrity gaps are
-tracked by [#107] and [#108]. Related isolation, mount, secret, resource,
-shadowing, remote, and temporary-agent work is linked in the risk sections
-above.
+The scoped qualified-CDI implementation is current through [#203]. The next
+security sequence is [#139] secure user/system defaults followed by [#163]
+enforcement. Direct device paths remain governed by [#142] and [#164]. Identity
+and rootfs-integrity gaps are tracked by [#107] and [#108]. Related isolation,
+mount, secret, resource, shadowing, remote, and temporary-agent work is linked in
+the risk sections above.
 
 Suspected violations of these boundaries must follow the private
 [security reporting policy][security-policy], not a public issue.

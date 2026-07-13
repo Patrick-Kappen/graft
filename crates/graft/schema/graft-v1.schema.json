@@ -72,7 +72,7 @@
           ]
         },
         "filesystem": {
-          "description": "Supported filesystem volume settings.",
+          "description": "Supported filesystem volume and CDI device settings.",
           "anyOf": [
             {
               "$ref": "#/$defs/Filesystem"
@@ -344,6 +344,21 @@
         }
       ]
     },
+    "Device": {
+      "description": "A qualified CDI device reference (`[[config.filesystem.devices]]`).",
+      "type": "object",
+      "properties": {
+        "source": {
+          "description": "Colon-free CDI qualified name in `vendor/class=device` form.",
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9._-]*[A-Za-z0-9]/[A-Za-z][A-Za-z0-9._-]*[A-Za-z0-9]=[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "source"
+      ]
+    },
     "ExternalUnitDependencyTarget": {
       "description": "External systemd unit dependency target.",
       "type": "object",
@@ -364,6 +379,16 @@
       "description": "Filesystem configuration (`[config.filesystem]`).",
       "type": "object",
       "properties": {
+        "devices": {
+          "description": "Ordered qualified CDI device references.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/Device"
+          }
+        },
         "volumes": {
           "description": "Ordered literal Quadlet `Volume=` entries.",
           "type": [

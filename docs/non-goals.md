@@ -16,8 +16,9 @@ authoritative boundary.
 
 Deferred for v0.2:
 
-- no direct host-device paths, device remapping, or device permissions; a
-  qualified CDI-only slice is planned separately in [#203]
+- no direct host-device paths, optional-device prefixes, device remapping, or
+  device permissions; current [qualified CDI references](cdi.md) accept only a
+  colon-free resource name
 - no port syntax parser for `PublishPort=` values
 - no filesystem path existence checks for volumes
 - no volume mode allowlist beyond line-safety validation
@@ -130,5 +131,3 @@ Related tracking issues:
 - [#161: Design multi-host build, deployment, and remote lifecycle control](https://github.com/Patrick-Kappen/graft/issues/161)
 - [#100: Add graft lint for TOML diagnostics](https://github.com/Patrick-Kappen/graft/issues/100)
 - [#101: Add graft doctor for local environment diagnostics](https://github.com/Patrick-Kappen/graft/issues/101)
-
-[#203]: https://github.com/Patrick-Kappen/graft/issues/203

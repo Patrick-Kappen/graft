@@ -67,6 +67,7 @@ examples:
 - `config.container.environmentFile`
 - `config.network.publish`
 - `config.filesystem.volumes`
+- `config.filesystem.devices`
 
 Document the choice in `docs/reference.md`.
 

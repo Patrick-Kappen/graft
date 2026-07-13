@@ -1,0 +1,12 @@
+version = 1
+name = "graft-cdi-runtime"
+
+[config.runtime]
+packages = ["busybox"]
+command = ["/bin/sh", "-c", "test \"$GRAFT_CDI_TEST\" = injected"]
+
+[[config.filesystem.devices]]
+source = "graft.test/device=fake"
+
+[config.service]
+lifecycle = "job"

@@ -1,0 +1,8 @@
+version = 1
+name = "nix-check-cdi-system"
+
+[[config.filesystem.devices]]
+source = "nvidia.com/gpu=all"
+
+[[config.filesystem.devices]]
+source = "vendor.example/device_class=device-1.2"

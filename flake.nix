@@ -50,6 +50,11 @@
               inherit pkgs graftPackage;
             }
           );
+          cdi-runtime-test = pkgs.testers.runNixOSTest (
+            import ./tests/nixos/cdi.nix {
+              inherit graftPackage;
+            }
+          );
         }
       );
 
@@ -177,6 +182,34 @@
             ];
           };
 
+          cdiNixosEval = lib.evalModules {
+            specialArgs = { inherit pkgs; };
+            modules = [
+              moduleTestOptions
+              self.nixosModules.graft
+              {
+                services.graft = {
+                  enable = true;
+                  configRoot = ./tests/nix/cdi;
+                };
+              }
+            ];
+          };
+
+          cdiHomeManagerEval = lib.evalModules {
+            specialArgs = { inherit pkgs; };
+            modules = [
+              moduleTestOptions
+              self.homeManagerModules.graft
+              {
+                programs.graft = {
+                  enable = true;
+                  configRoot = ./tests/nix/cdi;
+                };
+              }
+            ];
+          };
+
           quickstartNixosEval = lib.evalModules {
             specialArgs = { inherit pkgs; };
             modules = [
@@ -242,6 +275,10 @@
             dependencyHomeManagerEval.config.xdg.configFile."containers/systemd/dependency-owner-user.container".text;
           homeManagerDependencyClientRendered =
             dependencyHomeManagerEval.config.xdg.configFile."containers/systemd/dependency-client-user.container".text;
+          nixosCdiRendered =
+            cdiNixosEval.config.environment.etc."containers/systemd/cdi-system.container".text;
+          homeManagerCdiRendered =
+            cdiHomeManagerEval.config.xdg.configFile."containers/systemd/cdi-user.container".text;
           quickstartNixosRendered =
             quickstartNixosEval.config.environment.etc."containers/systemd/graft-example.container".text;
           quickstartHomeManagerRendered =
@@ -852,6 +889,46 @@
                 grep -Fx "After=$owner" "$client"
                 grep -E "^ExecStart=.* --network container:nix-check-network-owner-$scope( |$)" "$client"
                 grep -E "^ExecStart=.* --network none( |$)" "$generated/network-none-$scope.service"
+              done
+
+              mkdir -p runtime/systemd
+              XDG_RUNTIME_DIR="$PWD/runtime" \
+                SYSTEMD_UNIT_PATH="$PWD/generated-system:$PWD/generated-user:${pkgs.podman}/share/systemd/user:${pkgs.systemd}/example/systemd/user:${pkgs.systemd}/example/systemd/system" \
+                ${lib.getExe' pkgs.systemd "systemd-analyze"} --user verify \
+                generated-system/*.service generated-user/*.service
+              cp generated-system/*.service generated-user/*.service $out/
+            '';
+
+          quadlet-cdi =
+            let
+              sources = {
+                system = pkgs.writeText "cdi-system.container" nixosCdiRendered;
+                user = pkgs.writeText "cdi-user.container" homeManagerCdiRendered;
+              };
+            in
+            pkgs.runCommand "graft-quadlet-cdi" { } ''
+              mkdir source-system source-user generated-system generated-user $out
+              cp ${sources.system} source-system/cdi-system.container
+              cp ${sources.user} source-user/cdi-user.container
+
+              for source in source-system/cdi-system.container source-user/cdi-user.container; do
+                test "$(grep -c '^AddDevice=' "$source")" = 2
+                test "$(grep -n '^AddDevice=' "$source" | cut -d: -f2-)" = \
+                  $'AddDevice=nvidia.com/gpu=all\nAddDevice=vendor.example/device_class=device-1.2'
+              done
+
+              QUADLET_UNIT_DIRS="$PWD/source-system" \
+                ${pkgs.podman}/libexec/podman/quadlet \
+                generated-system generated-system generated-system
+              QUADLET_UNIT_DIRS="$PWD/source-user" \
+                ${pkgs.podman}/libexec/podman/quadlet -user \
+                generated-user generated-user generated-user
+
+              for scope in system user; do
+                service="generated-$scope/cdi-$scope.service"
+                grep -F -- \
+                  "--device nvidia.com/gpu=all --device vendor.example/device_class=device-1.2" \
+                  "$service"
               done
 
               mkdir -p runtime/systemd

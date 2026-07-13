@@ -91,6 +91,7 @@ promised syntax or schedule.
 
 - **Configure workloads:** [Reference](reference.md),
   [Typed workload dependencies](dependencies.md),
+  [Container Device Interface references](cdi.md),
   [Capability status](capabilities.md), and the generated supported schema at
   `crates/graft/schema/graft-v1.schema.json`
 - **Understand output:** [Overview](overview.md), [Design](design.md), and

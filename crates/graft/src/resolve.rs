@@ -8,8 +8,8 @@ use serde::Serialize;
 use crate::config::schema::{
     Attach, Config, Container, ContainerConfig, Dependency, DependencyLifecycle,
     DependencyOrdering, DependencyRequirement, DependencyTarget, Deploy, DeployActivation,
-    DeployTarget, ExternalUnitDependencyTarget, Filesystem, FilesystemVolume, GraphRefs, Health,
-    Home, Network, NetworkMode, PackageOps, Quadlet, Resources, Runtime, Security, Service,
+    DeployTarget, Device, ExternalUnitDependencyTarget, Filesystem, FilesystemVolume, GraphRefs,
+    Health, Home, Network, NetworkMode, PackageOps, Quadlet, Resources, Runtime, Security, Service,
     ServiceLifecycle, Validation, WorkloadDependencyTarget, Workspace,
 };
 
@@ -168,6 +168,17 @@ pub struct ResolvedFilesystem {
     /// Optional volume mounts rendered as Quadlet `Volume=`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub volumes: Option<Vec<ResolvedFilesystemVolume>>,
+    /// Optional qualified CDI references rendered as Quadlet `AddDevice=`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub devices: Option<Vec<ResolvedDevice>>,
+}
+
+/// Resolved qualified CDI device reference.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolvedDevice {
+    /// Validated colon-free CDI qualified name.
+    pub source: String,
 }
 
 /// Resolved filesystem volume mount.
@@ -615,7 +626,7 @@ fn validate_unsupported_filesystem_intent(filesystem: Option<&Filesystem>) -> Re
         tmpfs,
         mounts,
         volumes: _,
-        devices,
+        devices: _,
     }) = filesystem
     else {
         return Ok(());
@@ -625,7 +636,6 @@ fn validate_unsupported_filesystem_intent(filesystem: Option<&Filesystem>) -> Re
     reject!(read_only_tmpfs, "config.filesystem.readOnlyTmpfs");
     reject!(tmpfs, "config.filesystem.tmpfs");
     reject!(mounts, "config.filesystem.mounts");
-    reject!(devices, "config.filesystem.devices");
 
     Ok(())
 }
@@ -1000,12 +1010,13 @@ fn resolve_filesystem(config: &ContainerConfig) -> Result<Option<ResolvedFilesys
         .as_ref()
         .and_then(|config| config.filesystem.as_ref());
     let volumes = resolve_volumes(filesystem)?;
+    let devices = resolve_devices(filesystem)?;
 
-    if volumes.is_none() {
+    if volumes.is_none() && devices.is_none() {
         return Ok(None);
     }
 
-    Ok(Some(ResolvedFilesystem { volumes }))
+    Ok(Some(ResolvedFilesystem { volumes, devices }))
 }
 
 fn resolve_volumes(
@@ -1056,6 +1067,101 @@ fn validate_volume_part(name: &str, value: &str) -> Result<()> {
 
     if value.contains(':') {
         bail!("filesystem volume {name} cannot contain ':'");
+    }
+
+    Ok(())
+}
+
+fn resolve_devices(filesystem: Option<&Filesystem>) -> Result<Option<Vec<ResolvedDevice>>> {
+    let Some(devices) = filesystem.and_then(|filesystem| filesystem.devices.as_ref()) else {
+        return Ok(None);
+    };
+
+    if devices.is_empty() {
+        return Ok(None);
+    }
+
+    let mut sources = BTreeSet::new();
+    let mut resolved = Vec::with_capacity(devices.len());
+
+    for (index, device) in devices.iter().enumerate() {
+        let resolved_device = resolve_device(device, index)?;
+        if !sources.insert(device.source.as_str()) {
+            bail!("config.filesystem.devices[{index}].source duplicates an earlier CDI reference");
+        }
+        resolved.push(resolved_device);
+    }
+
+    Ok(Some(resolved))
+}
+
+fn resolve_device(device: &Device, index: usize) -> Result<ResolvedDevice> {
+    if device.target.is_some() {
+        bail!(
+            "config.filesystem.devices[{index}].target is configured but CDI target remapping is not supported"
+        );
+    }
+    if device.permissions.is_some() {
+        bail!(
+            "config.filesystem.devices[{index}].permissions is configured but CDI permissions are not supported"
+        );
+    }
+
+    let field_name = format!("config.filesystem.devices[{index}].source");
+    validate_cdi_qualified_name(&field_name, &device.source)?;
+
+    Ok(ResolvedDevice {
+        source: device.source.clone(),
+    })
+}
+
+fn validate_cdi_qualified_name(field_name: &str, value: &str) -> Result<()> {
+    validate_non_empty_no_control(field_name, value)?;
+
+    if value.contains(':') {
+        bail!("{field_name} cannot contain ':'");
+    }
+
+    let Some((kind, name)) = value.split_once('=') else {
+        bail!("{field_name} must be a CDI qualified name in vendor/class=device form");
+    };
+    let Some((vendor, class)) = kind.split_once('/') else {
+        bail!("{field_name} must be a CDI qualified name in vendor/class=device form");
+    };
+
+    let valid_kind_component = |component: &str| {
+        let mut chars = component.chars();
+        let Some(first) = chars.next() else {
+            return false;
+        };
+        component.len() >= 2
+            && first.is_ascii_alphabetic()
+            && component
+                .chars()
+                .last()
+                .is_some_and(|last| last.is_ascii_alphanumeric())
+            && chars.all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-' | '_'))
+    };
+    let valid_device_name = || {
+        let mut chars = name.chars();
+        let Some(first) = chars.next() else {
+            return false;
+        };
+        first.is_ascii_alphanumeric()
+            && name
+                .chars()
+                .last()
+                .is_some_and(|last| last.is_ascii_alphanumeric())
+            && chars.all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-' | '_'))
+    };
+
+    if value.matches('=').count() != 1
+        || kind.matches('/').count() != 1
+        || !valid_kind_component(vendor)
+        || !valid_kind_component(class)
+        || !valid_device_name()
+    {
+        bail!("{field_name} must be a CDI qualified name in vendor/class=device form");
     }
 
     Ok(())
@@ -2277,10 +2383,6 @@ mod tests {
             "config.filesystem.mounts",
         ),
         (
-            "[config.filesystem]\ndevices = [{ source = \"/dev/null\" }]",
-            "config.filesystem.devices",
-        ),
-        (
             "[config.network]\ndns = [\"1.1.1.1\"]",
             "config.network.dns",
         ),
@@ -3301,6 +3403,7 @@ mod tests {
                     target: "/data".to_string(),
                     mode: None,
                 }]),
+                devices: None,
             })
         );
 
@@ -3331,6 +3434,7 @@ mod tests {
                     target: "/data".to_string(),
                     mode: None,
                 }]),
+                devices: None,
             })
         );
     }
@@ -3356,6 +3460,7 @@ mod tests {
                     target: "/config".to_string(),
                     mode: Some("ro".to_string()),
                 }]),
+                devices: None,
             })
         );
     }
@@ -3574,6 +3679,241 @@ mod tests {
         assert_eq!(
             error.to_string(),
             "filesystem volume mode cannot contain ':'"
+        );
+    }
+
+    #[test]
+    fn empty_devices_are_omitted() {
+        let config = filesystem_config(Filesystem {
+            devices: Some(Vec::new()),
+            ..Filesystem::default()
+        });
+
+        let resolved = resolve(&config).unwrap();
+
+        assert_eq!(resolved.filesystem, None);
+    }
+
+    #[test]
+    fn cdi_device_references_preserve_declaration_order() {
+        let config = filesystem_config(Filesystem {
+            devices: Some(vec![
+                Device {
+                    source: "nvidia.com/gpu=all".to_string(),
+                    target: None,
+                    permissions: None,
+                },
+                Device {
+                    source: "vendor.example/device_class=device-1.2".to_string(),
+                    target: None,
+                    permissions: None,
+                },
+            ]),
+            ..Filesystem::default()
+        });
+
+        let resolved = resolve(&config).unwrap();
+
+        assert_eq!(
+            resolved.filesystem,
+            Some(ResolvedFilesystem {
+                volumes: None,
+                devices: Some(vec![
+                    ResolvedDevice {
+                        source: "nvidia.com/gpu=all".to_string(),
+                    },
+                    ResolvedDevice {
+                        source: "vendor.example/device_class=device-1.2".to_string(),
+                    },
+                ]),
+            })
+        );
+        let json = serde_json::to_value(&resolved).unwrap();
+        assert_eq!(
+            json["filesystem"]["devices"][0]["source"],
+            "nvidia.com/gpu=all"
+        );
+        assert_eq!(
+            json["filesystem"]["devices"][1]["source"],
+            "vendor.example/device_class=device-1.2"
+        );
+        assert_eq!(json["filesystem"]["devices"][0].get("target"), None);
+        assert_eq!(json["filesystem"]["devices"][0].get("permissions"), None);
+    }
+
+    #[test]
+    fn volumes_and_cdi_devices_resolve_together() {
+        let config = filesystem_config(Filesystem {
+            volumes: Some(vec![FilesystemVolume {
+                source: None,
+                target: "/data".to_string(),
+                mode: None,
+            }]),
+            devices: Some(vec![Device {
+                source: "nvidia.com/gpu=all".to_string(),
+                target: None,
+                permissions: None,
+            }]),
+            ..Filesystem::default()
+        });
+
+        let resolved = resolve(&config).unwrap();
+
+        assert_eq!(
+            resolved.filesystem,
+            Some(ResolvedFilesystem {
+                volumes: Some(vec![ResolvedFilesystemVolume {
+                    source: None,
+                    target: "/data".to_string(),
+                    mode: None,
+                }]),
+                devices: Some(vec![ResolvedDevice {
+                    source: "nvidia.com/gpu=all".to_string(),
+                }]),
+            })
+        );
+    }
+
+    #[test]
+    fn malformed_cdi_device_sources_return_field_specific_errors() {
+        let cases = [
+            ("", "config.filesystem.devices[0].source cannot be empty"),
+            ("  ", "config.filesystem.devices[0].source cannot be empty"),
+            (
+                "nvidia.com/gpu=al\nl",
+                "config.filesystem.devices[0].source cannot contain control characters",
+            ),
+            (
+                "/dev/nvidia0",
+                "config.filesystem.devices[0].source must be a CDI qualified name in vendor/class=device form",
+            ),
+            (
+                "nvidia.com/gpu",
+                "config.filesystem.devices[0].source must be a CDI qualified name in vendor/class=device form",
+            ),
+            (
+                "nvidia.com=all",
+                "config.filesystem.devices[0].source must be a CDI qualified name in vendor/class=device form",
+            ),
+            (
+                "nvidia.com/gpu/extra=all",
+                "config.filesystem.devices[0].source must be a CDI qualified name in vendor/class=device form",
+            ),
+            (
+                "nvidia.com/gpu=all=extra",
+                "config.filesystem.devices[0].source must be a CDI qualified name in vendor/class=device form",
+            ),
+            (
+                "_nvidia/gpu=all",
+                "config.filesystem.devices[0].source must be a CDI qualified name in vendor/class=device form",
+            ),
+            (
+                "a/gpu=all",
+                "config.filesystem.devices[0].source must be a CDI qualified name in vendor/class=device form",
+            ),
+            (
+                "nvidia.com/g=all",
+                "config.filesystem.devices[0].source must be a CDI qualified name in vendor/class=device form",
+            ),
+            (
+                "nvidia.com/gpu_=all",
+                "config.filesystem.devices[0].source must be a CDI qualified name in vendor/class=device form",
+            ),
+            (
+                "nvidia.com/gpu=-all",
+                "config.filesystem.devices[0].source must be a CDI qualified name in vendor/class=device form",
+            ),
+            (
+                "nvidiä.com/gpu=all",
+                "config.filesystem.devices[0].source must be a CDI qualified name in vendor/class=device form",
+            ),
+            (
+                "nvidia.com/gpu=device:variant",
+                "config.filesystem.devices[0].source cannot contain ':'",
+            ),
+        ];
+
+        for (source, expected) in cases {
+            let config = filesystem_config(Filesystem {
+                devices: Some(vec![Device {
+                    source: source.to_string(),
+                    target: None,
+                    permissions: None,
+                }]),
+                ..Filesystem::default()
+            });
+
+            let error = resolve(&config).unwrap_err();
+
+            assert_eq!(
+                error.to_string(),
+                expected,
+                "unexpected diagnostic for {source:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn duplicate_cdi_device_source_returns_indexed_error() {
+        let config = filesystem_config(Filesystem {
+            devices: Some(vec![
+                Device {
+                    source: "nvidia.com/gpu=all".to_string(),
+                    target: None,
+                    permissions: None,
+                },
+                Device {
+                    source: "nvidia.com/gpu=all".to_string(),
+                    target: None,
+                    permissions: None,
+                },
+            ]),
+            ..Filesystem::default()
+        });
+
+        let error = resolve(&config).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "config.filesystem.devices[1].source duplicates an earlier CDI reference"
+        );
+    }
+
+    #[test]
+    fn cdi_device_target_remapping_returns_indexed_error() {
+        let config = filesystem_config(Filesystem {
+            devices: Some(vec![Device {
+                source: "nvidia.com/gpu=all".to_string(),
+                target: Some("/dev/gpu0".to_string()),
+                permissions: None,
+            }]),
+            ..Filesystem::default()
+        });
+
+        let error = resolve(&config).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "config.filesystem.devices[0].target is configured but CDI target remapping is not supported"
+        );
+    }
+
+    #[test]
+    fn cdi_device_permissions_return_indexed_error() {
+        let config = filesystem_config(Filesystem {
+            devices: Some(vec![Device {
+                source: "nvidia.com/gpu=all".to_string(),
+                target: None,
+                permissions: Some("rwm".to_string()),
+            }]),
+            ..Filesystem::default()
+        });
+
+        let error = resolve(&config).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "config.filesystem.devices[0].permissions is configured but CDI permissions are not supported"
         );
     }
 

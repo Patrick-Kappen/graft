@@ -9,6 +9,7 @@ Related authoritative sources:
 
 - [Graft v1 JSON Schema](https://github.com/Patrick-Kappen/graft/blob/main/crates/graft/schema/graft-v1.schema.json) — accepted current TOML shape;
 - [Capability status](capabilities.md) — each field's parser, resolver, Nix, and Quadlet stages plus deferred and forbidden boundaries;
+- [Container Device Interface references](cdi.md) — qualified device-name syntax and host registry trust boundary;
 - [Roadmap](roadmap.md) — planned implementation direction;
 - [Non-goals and deferred scope](non-goals.md) — deliberate current exclusions.
 
@@ -179,6 +180,34 @@ paths elsewhere. The current contract does not attest path safety or
 confinement; review such mounts explicitly. Typed mount policy remains tracked
 by
 [#142](https://github.com/Patrick-Kappen/graft/issues/142) and
+[#164](https://github.com/Patrick-Kappen/graft/issues/164).
+
+## CDI devices
+
+```toml
+[[config.filesystem.devices]]
+source = "nvidia.com/gpu=all"
+```
+
+`config.filesystem.devices` is an optional ordered list. Each entry requires
+only `source`, a colon-free qualified CDI name in `vendor/class=device` form.
+Graft rejects malformed names, direct paths, control characters, colons,
+duplicates, target remapping, and permission modes before materialisation. An
+empty list is omitted.
+
+Each resolved entry keeps only its source and renders as one ordered line:
+
+```ini
+AddDevice=nvidia.com/gpu=all
+```
+
+Graft does not inspect or provision the host CDI registry. A selected host spec
+may inject device nodes, mounts, environment values, and OCI hooks; its
+existence, contents, permissions, lifecycle, and runtime authorization remain
+host responsibilities. See
+[Container Device Interface references](cdi.md) for the exact accepted subset,
+target-specific authority, and runtime boundary. Direct devices remain tracked
+by [#142](https://github.com/Patrick-Kappen/graft/issues/142) and
 [#164](https://github.com/Patrick-Kappen/graft/issues/164).
 
 ## Network

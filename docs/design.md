@@ -20,8 +20,10 @@ between long-running services, finite jobs, and retained setup jobs is defined
 in [Workload lifecycle semantics](lifecycle.md). Explicit manager-start policy
 is defined separately in [Workload startup activation](activation.md). The
 approved typed namespace, shared-container reference, and network security
-boundaries are defined in [Container network intent](networking.md). Security
-assumptions, target authority, and current invariant evidence are defined in
+boundaries are defined in [Container network intent](networking.md). Qualified
+host-managed resource references are defined in
+[Container Device Interface references](cdi.md). Security assumptions, target
+authority, and current invariant evidence are defined in
 [Threat model and trust boundaries](threat-model.md). The boundary between
 first-class typed intent, dangerous explicit authority, and forbidden escape
 hatches is defined in [Capability policy](capability-policy.md).
@@ -146,7 +148,7 @@ The CLI may only add defaults that belong to Graft semantics.
 | `deploy.target` | default `system`, unless user sets `user` |
 | `config.runtime.mode` | currently only `rootfs-store` |
 | supported container fields | no defaults; include only if user sets them |
-| environment, publish, volumes | no defaults; preserve deterministic ordering rules |
+| environment, publish, volumes, CDI devices | no defaults; preserve deterministic ordering rules |
 | `dependencies` | no defaults; typed relations resolve to sorted concrete source-unit or external-unit identities |
 | `config.network.mode` | absent preserves Quadlet's target-specific default; `none` and typed container references are supported |
 | `config.service.lifecycle` | absent means Quadlet's long-running notify default; explicit intent resolves to typed service fields |
@@ -245,7 +247,9 @@ Currently proven:
 - system/rootful Quadlet runtime
 - non-root Home Manager user/rootless Quadlet runtime
 - useful Quadlet rendering for container identity, working directory,
-  environment, environment files, published ports, volumes, and service timing
+  environment, environment files, published ports, volumes, qualified CDI
+  references, and service timing
+- fake-spec CDI runtime translation without physical device hardware
 - clean keep-alive shutdown
 
 Typed long-running, finite-job, and retained setup-job behavior is defined in
