@@ -58,8 +58,8 @@ default keep-alive commands.
 ### CLI
 
 The CLI translates TOML into a resolved JSON spec and writes that JSON to
-stdout. The CLI owns defaults, dependencies, validation, and translation from
-Graft concepts to the resolved spec.
+stdout. The CLI owns dependencies, validation, translation, and defaults
+represented in the resolved spec.
 
 Current CLI rules:
 
@@ -89,7 +89,9 @@ JSON and mechanically:
 5. render the Quadlet `.container` file
 6. place the file in the matching Quadlet search path
 
-The modules do not decide defaults or interpret TOML semantics.
+The modules do not infer semantic defaults or interpret TOML relationships.
+They apply the documented materialisation rule that absent `deploy.enable`
+means render.
 
 ## IFD and JSON stdout
 

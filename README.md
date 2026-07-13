@@ -105,8 +105,10 @@ Nix-store rootfs + Quadlet .container
 systemd service → Podman container
 ```
 
-The CLI owns defaults, validation, and semantic decisions. Nix modules remain
-mechanical materialisers. Quadlet generates units, systemd owns lifecycle, and
+The CLI owns validation, semantic decisions, and defaults represented in
+resolved JSON. Nix modules remain mechanical materialisers; absent
+`deploy.enable` is the documented rule to render. Quadlet generates units,
+systemd owns lifecycle, and
 Podman runs the containers. See [Design](docs/design.md) and
 [Quadlet output](docs/quadlet.md) for the contracts.
 

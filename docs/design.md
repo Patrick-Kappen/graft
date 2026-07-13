@@ -76,7 +76,7 @@ resolvedByFilename = builtins.fromJSON (builtins.readFile resolvedSetJson);
 
 The CLI owns business logic:
 
-- applying Graft defaults
+- applying defaults represented in resolved JSON
 - resolving typed workload and external-unit dependencies
 - selecting the keep-alive command
 - validating supported runtime modes
@@ -162,7 +162,8 @@ The NixOS and Home Manager modules read resolved JSON and do mechanical work:
 5. render the Quadlet `.container` file
 6. place it in the matching Quadlet search path
 
-They do not decide:
+Beyond mechanically rendering when `deploy.enable` is absent, they do not
+decide:
 
 - which default command to use
 - which implicit package is needed
