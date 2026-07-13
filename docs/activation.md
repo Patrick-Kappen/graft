@@ -195,8 +195,8 @@ first Graft contract exposes only the fixed `WantedBy` mapping above:
 - `Alias` changes unit identity and must wait for the identity contract in
   [#107](https://github.com/Patrick-Kappen/graft/issues/107).
 
-Raw `[Install]` passthrough remains subject to the dangerous-capability policy in
-[#128](https://github.com/Patrick-Kappen/graft/issues/128). It is not an interim
+Raw `[Install]` passthrough is forbidden by the
+[Capability policy](capability-policy.md). It is not an interim
 path for startup activation.
 
 ## Implemented scope and checks

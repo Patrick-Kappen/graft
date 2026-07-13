@@ -95,8 +95,9 @@ promised syntax or schedule.
   `crates/graft/schema/graft-v1.schema.json`
 - **Understand output:** [Overview](overview.md), [Design](design.md), and
   [Quadlet output](quadlet.md)
-- **Understand boundaries:** [Threat model and trust boundaries](threat-model.md)
-  and [Non-goals and deferred scope](non-goals.md)
+- **Understand boundaries:** [Threat model and trust boundaries](threat-model.md),
+  [Capability policy](capability-policy.md), and
+  [Non-goals and deferred scope](non-goals.md)
 - **Track direction:** [Roadmap](roadmap.md) and [Long-term vision](vision.md)
 - **Contribute:** [Repository contribution entry point](https://github.com/Patrick-Kappen/graft/contribute)
   and [Development](development.md)

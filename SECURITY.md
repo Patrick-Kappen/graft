@@ -63,9 +63,10 @@ only when that account is non-root, and Graft does not enforce the UID.
 Repository intent must remain constrained by trusted host and security policy.
 
 The current assumptions, invariants, and accepted residual risks are defined in
-[Threat model and trust boundaries](docs/threat-model.md). Secure defaults and
-capability policy remain active work in the
-[security roadmap](docs/roadmap.md#security-hardening). Do not infer
+[Threat model and trust boundaries](docs/threat-model.md). First-class,
+dangerous, and forbidden authority is defined in the
+[Capability policy](docs/capability-policy.md). Secure defaults remain active
+work in the [security roadmap](docs/roadmap.md#security-hardening). Do not infer
 unimplemented isolation guarantees from future roadmap or vision text.
 
 ## Disclosure and response expectations

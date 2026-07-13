@@ -16,6 +16,8 @@ authoritative boundary.
 
 Deferred for v0.2:
 
+- no direct host-device paths, device remapping, or device permissions; a
+  qualified CDI-only slice is planned separately in [#203]
 - no port syntax parser for `PublishPort=` values
 - no filesystem path existence checks for volumes
 - no volume mode allowlist beyond line-safety validation
@@ -85,7 +87,10 @@ later interactive-workspace access contract; see [Long-term vision](vision.md).
 
 Some upstream syntaxes are broad and already validated by Podman, Quadlet, or
 systemd. For those fields, Graft should prefer line-safe passthrough until a
-separate policy issue exists.
+separate policy issue exists. This rule does not authorize security-sensitive
+runtime authority such as devices, namespace sharing, capability additions, or
+host commands; those remain governed by the
+[Capability policy](capability-policy.md).
 
 Current examples:
 
@@ -125,3 +130,5 @@ Related tracking issues:
 - [#161: Design multi-host build, deployment, and remote lifecycle control](https://github.com/Patrick-Kappen/graft/issues/161)
 - [#100: Add graft lint for TOML diagnostics](https://github.com/Patrick-Kappen/graft/issues/100)
 - [#101: Add graft doctor for local environment diagnostics](https://github.com/Patrick-Kappen/graft/issues/101)
+
+[#203]: https://github.com/Patrick-Kappen/graft/issues/203

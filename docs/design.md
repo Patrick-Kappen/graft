@@ -22,7 +22,9 @@ is defined separately in [Workload startup activation](activation.md). The
 approved typed namespace, shared-container reference, and network security
 boundaries are defined in [Container network intent](networking.md). Security
 assumptions, target authority, and current invariant evidence are defined in
-[Threat model and trust boundaries](threat-model.md).
+[Threat model and trust boundaries](threat-model.md). The boundary between
+first-class typed intent, dangerous explicit authority, and forbidden escape
+hatches is defined in [Capability policy](capability-policy.md).
 
 ## TOML is user intent
 
@@ -278,6 +280,8 @@ The high-level constraints are:
 
 - TOML should not become raw Quadlet.
 - TOML should not become raw Nix.
+- Capability expansion must follow the
+  [Capability policy](capability-policy.md), not raw escape hatches.
 - Nix modules should not contain business logic.
 - Packages should not be installed ad-hoc inside containers.
 - Containers should not auto-start unless explicitly configured.
