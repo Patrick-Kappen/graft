@@ -112,7 +112,7 @@ command = ["bash", "-c", "exec /bin/graft-pause"]
 | Field | Type | Default | Validation and effect |
 | --- | --- | --- | --- |
 | `config.runtime.mode` | string | `rootfs-store` | Only `rootfs-store` is supported. |
-| `config.runtime.packages` | list of strings | `[]` | Entries must be non-empty and contain no whitespace or control characters. Names resolve from the target configuration's trusted `pkgs`. |
+| `config.runtime.packages` | list of strings | `[]` | Entries must be non-empty and contain no whitespace or control characters. `graft-pause` resolves from the host-selected Graft package; other names resolve from the target configuration's trusted `pkgs`. |
 | `config.runtime.command` | non-empty list of strings | `[/bin/graft-pause]` for implicit or long-running lifecycle | Entries must be non-empty and contain no control characters. `job` and `setup` require an explicit command. The argv is preserved and rendered as quoted `Exec=`. |
 
 `graft-pause` is always added to the resolved package list. No default shell,

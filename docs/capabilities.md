@@ -59,7 +59,7 @@ intentionally has no output there.
 | `deploy.target` | `system` or `user`; defaults to `system` | Effective `deploy.target` | Selects NixOS or Home Manager output | Selects system or user manager | Both | Current |
 | `deploy.activation` | Optional `startup`; no aliases or arbitrary targets | `install.wantedBy` | Renders a fixed install relationship | `WantedBy=multi-user.target` or `default.target` | Target-specific | Current |
 | `config.runtime.mode` | Optional; only `rootfs-store`, which is also the default | `runtime.mode` | Selects the Nix-store rootfs backend | `Rootfs=<store-path>:O` | Both | Current |
-| `config.runtime.packages` | Optional ordered non-empty Nix package names | `runtime.packages`, always including `graft-pause` | Resolves names from the target `pkgs` and builds the rootfs | Added to the generated rootfs path; explicit mounts may hide paths | Both | Current |
+| `config.runtime.packages` | Optional ordered non-empty Nix package names | `runtime.packages`, always including `graft-pause` | Resolves `graft-pause` from host-selected `cfg.package`, other names from target `pkgs`, and builds the rootfs | Added to the generated rootfs path; explicit mounts may hide paths | Both | Current |
 | `config.runtime.command` | Optional non-empty argv with non-empty, control-free entries; `job` and `setup` require it | `runtime.command`; defaults to `/bin/graft-pause` only for implicit or long-running lifecycle | Passed to the shared renderer | Quoted `Exec=` | Both | Current |
 | `config.container.hostname` | Optional non-empty, control-free literal | `container.hostname` | Passed through mechanically | `HostName=` | Both | Current |
 | `config.container.user` | Optional non-empty, control-free literal | `container.user` | Passed through mechanically | `User=` | Both | Current |
@@ -131,7 +131,7 @@ classification and future opt-in policy remain owned by
 | `Conflicts=`, `Upholds=`, failure handlers, and stop propagation to external units | Unknown field or raw-map error | Dangerous; activation and reverse lifecycle effects require typed policy under [#128] |
 | `Requisite=` and reload propagation | Unknown field or raw-map error | Deferred until a concrete typed use case exists |
 | Raw `[Unit]`, `[Service]`, `[Install]`, host `ExecStart*`/`ExecStop*`, and host shell | Unknown field or raw-map error | Forbidden; only reviewed typed dependencies, lifecycle, timing, and startup intent may produce their fixed directives |
-| Arbitrary Nix expressions or package repositories in TOML | Unknown field or package lookup error | Forbidden; the trusted host package set owns evaluation |
+| Arbitrary Nix expressions or package repositories in TOML | Unknown field or package lookup error | Forbidden; trusted host package sources own evaluation |
 
 ## Artifact and Quadlet resource scope
 
