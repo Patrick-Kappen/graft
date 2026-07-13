@@ -172,7 +172,7 @@ the same source-reference rule in their own contracts.
 - **Dangerous and unavailable:** `Conflicts=`, `Upholds=`, `OnFailure=`,
   `OnSuccess=`, and stop propagation to external units can activate, retain, or
   stop manager units outside the ordinary dependency direction. They require a
-  separate typed policy under [#128](https://github.com/Patrick-Kappen/graft/issues/128).
+  separate classification under the [Capability policy](capability-policy.md).
 - **Deferred:** `Requisite=` and reload propagation are not accepted without a
   concrete use case and contract.
 - **Forbidden:** raw `[Unit]`, host commands, and arbitrary systemd maps are not

@@ -7,6 +7,7 @@
 - [Long-term vision](vision.md)
 - [Design](design.md)
 - [Threat model and trust boundaries](threat-model.md)
+- [Capability policy](capability-policy.md)
 - [Workload lifecycle semantics](lifecycle.md)
 - [Workload startup activation](activation.md)
 - [Typed workload dependencies](dependencies.md)

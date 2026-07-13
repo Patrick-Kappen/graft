@@ -159,15 +159,17 @@ turn containers into mutable images.
 ## Security hardening
 
 The current [Threat model and trust boundaries](threat-model.md) records what
-the MVP protects and trusts. The current implementation proves the flow, not
-the final isolation model.
+the MVP protects and trusts. The [Capability policy](capability-policy.md)
+classifies first-class intent, dangerous authority, and forbidden escape
+hatches. The current implementation proves the flow, not the final isolation
+model.
 
 Planned hardening:
 
 - `userns=auto`
 - per-container limited UIDs
 - workdir-only write access
-- explicit mount policies
+- explicit mount and direct-device policies
 - explicit network policies
 - secrets support
 - resource limits
@@ -182,6 +184,10 @@ The parser contains reserved roadmap concepts beyond the generated supported
 schema. The current renderer covers useful basics, and later phases may promote
 typed fields into the schema, resolved JSON, and Quadlet output only when their
 full contract is implemented.
+
+The next scoped addition is a qualified CDI resource reference backed by a
+host-owned spec in [#203](https://github.com/Patrick-Kappen/graft/issues/203).
+It does not include direct device paths, remapping, or permissions.
 
 Remaining areas include:
 

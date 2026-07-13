@@ -106,8 +106,10 @@ mode = "host"
 It maps to `Network=host`, but is not part of the first implementation phase.
 Host networking removes the separate network namespace, exposes host loopback
 and interfaces to the workload, and makes container port publication
-meaningless. It is dangerous intent and must satisfy the capability policy in
-[#128](https://github.com/Patrick-Kappen/graft/issues/128) before support lands.
+meaningless. It is dangerous intent under the
+[Capability policy](capability-policy.md) and remains unavailable pending the
+typed implementation in
+[#193](https://github.com/Patrick-Kappen/graft/issues/193).
 The mode does not configure or attest to host firewall policy.
 
 ## Mode matrix
@@ -117,7 +119,7 @@ The mode does not configure or attest to host firewall policy.
 | mode absent | no `Network=` | Podman target-specific default | A |
 | `mode = "none"` | `Network=none` | loopback only, excluding other mounted communication paths | A |
 | `mode = "container"` plus reference | `Network=<source>.container` | exactly the referenced workload's network namespace | A |
-| `mode = "host"` | `Network=host` | host network namespace; dangerous | B, after #128 |
+| `mode = "host"` | `Network=host` | host network namespace; dangerous | B, through #193 |
 
 Only these values belong to the approved contract. Values such as `bridge`,
 `slirp4netns`, `pasta`, arbitrary network names, and literal
@@ -272,7 +274,8 @@ and the broader Phase B remain in
 
 ## Phase B boundary
 
-Phase B may add the approved host mode after #128 and design typed intent for:
+Phase B may add the dangerous host mode under the capability policy and design
+typed intent for:
 
 - loopback versus public published-port binds;
 - network aliases;

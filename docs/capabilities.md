@@ -1,8 +1,10 @@
 # Capability status
 
-This page is the authoritative status boundary between current Graft intent,
-reserved parser fields, dangerous capabilities, forbidden passthrough, and
-future design. The [Reference](reference.md) explains current field semantics; the generated
+This page is the authoritative availability boundary between current Graft
+intent, reserved parser fields, and future design. The
+[Capability policy](capability-policy.md) separately defines first-class,
+dangerous, and forbidden classes. The [Reference](reference.md) explains current
+field semantics; the generated
 [Graft v1 JSON Schema](https://github.com/Patrick-Kappen/graft/blob/main/crates/graft/schema/graft-v1.schema.json)
 is the machine-readable current-input contract.
 
@@ -16,18 +18,28 @@ is the machine-readable current-input contract.
 | Current machine-readable input | [Graft v1 JSON Schema](https://github.com/Patrick-Kappen/graft/blob/main/crates/graft/schema/graft-v1.schema.json) | Generated-versus-tracked Rust schema test |
 | Capability and pipeline status | This page | `documentation-drift` rejects missing, extra, or duplicate current paths |
 | Current security assumptions and invariants | [Threat model and trust boundaries](threat-model.md) | Invariants link to their implementation and test evidence |
+| Capability class and implementation gates | [Capability policy](capability-policy.md) | Security-sensitive work must classify authority before schema inclusion |
 | Future direction and exclusions | [Roadmap](roadmap.md), [Vision](vision.md), and [Non-goals](non-goals.md) | Must not be presented as runnable current syntax |
 | Upstream implementation details | Versioned links in [Tested upstream context](#tested-upstream-context) | Compatibility expansion remains owned by [#129] |
 
-## Status definitions
+## Availability and class
 
-| Status | Meaning |
+| Availability | Meaning |
 | --- | --- |
 | **Current** | Typed, validated, resolved, mechanically materialised, documented, and covered by the applicable tests. |
 | **Planned** | Owned by an approved implementation issue but unavailable in normal configuration. |
 | **Deferred** | Recognised as possible future scope, without an implemented contract. |
-| **Dangerous** | Unavailable security-sensitive intent that requires typed policy and explicit review before implementation. |
-| **Forbidden** | Not a Graft input path; unrestricted passthrough or host execution will not be accepted. |
+
+| Class | Meaning |
+| --- | --- |
+| **First-class** | Dedicated typed intent suitable for ordinary reviewed configuration. |
+| **Dangerous** | Dedicated explicit intent that exposes unusual host, manager, namespace, or privilege authority. |
+| **Forbidden** | An unrestricted escape hatch or host-execution path that Graft TOML will not accept. |
+
+Class and availability are independent: a dangerous capability can be current,
+and a planned capability can be first-class. See the
+[Capability policy](capability-policy.md) for implementation gates and the
+classification matrix.
 
 A parser-recognised field is not automatically supported. Normal resolution
 fails closed when any reserved field is explicitly configured, including
@@ -103,11 +115,11 @@ yet.
 | `config.container.pod`, `entrypoint`, `stopSignal`, `stopTimeout`, `timezone`, `notify`, `runInit`, `environmentHost`, and `health.*` | Field-specific resolver error | Planned health/graceful behavior: [#146]; pod and host-environment contracts remain deferred |
 | `config.container.annotations`, `ip`, `ip6`, `networkAlias`, `exposeHostPort`, `uidMap`, `gidMap`, `subUidMap`, `subGidMap`, `shmSize`, `mask`, `unmaskPaths`, `sysctl`, and `logDriver` | Field-specific resolver error | Planned or deferred through [#141], [#145], [#146], and [#193] |
 | `config.container.podmanArgs` and `globalArgs` | Field-specific resolver error | Forbidden raw runtime passthrough; future needs require typed intent |
-| `config.filesystem.readOnly`, `readOnlyTmpfs`, `tmpfs`, `mounts`, and `devices` | Field-specific resolver error | Planned mount policy and implementation: [#142] and [#164] |
+| `config.filesystem.readOnly`, `readOnlyTmpfs`, `tmpfs`, `mounts`, and `devices` | Field-specific resolver error | Qualified CDI-only references are planned in [#203]; direct devices and broader mount policy remain in [#142] and [#164] |
 | `config.network.dns`, `dnsOption`, `dnsSearch`, and `addHost` | Field-specific resolver error | Planned network Phase B: [#193] |
 | `config.networks`, including nested labels and raw maps | Field-specific resolver error | Planned typed `.network` resources: [#147] |
 | `config.volumes`, including nested labels and raw maps | Field-specific resolver error | Planned typed `.volume` resources: [#148] |
-| `config.security.*` | Field-specific resolver error | Current boundary: [Threat model](threat-model.md); policy and secure controls: [#128], [#139], and [#163] |
+| `config.security.*` | Field-specific resolver error | Current boundary: [Threat model](threat-model.md); classification: [Capability policy](capability-policy.md); defaults and controls: [#139] and [#163] |
 | `config.resources.*` | Field-specific resolver error | Planned limits: [#145] |
 | `config.secrets` | Field-specific resolver error | Planned credential pipeline: [#143] and [#166] |
 | `config.workspace.*`, `config.home.*`, and `config.attach.*` | Field-specific resolver error | Deferred workspace/instance design: [#151], [#153], and [#160] |
@@ -115,23 +127,31 @@ yet.
 | `config.service.type`, `config.service.remainAfterExit` | Migration error directing users to typed `lifecycle` | Forbidden as alternate raw lifecycle syntax |
 | `config.quadlet.container`, `service`, and `install` | Raw-map error; install points to typed `deploy.activation` | Forbidden raw Quadlet passthrough |
 
-## Dangerous and forbidden boundaries
+## Classification boundaries
 
-Dangerous means unavailable, not “accepted with a warning.” Current assumptions
-and residual risks are defined in the [Threat model](threat-model.md);
-classification and future opt-in policy remain owned by
-[#128](https://github.com/Patrick-Kappen/graft/issues/128).
+Current assumptions and residual risks are defined in the
+[Threat model](threat-model.md). Dangerous means a capability class, not an
+availability state and not “accepted with a warning.” Unavailable intent still
+fails closed.
 
-| Capability | Current input result | Status |
-| --- | --- | --- |
-| Host networking and other host namespace sharing | Unsupported enum or field-specific error | Dangerous; policy pending [#128], network design in [#193] |
-| `privileged`, capability additions, host devices, unconfined seccomp/labels, and user namespaces | Field-specific error | Dangerous; typed policy required before implementation |
-| Writable host mounts | Literal `config.filesystem.volumes` currently permits a mode without `ro`; paths and policy are not attested | Current narrow passthrough with security policy pending [#142]/[#163]; review explicitly |
-| `PodmanArgs`, `GlobalArgs`, and raw Quadlet maps | Field-specific error | Forbidden as unrestricted passthrough; future needs require typed intent |
-| `Conflicts=`, `Upholds=`, failure handlers, and stop propagation to external units | Unknown field or raw-map error | Dangerous; activation and reverse lifecycle effects require typed policy under [#128] |
-| `Requisite=` and reload propagation | Unknown field or raw-map error | Deferred until a concrete typed use case exists |
-| Raw `[Unit]`, `[Service]`, `[Install]`, host `ExecStart*`/`ExecStop*`, and host shell | Unknown field or raw-map error | Forbidden; only reviewed typed dependencies, lifecycle, timing, and startup intent may produce their fixed directives |
-| Arbitrary Nix expressions or package repositories in TOML | Unknown field or package lookup error | Forbidden; trusted host package sources own evaluation |
+| Capability | Current input result | Class | Availability and owner |
+| --- | --- | --- | --- |
+| Qualified CDI resource name without remapping or permissions | Field-specific `config.filesystem.devices` error | First-class | Planned in [#203] |
+| Direct host devices, device directories, target remapping, and permissions | Field-specific `config.filesystem.devices` error | Dangerous | Deferred to [#142] and [#164] |
+| Host networking and other host namespace sharing | Unsupported enum or field-specific error | Dangerous | Deferred to typed policy such as [#193] |
+| `privileged` | Field-specific error | Dangerous | Deferred; [#163] keeps unsupported privileged intent rejected |
+| Capability additions and unconfined seccomp/labels | Field-specific error | Dangerous | Policy in [#139], approved controls in [#163] |
+| Automatic per-container user namespaces | Field-specific error | First-class | Planned in [#139] and [#141] |
+| Custom UID/GID maps and subordinate-ID selection | Field-specific error | Dangerous | Deferred within [#140] and [#141] |
+| Host-path, sensitive-source, or writable-host mounts | Literal `config.filesystem.volumes` currently permits unvalidated sources, paths, and modes | Dangerous | Current narrow passthrough; policy pending [#142] and [#163] |
+| Host environment-file references | Exact `config.container.environmentFile` paths are accepted without ownership, permission, lifecycle, or disclosure attestation | Dangerous | Current explicit host crossing; typed credentials planned in [#143] and [#166] |
+| Exact external-systemd-unit relationships | Exact typed name is accepted; selected-manager implementation is not inspected | Dangerous | Current explicit host crossing |
+| `PodmanArgs`, `GlobalArgs`, and raw Quadlet maps | Field-specific error | Forbidden | No unrestricted passthrough; concrete needs require typed intent |
+| `Conflicts=`, `Upholds=`, failure handlers, and stop propagation to external units | Unknown field or raw-map error | Dangerous | Deferred until a concrete typed graph contract exists |
+| `Requisite=` and reload propagation | Unknown field or raw-map error | Unclassified | Deferred until a concrete typed use case is classified |
+| Raw `[Unit]`, `[Service]`, `[Install]`, host `ExecStart*`/`ExecStop*`, and host shell | Unknown field or raw-map error | Forbidden | Only reviewed typed dependencies, lifecycle, timing, and startup intent may produce fixed directives |
+| Disabling mandatory parse, validation, or fail-closed checks | `validation.level` field-specific error | Forbidden | Future lint levels cannot downgrade resolver errors |
+| Arbitrary Nix expressions or package repositories in TOML | Unknown field or package lookup error | Forbidden | Trusted host package sources own evaluation |
 
 ## Artifact and Quadlet resource scope
 
@@ -170,9 +190,9 @@ The capability and compatibility claims above apply only to the versions that
 Graft's tests actually exercise.
 
 [#107]: https://github.com/Patrick-Kappen/graft/issues/107
-[#128]: https://github.com/Patrick-Kappen/graft/issues/128
 [#129]: https://github.com/Patrick-Kappen/graft/issues/129
 [#139]: https://github.com/Patrick-Kappen/graft/issues/139
+[#140]: https://github.com/Patrick-Kappen/graft/issues/140
 [#141]: https://github.com/Patrick-Kappen/graft/issues/141
 [#142]: https://github.com/Patrick-Kappen/graft/issues/142
 [#143]: https://github.com/Patrick-Kappen/graft/issues/143
@@ -192,3 +212,4 @@ Graft's tests actually exercise.
 [#167]: https://github.com/Patrick-Kappen/graft/issues/167
 [#173]: https://github.com/Patrick-Kappen/graft/issues/173
 [#193]: https://github.com/Patrick-Kappen/graft/issues/193
+[#203]: https://github.com/Patrick-Kappen/graft/issues/203

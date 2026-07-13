@@ -7,7 +7,9 @@
 Graft turns selected TOML files into resolved JSON, Nix-store root filesystems,
 Quadlet source units, generated systemd services, and Podman containers. This
 model identifies what that pipeline protects, what it trusts, and where an
-operator must apply policy outside Graft.
+operator must apply policy outside Graft. The separate
+[Capability policy](capability-policy.md) classifies first-class typed intent,
+dangerous explicit authority, and forbidden escape hatches.
 
 The central rule is:
 
@@ -240,8 +242,10 @@ workdir-only writes. Typed host device mappings are unavailable and fail closed;
 the runtime's standard device set remains upstream policy.
 
 All explicit `config.security.*` intent currently fails closed. Therefore the
-runtime receives upstream defaults, not Graft's future secure defaults. Policy
-and implementation are tracked by [#128], [#139], and [#163].
+runtime receives upstream defaults, not Graft's future secure defaults.
+Capability classification is defined in the
+[Capability policy](capability-policy.md); defaults and implementation are
+tracked by [#139] and [#163].
 
 ### Host files, mounts, paths, and state
 
@@ -367,7 +371,8 @@ A security-sensitive design or implementation must:
 
 1. identify the affected `GRAFT-TM-*` invariants and trust boundaries;
 2. state whether it narrows or deliberately expands authority;
-3. classify intent under [#128] as first-class, dangerous, or forbidden;
+3. classify intent under the [Capability policy](capability-policy.md) as
+   first-class, dangerous, or forbidden;
 4. expose effective defaults and relaxations in resolved/inspectable output;
 5. cover system/rootful, non-root user/rootless, and root-owned user/rootful
    manager contexts separately;
@@ -375,17 +380,18 @@ A security-sensitive design or implementation must:
    incompatible combinations; and
 7. update this model when assumptions or accepted residual risks change.
 
-The immediate sequence is [#128] capability policy, [#139] secure user/system
-defaults, and [#163] enforcement. Identity and rootfs-integrity gaps are tracked
-by [#107] and [#108]. Related isolation, mount, secret, resource, shadowing,
-remote, and temporary-agent work is linked in the risk sections above.
+The immediate sequence is the scoped qualified-CDI implementation in [#203],
+[#139] secure user/system defaults, and [#163] enforcement. Direct device paths
+remain governed by [#142] and [#164]. Identity and rootfs-integrity gaps are
+tracked by [#107] and [#108]. Related isolation, mount, secret, resource,
+shadowing, remote, and temporary-agent work is linked in the risk sections
+above.
 
 Suspected violations of these boundaries must follow the private
 [security reporting policy][security-policy], not a public issue.
 
 [#107]: https://github.com/Patrick-Kappen/graft/issues/107
 [#108]: https://github.com/Patrick-Kappen/graft/issues/108
-[#128]: https://github.com/Patrick-Kappen/graft/issues/128
 [#139]: https://github.com/Patrick-Kappen/graft/issues/139
 [#142]: https://github.com/Patrick-Kappen/graft/issues/142
 [#143]: https://github.com/Patrick-Kappen/graft/issues/143
@@ -400,6 +406,7 @@ Suspected violations of these boundaries must follow the private
 [#171]: https://github.com/Patrick-Kappen/graft/issues/171
 [#174]: https://github.com/Patrick-Kappen/graft/issues/174
 [#193]: https://github.com/Patrick-Kappen/graft/issues/193
+[#203]: https://github.com/Patrick-Kappen/graft/issues/203
 [activation-test]: https://github.com/Patrick-Kappen/graft/blob/main/tests/nixos/activation.nix
 [ci-source]: https://github.com/Patrick-Kappen/graft/blob/main/.github/workflows/ci.yml
 [flake-source]: https://github.com/Patrick-Kappen/graft/blob/main/flake.nix
