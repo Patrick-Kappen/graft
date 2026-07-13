@@ -185,11 +185,14 @@ reduces runtime privilege through Podman's rootless model, but a kernel/runtime
 vulnerability or an explicitly exposed same-user resource can still cross the
 boundary. Use a VM when the workload must not share the host kernel.
 
-The current rootfs lower layer and `/nix/store` mount are read-only. `:O`
-provides writable runtime overlay state, which is not a durable or reviewable
-persistence contract. Explicit volumes, environment files, published ports,
-shared network namespaces, and external-unit dependencies cross back into host
-or manager resources and must be reviewed as such.
+The generated rootfs lower layer and fixed `/nix/store:/nix/store:ro` bind are
+read-only. `:O` provides writable runtime overlay state, which is not a durable
+or reviewable persistence contract. Explicit volumes are rendered after the
+fixed bind and may overlap a path below `/nix/store` or expose a store path at
+another target; Graft therefore does not guarantee an effectively read-only
+store tree. Volumes, environment files, published ports, shared network
+namespaces, and external-unit dependencies cross back into host or manager
+resources and must be reviewed as such.
 
 ## Current security invariants and evidence
 
@@ -205,7 +208,7 @@ invariant; it does not extend the invariant beyond its stated scope.
 | **GRAFT-TM-04** | Graft workload references use only the explicit source set and cannot silently cross target, identity, enablement, or lifecycle constraints. | `ConfigSource`, `ConfigIndex`, and graph validation in [`resolve.rs`][resolve-source]; one explicit set invocation in [`materialise-containers.nix`][materialiser-source]. | Missing, disabled, self, cross-target, duplicate, identity-membership, and mixed-cycle resolver tests; Quadlet dependency and network checks in [`flake.nix`][flake-source]. |
 | **GRAFT-TM-05** | A resolved workload is materialised only by the module matching its effective `system` or `user` target; `user` selects manager scope, not an enforced non-root UID. | Target filtering in [`materialise-containers.nix`][materialiser-source]; separate [`nixos.nix`][nixos-source] and [`home-manager.nix`][home-manager-source] destinations. | Module assertions prove opposite-target files are absent; [`activation.nix`][activation-test] proves rootful system execution and rootless user-manager execution for its non-root test accounts. |
 | **GRAFT-TM-06** | Materialisation does not imply startup. Typed startup has only fixed system/user targets, and dependency activation remains explicit. | Resolver maps `startup` to `multi-user.target` or `default.target`; absent intent renders no `[Install]`. | Resolver startup tests; `quadlet-activation` generator checks; manager transitions and foreign-unit preservation in [`activation.nix`][activation-test]. |
-| **GRAFT-TM-07** | Workload packages resolve only from host-selected sources: mandatory `graft-pause` from the configured Graft package and other TOML package names from `pkgs`; ordinary writes above the read-only rootfs lower layer land in runtime overlay state unless an explicit mount replaces the path, while the separate `/nix/store` mount remains read-only. | Package mapping and rootfs construction in [`materialise-containers.nix`][materialiser-source]; fixed `Rootfs=:O` and read-only store mount in [`render-quadlet.nix`][renderer-source]. | Nix module and real Quadlet generator checks in [`flake.nix`][flake-source]. Runtime overlay durability is explicitly excluded. |
+| **GRAFT-TM-07** | Configured rootfs package names resolve only from host-selected sources: mandatory `graft-pause` from the configured Graft package and other names from `pkgs`. The renderer emits `Rootfs=<store-path>:O` over the read-only lower layer and a fixed read-only `/nix/store` bind. Explicit volumes remain a reviewed exception and can overlap `/nix/store` or expose store paths elsewhere. | Package mapping and rootfs construction in [`materialise-containers.nix`][materialiser-source]; fixed `Rootfs=:O`, store bind, and ordered explicit volumes in [`render-quadlet.nix`][renderer-source]. | Nix module and real Quadlet generator checks in [`flake.nix`][flake-source]. Effective mount policy and runtime overlay durability are explicitly excluded. |
 | **GRAFT-TM-08** | Implemented non-default network namespaces are typed as `none` or a validated same-target Graft workload reference. | Network resolver and graph validation; source-unit rendering lets Quadlet own runtime identity and dependencies. | Resolver network matrix; `quadlet-network` generation; rootless no-network and shared-loopback checks in [`network.sh`][network-test]. |
 | **GRAFT-TM-09** | Current declarative startup changes do not implicitly remove mounted state, workspace markers, or foreign units. | Modules replace managed source-unit declarations only; no Graft cleanup control plane exists. | Removal, reboot, restoration, and preservation scenarios in [`activation.nix`][activation-test]. |
 | **GRAFT-TM-10** | External-unit dependency intent remains an exact, validated, visible same-manager unit name rather than host command text. | Strict concrete unit-name validation and fixed dependency axes in [`resolve.rs`][resolve-source]. | External-name, identity-collision, module parity, real Quadlet translation, and `systemd-analyze verify` tests. Unit existence and safety are host review responsibilities. |
@@ -244,10 +247,11 @@ and implementation are tracked by [#128], [#139], and [#163].
 
 A configured volume can expose host content with the target manager's authority.
 Current volume parts are delimiter- and line-safe, but Graft does not check path
-existence, ownership, symlink traversal, source type, read-only policy, or an
-approved host-path allowlist. Writable mounts let a compromised workload alter
-host-owned data within its runtime authority. Mount and device policy belongs to
-[#142] and [#164].
+existence, ownership, symlink traversal, source type, target overlap, read-only
+policy, or an approved host-path allowlist. A volume can overlap the generated
+`/nix/store` bind or expose a store source at another target. Writable mounts let
+a compromised workload alter host-owned data within its runtime authority.
+Mount and device policy belongs to [#142] and [#164].
 
 Overlay writes are disposable runtime state. Explicitly mounted persistent data
 needs separate permissions, backup, integrity, and retention policy. Graft does

@@ -73,7 +73,7 @@ promised.
 | `Exec=` | resolved `runtime.command` |
 | `Volume=/nix/store:/nix/store:ro` | required for Nix store symlinks |
 
-Example without a user command:
+Example with implicit or long-running lifecycle and no user command:
 
 ```ini
 [Container]
@@ -101,8 +101,9 @@ Volume=/nix/store:/nix/store:ro
 packages = ["graft-pause", ...user packages]
 ```
 
-`Exec="/bin/graft-pause"` is used only when the user does not set a command. If
-the user sets a command, that command becomes quoted `Exec=` argv.
+`Exec="/bin/graft-pause"` is used when an implicit or long-running lifecycle
+has no command. `job` and `setup` require an explicit command and fail
+resolution without one. A user command becomes quoted `Exec=` argv.
 
 `graft-pause` exits cleanly on `SIGTERM` and `SIGINT`, so `systemctl stop` and
 `systemctl --user stop` can finish without a SIGKILL timeout.
@@ -209,9 +210,12 @@ lowerdir = /nix/store/xxx-graft-env   (read-only)
 upperdir = container storage          (writable)
 ```
 
-Writes inside the container go to the upperdir. The current `Rootfs=...:O` mode
-does not configure a persistent, inspectable upperdir, so users must not rely on
-those writes after the runtime container is removed. It is not a promote flow.
+For paths backed by `Rootfs=` rather than another runtime or explicit mount,
+writes go to the upperdir. The renderer's `/nix/store` bind is read-only, but
+later explicit volumes can overlap it or expose a store path elsewhere. The
+current `Rootfs=...:O` mode does not configure a persistent, inspectable
+upperdir, so users must not rely on overlay writes after the runtime container
+is removed. It is not a promote flow.
 Reviewable overlay inspection, diff, and promotion are future work in
 [#160](https://github.com/Patrick-Kappen/graft/issues/160) and
 [#175](https://github.com/Patrick-Kappen/graft/issues/175).
@@ -253,7 +257,7 @@ Stopping a service removes the runtime container when Podman runs it with
 ## Not used by rootfs-store Graft containers
 
 - `Image=` — Graft uses `Rootfs=` for this mode.
-- image downloads at runtime
+- runtime image pulls by Graft
 - user-written `.container` files as input
 - default `Restart=on-failure`
 - default `[Install] WantedBy=...`

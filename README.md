@@ -84,10 +84,10 @@ checks:
   raw `[Unit]` maps.
 - **System and user scope:** one intent model targets the NixOS system manager
   or the current Home Manager account's user manager.
-- **Explicit host policy:** apart from the generated read-only `/nix/store`
-  mount required by `rootfs-store`, Graft does not silently enable Podman,
-  linger, firewall rules, accounts, user-specified host mounts, or privileged
-  capabilities.
+- **Explicit host policy:** Graft generates a read-only `/nix/store` bind for
+  `rootfs-store`, but explicit volumes may overlap it. Graft does not silently
+  enable Podman, linger, firewall rules, accounts, user-specified host mounts,
+  or privileged capabilities.
 - **Minimal defaults:** no default shell, `coreutils`, restart policy, or
   autostart is hidden in the workload.
 

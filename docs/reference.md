@@ -113,7 +113,7 @@ command = ["bash", "-c", "exec /bin/graft-pause"]
 | --- | --- | --- | --- |
 | `config.runtime.mode` | string | `rootfs-store` | Only `rootfs-store` is supported. |
 | `config.runtime.packages` | list of strings | `[]` | Entries must be non-empty and contain no whitespace or control characters. Names resolve from the target configuration's trusted `pkgs`. |
-| `config.runtime.command` | non-empty list of strings | `[/bin/graft-pause]` | Entries must be non-empty and contain no control characters. The argv is preserved and rendered as quoted `Exec=`. |
+| `config.runtime.command` | non-empty list of strings | `[/bin/graft-pause]` for implicit or long-running lifecycle | Entries must be non-empty and contain no control characters. `job` and `setup` require an explicit command. The argv is preserved and rendered as quoted `Exec=`. |
 
 `graft-pause` is always added to the resolved package list. No default shell,
 `coreutils`, restart policy, or startup activation is added. Custom package names
@@ -170,9 +170,11 @@ mechanically as `target`, `source:target`, or `source:target:mode`.
 | `source` | no | Non-empty when present; no control characters or `:`. No path existence check. |
 | `mode` | no | Requires `source`; non-empty; no control characters or `:`. No option allowlist. |
 
-A mode without `ro` may create a writable host mount. The current contract does
-not attest path safety or confinement; review such mounts explicitly. Typed
-mount policy remains tracked by
+A mode without `ro` may create a writable host mount. Targets can overlap fixed
+paths, including the generated `/nix/store` bind, and sources can expose store
+paths elsewhere. The current contract does not attest path safety or
+confinement; review such mounts explicitly. Typed mount policy remains tracked
+by
 [#142](https://github.com/Patrick-Kappen/graft/issues/142) and
 [#164](https://github.com/Patrick-Kappen/graft/issues/164).
 
