@@ -19,9 +19,9 @@ NixOS system containers and Home Manager user containers, without requiring a
 Dockerfile or hand-written Quadlet file for the current `rootfs-store` backend.
 
 > **Early MVP:** the rootfs-store path is working and has been validated for
-> system/rootful and user/rootless workloads. Lifecycle commands, broader
-> security policy, temporary agents, and multi-host control remain active
-> roadmap work. Start with the [NixOS quickstart](docs/quickstart/nixos.md) or
+> system/rootful and user/rootless workloads. Lifecycle commands, secure
+> defaults, temporary agents, and multi-host control remain active roadmap
+> work. Start with the [NixOS quickstart](docs/quickstart/nixos.md) or
 > [Home Manager quickstart](docs/quickstart/home-manager.md).
 
 [Published manual](https://patrick-kappen.github.io/graft/) ·
@@ -131,10 +131,10 @@ host configuration.
 
 Rootless is the preferred direction for unattended server workloads. System
 targets are rootful, and containers share the host kernel: they are not
-presented as VM-equivalent isolation. The final threat model and secure defaults
-are active work; see [Security hardening](docs/roadmap.md#security-hardening),
-[Non-goals](docs/non-goals.md), and
-[issue #127](https://github.com/Patrick-Kappen/graft/issues/127). Report suspected
+presented as VM-equivalent isolation. Read the current
+[Threat model and trust boundaries](docs/threat-model.md) before selecting a
+target or config source. Secure defaults remain active work in
+[Security hardening](docs/roadmap.md#security-hardening). Report suspected
 vulnerabilities privately through the [security policy](SECURITY.md), never in a
 public issue.
 
@@ -177,7 +177,8 @@ recorded separately rather than advertised as implemented.
   [Supported JSON Schema](crates/graft/schema/graft-v1.schema.json)
 - **Track direction:** [Roadmap](docs/roadmap.md) ·
   [Vision](docs/vision.md) · [Non-goals](docs/non-goals.md)
-- **Security:** [Security policy and private reporting](SECURITY.md)
+- **Security:** [Threat model and trust boundaries](docs/threat-model.md) ·
+  [Security policy and private reporting](SECURITY.md)
 - **Contribute:** [Contribution guide](CONTRIBUTING.md) ·
   [Development checks](docs/development.md)
 

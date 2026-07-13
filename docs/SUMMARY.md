@@ -6,6 +6,7 @@
 - [Home Manager quickstart](quickstart/home-manager.md)
 - [Long-term vision](vision.md)
 - [Design](design.md)
+- [Threat model and trust boundaries](threat-model.md)
 - [Workload lifecycle semantics](lifecycle.md)
 - [Workload startup activation](activation.md)
 - [Typed workload dependencies](dependencies.md)

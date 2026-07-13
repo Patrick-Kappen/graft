@@ -155,7 +155,9 @@ turn containers into mutable images.
 
 ## Security hardening
 
-The current MVP proves the flow, not the final isolation model.
+The current [Threat model and trust boundaries](threat-model.md) records what
+the MVP protects and trusts. The current implementation proves the flow, not
+the final isolation model.
 
 Planned hardening:
 

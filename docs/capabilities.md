@@ -15,6 +15,7 @@ is the machine-readable current-input contract.
 | Current human configuration semantics | [Reference](reference.md) | Capability/schema path comparison plus documentation checks |
 | Current machine-readable input | [Graft v1 JSON Schema](https://github.com/Patrick-Kappen/graft/blob/main/crates/graft/schema/graft-v1.schema.json) | Generated-versus-tracked Rust schema test |
 | Capability and pipeline status | This page | `documentation-drift` rejects missing, extra, or duplicate current paths |
+| Current security assumptions and invariants | [Threat model and trust boundaries](threat-model.md) | Invariants link to their implementation and test evidence |
 | Future direction and exclusions | [Roadmap](roadmap.md), [Vision](vision.md), and [Non-goals](non-goals.md) | Must not be presented as runnable current syntax |
 | Upstream implementation details | Versioned links in [Tested upstream context](#tested-upstream-context) | Compatibility expansion remains owned by [#129] |
 
@@ -104,7 +105,7 @@ yet.
 | `config.network.dns`, `dnsOption`, `dnsSearch`, and `addHost` | Field-specific resolver error | Planned network Phase B: [#193] |
 | `config.networks`, including nested labels and raw maps | Field-specific resolver error | Planned typed `.network` resources: [#147] |
 | `config.volumes`, including nested labels and raw maps | Field-specific resolver error | Planned typed `.volume` resources: [#148] |
-| `config.security.*` | Field-specific resolver error | Policy and secure controls: [#128], [#139], and [#163] |
+| `config.security.*` | Field-specific resolver error | Current boundary: [Threat model](threat-model.md); policy and secure controls: [#128], [#139], and [#163] |
 | `config.resources.*` | Field-specific resolver error | Planned limits: [#145] |
 | `config.secrets` | Field-specific resolver error | Planned credential pipeline: [#143] and [#166] |
 | `config.workspace.*`, `config.home.*`, and `config.attach.*` | Field-specific resolver error | Deferred workspace/instance design: [#151], [#153], and [#160] |
@@ -114,10 +115,10 @@ yet.
 
 ## Dangerous and forbidden boundaries
 
-Dangerous means unavailable, not “accepted with a warning.” Classification and
-future opt-in policy remain owned by
-[#128](https://github.com/Patrick-Kappen/graft/issues/128) and the threat model
-in [#127](https://github.com/Patrick-Kappen/graft/issues/127).
+Dangerous means unavailable, not “accepted with a warning.” Current assumptions
+and residual risks are defined in the [Threat model](threat-model.md);
+classification and future opt-in policy remain owned by
+[#128](https://github.com/Patrick-Kappen/graft/issues/128).
 
 | Capability | Current input result | Status |
 | --- | --- | --- |
