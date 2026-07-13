@@ -221,8 +221,9 @@ The current MVP proves the rootfs-store path for both NixOS and Home Manager.
 The generated schema contains only intent that reaches the implemented pipeline;
 parser-recognised roadmap fields fail closed instead of disappearing. See
 [Reference](reference.md) for current semantics,
-[Capability status](capabilities.md) for every pipeline stage, and
-[Non-goals](non-goals.md) for deliberate exclusions.
+[Capability status](capabilities.md) for every pipeline stage,
+[Threat model and trust boundaries](threat-model.md) for current security
+assumptions, and [Non-goals](non-goals.md) for deliberate exclusions.
 
 For the active implementation direction, see [Roadmap](roadmap.md). For the
 later portable workload direction, see [Long-term vision](vision.md).
@@ -244,6 +245,7 @@ graft/
     overview.md        # this file
     reference.md       # current configuration contract
     capabilities.md    # authoritative pipeline and status matrix
+    threat-model.md    # security assumptions, invariants, and residual risks
     vision.md          # long-term product direction
     quadlet.md         # Quadlet output notes
     roadmap.md         # roadmap and future direction

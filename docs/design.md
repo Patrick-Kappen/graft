@@ -20,7 +20,9 @@ between long-running services, finite jobs, and retained setup jobs is defined
 in [Workload lifecycle semantics](lifecycle.md). Explicit manager-start policy
 is defined separately in [Workload startup activation](activation.md). The
 approved typed namespace, shared-container reference, and network security
-boundaries are defined in [Container network intent](networking.md).
+boundaries are defined in [Container network intent](networking.md). Security
+assumptions, target authority, and current invariant evidence are defined in
+[Threat model and trust boundaries](threat-model.md).
 
 ## TOML is user intent
 
@@ -221,6 +223,8 @@ The generated TOML schema exposes only implemented intent; reserved parser
 fields fail closed. [Reference](reference.md) documents field semantics, while
 [Capability status](capabilities.md) records which pipeline stages each field
 reaches and separates current, deferred, dangerous, and forbidden behavior.
+[Threat model and trust boundaries](threat-model.md) defines what that pipeline
+protects, trusts, and leaves to host policy.
 
 Currently proven:
 

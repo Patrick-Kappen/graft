@@ -9,8 +9,8 @@ managed by Podman Quadlet and systemd.** The same typed intent path supports
 NixOS system containers and Home Manager user containers.
 
 > **Early MVP:** the current `rootfs-store` path works for system/rootful and
-> user/rootless workloads. Lifecycle commands, broader security policy,
-> temporary agents, and multi-host control remain roadmap work.
+> user/rootless workloads. Lifecycle commands, secure defaults, temporary
+> agents, and multi-host control remain roadmap work.
 
 ## Start here
 
@@ -68,7 +68,9 @@ configuration.
 NixOS owns system/rootful materialisation. Home Manager owns user/rootless
 materialisation. Rootless is the preferred direction for unattended server
 workloads, but containers still share the host kernel and are not a
-VM-equivalent isolation boundary.
+VM-equivalent isolation boundary. Review the current
+[Threat model and trust boundaries](threat-model.md) before selecting a target
+or config source.
 
 ## Current, planned, and vision
 
@@ -90,15 +92,16 @@ promised syntax or schedule.
   `crates/graft/schema/graft-v1.schema.json`
 - **Understand output:** [Overview](overview.md), [Design](design.md), and
   [Quadlet output](quadlet.md)
-- **Understand boundaries:** [Non-goals and deferred scope](non-goals.md)
+- **Understand boundaries:** [Threat model and trust boundaries](threat-model.md)
+  and [Non-goals and deferred scope](non-goals.md)
 - **Track direction:** [Roadmap](roadmap.md) and [Long-term vision](vision.md)
 - **Contribute:** [Repository contribution entry point](https://github.com/Patrick-Kappen/graft/contribute)
   and [Development](development.md)
 - **Security:** open the [Repository security page](https://github.com/Patrick-Kappen/graft/security)
   and choose **Report a vulnerability** for private reporting
 
-Security hardening and the final threat model remain active work. See
-[Security hardening](roadmap.md#security-hardening) and
-[issue #127](https://github.com/Patrick-Kappen/graft/issues/127) before treating
-an alpha workload as a strong isolation boundary. Never disclose a suspected
+The threat model documents current guarantees and accepted residual risks;
+secure defaults remain active work. See
+[Security hardening](roadmap.md#security-hardening) before treating an alpha
+workload as a strong isolation boundary. Never disclose a suspected
 vulnerability or secret in a public issue.
