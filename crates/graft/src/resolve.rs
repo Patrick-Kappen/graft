@@ -385,7 +385,7 @@ fn requires_config_index(sources: &[ConfigSource<'_>]) -> bool {
                 .as_ref()
                 .is_some_and(|dependencies| {
                     dependencies.iter().any(|dependency| {
-                        matches!(dependency.target, DependencyTarget::Workload(_))
+                        matches!(&dependency.target, DependencyTarget::Workload(_))
                     })
                 });
 
@@ -1334,7 +1334,7 @@ impl ConfigIndex {
                     if self
                         .workloads
                         .keys()
-                        .any(|candidate| candidate.name == *reference)
+                        .any(|candidate| candidate.name.as_str() == reference.as_str())
                     {
                         bail!(
                             "dependency workload reference '{}' for workload '{}' has a different deploy target in config context {}",
@@ -1441,7 +1441,7 @@ impl ConfigIndex {
         let workload = self
             .workloads
             .get(&referenced)
-            .ok_or_else(|| anyhow::anyhow!("validated workload reference disappeared"))?;
+            .ok_or_else(|| anyhow::anyhow!("validated reference disappeared"))?;
         Ok(format!("{}.container", workload.unit_name))
     }
 }
