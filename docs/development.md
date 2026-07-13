@@ -21,8 +21,9 @@ Keep implementation decisions aligned with the main architecture:
 TOML → CLI → JSON stdout → NixOS/Home Manager modules → Quadlet .container
 ```
 
-The CLI owns defaults, validation, dependency resolution, and semantic decisions.
-The Nix modules should stay dumb materialisers.
+The CLI owns validation, dependency resolution, semantic decisions, and
+defaults represented in resolved JSON. The Nix modules should stay dumb
+materialisers; absent `deploy.enable` is the documented rule to render.
 
 ## Quadlet renderer checklist
 

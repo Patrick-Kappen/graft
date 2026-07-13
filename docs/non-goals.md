@@ -40,9 +40,10 @@ These boundaries are intentional:
 
 - TOML is user intent, not raw Quadlet.
 - TOML is not a second NixOS module language.
-- The CLI owns defaults, validation, dependency resolution, and semantic
-  decisions.
-- NixOS and Home Manager modules are dumb materialisers.
+- The CLI owns validation, dependency resolution, semantic decisions, and
+  defaults represented in resolved JSON.
+- NixOS and Home Manager modules are dumb materialisers; absent `deploy.enable`
+  is the documented rule to render.
 - Nix evaluation must stay deterministic and side-effect free.
 - Hidden state between modules or commands should be avoided.
 - Packages are declared in TOML and realised by Nix; they are not installed
