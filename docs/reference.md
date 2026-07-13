@@ -57,7 +57,7 @@ activation = "startup"
 | Field | Accepted values | Default | Effect |
 | --- | --- | --- | --- |
 | `deploy.enable` | `true`, `false` | materialise | `false` prevents both NixOS and Home Manager from rendering the workload. |
-| `deploy.target` | `system`, `user` | `system` | Selects NixOS system/rootful or Home Manager user/rootless materialisation. |
+| `deploy.target` | `system`, `user` | `system` | Selects the NixOS system manager or current Home Manager account's user manager. The user target is rootless only for a non-root account. |
 | `deploy.activation` | `startup` | absent | Requests the workload from a fixed target during manager startup. |
 
 Startup maps system workloads to `WantedBy=multi-user.target` and user workloads
@@ -300,13 +300,14 @@ The module renders only effective `target = "system"` workloads under
 
 | Option | Type | Default | Description |
 | --- | --- | --- | --- |
-| `programs.graft.enable` | bool | `false` | Enable user/rootless Graft materialisation. |
+| `programs.graft.enable` | bool | `false` | Enable Graft materialisation in the current Home Manager account's user manager. |
 | `programs.graft.package` | package or null | `null` | Package providing `graft` and `graft-pause`; the exported flake module supplies a default. |
 | `programs.graft.configRoot` | path or null | `null` | First directory containing `*.toml` workloads. |
 | `programs.graft.configRoots` | list of paths | `[]` | Additional workload directories, read in list order. |
 
 The module renders only effective `target = "user"` workloads under
-`~/.config/containers/systemd/`.
+`~/.config/containers/systemd/`. Podman is rootless only when Home Manager runs
+for a non-root account; the module does not reject UID 0.
 
 Both modules read `configRoot` first and then `configRoots` in order. Every
 configured root must exist. New files must be tracked before Git flakes can see

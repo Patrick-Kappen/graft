@@ -153,7 +153,7 @@ pub enum DeployActivation {
 pub enum DeployTarget {
     /// NixOS system manager and rootful Podman.
     System,
-    /// Home Manager user manager and rootless Podman.
+    /// Home Manager user manager; Podman is rootless only for a non-root account.
     User,
 }
 

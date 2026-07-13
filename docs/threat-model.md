@@ -17,9 +17,12 @@ The central rule is:
 
 A system-target TOML is host-privileged configuration because it controls a
 rootful container and can request host mounts or same-manager units. A
-user-target TOML is configuration trusted with that user's authority. Rootless
-execution reduces the host privilege available to the runtime, but it does not
-isolate a workload from everything accessible to the same host account.
+user-target TOML is configuration trusted with the current Home Manager
+account's authority. Podman is rootless only when that account is non-root; a
+root-owned user manager retains root authority, and Graft does not enforce the
+UID. Rootless execution reduces the host privilege available to the runtime,
+but it does not isolate a workload from everything accessible to the same host
+account.
 
 ## Security objectives
 
@@ -153,9 +156,11 @@ host-provided package set and the host selects the Graft package that supplies
 ### 3. Quadlet and manager materialisation
 
 System-target source units are materialised for the system manager and rootful
-Podman. User-target source units are materialised for the user's manager and
-rootless Podman. Quadlet translates those source units into generated services;
-systemd owns service lifecycle and Podman owns container execution.
+Podman. User-target source units are materialised for the current Home Manager
+account's user manager. Podman is rootless only when that account is non-root;
+under UID 0 it remains rootful. Quadlet translates those source units into
+generated services; systemd owns service lifecycle and Podman owns container
+execution.
 
 Graft emits only its fixed supported `[Unit]`, `[Container]`, `[Service]`, and
 `[Install]` keys. It does not accept raw sections, host commands, or arbitrary
@@ -166,12 +171,12 @@ and foreign overrides remains in
 
 ### 4. Runtime and host-resource crossings
 
-Containers share the host kernel. A rootful system container is not a boundary
-against hostile code that requires protection from host root. A rootless user
-container reduces runtime privilege through Podman's rootless model, but a
-kernel/runtime vulnerability or an explicitly exposed same-user resource can
-still cross the boundary. Use a VM when the workload must not share the host
-kernel.
+Containers share the host kernel. A rootful system container or root-owned
+user-target container is not a boundary against hostile code that requires
+protection from host root. A user-target container under a non-root account
+reduces runtime privilege through Podman's rootless model, but a kernel/runtime
+vulnerability or an explicitly exposed same-user resource can still cross the
+boundary. Use a VM when the workload must not share the host kernel.
 
 The current rootfs lower layer and `/nix/store` mount are read-only. `:O`
 provides writable runtime overlay state, which is not a durable or reviewable
@@ -187,17 +192,17 @@ invariant; it does not extend the invariant beyond its stated scope.
 
 | ID | Current invariant | Enforcement | Evidence |
 | --- | --- | --- | --- |
-| **GRAFT-TM-01** | Unknown and explicitly configured unsupported intent never reaches normal resolved JSON. | [`schema.rs`](../crates/graft/src/config/schema.rs) uses `deny_unknown_fields`; [`resolve.rs`](../crates/graft/src/resolve.rs) exhaustively classifies parser fields and fails closed. | Parser `unknown_field_returns_error`; resolver `configured_unsupported_fields_return_field_specific_errors`, `explicit_empty_unsupported_leaf_values_return_errors`, and `validation_level_cannot_disable_fail_closed_resolution`; generated-schema parity in [`tests/schema.rs`](../crates/graft/tests/schema.rs). |
-| **GRAFT-TM-02** | Graft TOML cannot supply raw Quadlet maps, arbitrary Podman arguments, or host systemd commands. | Unsupported `podmanArgs`, `globalArgs`, and `config.quadlet.*` fields fail; [`render-quadlet.nix`](../modules/lib/render-quadlet.nix) owns a fixed key set. | Resolver unsupported-field matrix; negative reserved-field schema probe and security job in [`ci.yml`](../.github/workflows/ci.yml). |
-| **GRAFT-TM-03** | Supported scalar and list values cannot inject an additional generated line through control characters; parser-specific output is escaped mechanically. | Resolver line-safety and identity validators; renderer quoting plus `%` and `$` escaping. Broad literal fields receive line safety, not invented semantic policy. | Resolver control-character and unsafe-name tests; system/user escape assertions and real generator plus `systemd-analyze verify` checks in [`flake.nix`](../flake.nix). |
-| **GRAFT-TM-04** | Graft workload references use only the explicit source set and cannot silently cross target, identity, enablement, or lifecycle constraints. | `ConfigSource`, `ConfigIndex`, and graph validation in [`resolve.rs`](../crates/graft/src/resolve.rs); one explicit set invocation in [`materialise-containers.nix`](../modules/lib/materialise-containers.nix). | Missing, disabled, self, cross-target, duplicate, identity-membership, and mixed-cycle resolver tests; Quadlet dependency and network checks in [`flake.nix`](../flake.nix). |
-| **GRAFT-TM-05** | A resolved workload is materialised only by the module matching its effective `system` or `user` target. | Target filtering in [`materialise-containers.nix`](../modules/lib/materialise-containers.nix); separate [`nixos.nix`](../modules/nixos.nix) and [`home-manager.nix`](../modules/home-manager.nix) destinations. | NixOS/Home Manager module assertions prove opposite-target files are absent; [`activation.nix`](../tests/nixos/activation.nix) proves rootful system and rootless user-manager execution. |
-| **GRAFT-TM-06** | Materialisation does not imply startup. Typed startup has only fixed system/user targets, and dependency activation remains explicit. | Resolver maps `startup` to `multi-user.target` or `default.target`; absent intent renders no `[Install]`. | Resolver startup tests; `quadlet-activation` generator checks; manager transitions and foreign-unit preservation in [`activation.nix`](../tests/nixos/activation.nix). |
-| **GRAFT-TM-07** | Workload packages resolve only from host-selected sources: mandatory `graft-pause` from the configured Graft package and other TOML package names from `pkgs`; the rootfs and `/nix/store` lower content are rendered read-only, with writes directed to runtime overlay state. | Package mapping and rootfs construction in [`materialise-containers.nix`](../modules/lib/materialise-containers.nix); fixed `Rootfs=:O` and read-only store mount in [`render-quadlet.nix`](../modules/lib/render-quadlet.nix). | Nix module and real Quadlet generator checks in [`flake.nix`](../flake.nix). Runtime overlay durability is explicitly excluded. |
-| **GRAFT-TM-08** | Implemented non-default network namespaces are typed as `none` or a validated same-target Graft workload reference. | Network resolver and graph validation; source-unit rendering lets Quadlet own runtime identity and dependencies. | Resolver network matrix; `quadlet-network` generation; rootless no-network and shared-loopback checks in [`network.sh`](../tests/runtime/network.sh). |
-| **GRAFT-TM-09** | Current declarative startup changes do not implicitly remove mounted state, workspace markers, or foreign units. | Modules replace managed source-unit declarations only; no Graft cleanup control plane exists. | Removal, reboot, restoration, and preservation scenarios in [`activation.nix`](../tests/nixos/activation.nix). |
-| **GRAFT-TM-10** | External-unit dependency intent remains an exact, validated, visible same-manager unit name rather than host command text. | Strict concrete unit-name validation and fixed dependency axes in [`resolve.rs`](../crates/graft/src/resolve.rs). | External-name, identity-collision, module parity, real Quadlet translation, and `systemd-analyze verify` tests. Unit existence and safety are host review responsibilities. |
-| **GRAFT-TM-11** | Repository quality gates detect known dependency advisories, dependency-policy violations, secrets present in the current tracked-file snapshot, and unsafe workflow patterns before merge. | Pinned Nix tools and commit-pinned GitHub Actions. | `cargo-audit`, `cargo-deny`, the tracked-file gitleaks scan, zizmor, actionlint, named CI jobs, and coverage in [`ci.yml`](../.github/workflows/ci.yml). These checks do not scan removed secrets in Git history and reduce supply-chain risk without proving dependencies benign. |
+| **GRAFT-TM-01** | Unknown and explicitly configured unsupported intent never reaches normal resolved JSON. | [`schema.rs`][schema-source] uses `deny_unknown_fields`; [`resolve.rs`][resolve-source] exhaustively classifies parser fields and fails closed. | Parser `unknown_field_returns_error`; resolver `configured_unsupported_fields_return_field_specific_errors`, `explicit_empty_unsupported_leaf_values_return_errors`, and `validation_level_cannot_disable_fail_closed_resolution`; generated-schema parity in [`tests/schema.rs`][schema-tests]. |
+| **GRAFT-TM-02** | Graft TOML cannot supply raw Quadlet maps, arbitrary Podman arguments, or host systemd commands. | Unsupported `podmanArgs`, `globalArgs`, and `config.quadlet.*` fields fail; [`render-quadlet.nix`][renderer-source] owns a fixed key set. | Resolver unsupported-field matrix; negative reserved-field schema probe and security job in [`ci.yml`][ci-source]. |
+| **GRAFT-TM-03** | Supported scalar and list values cannot inject an additional generated line through control characters; parser-specific output is escaped mechanically. | Resolver line-safety and identity validators; renderer quoting plus `%` and `$` escaping. Broad literal fields receive line safety, not invented semantic policy. | Resolver control-character and unsafe-name tests; system/user escape assertions and real generator plus `systemd-analyze verify` checks in [`flake.nix`][flake-source]. |
+| **GRAFT-TM-04** | Graft workload references use only the explicit source set and cannot silently cross target, identity, enablement, or lifecycle constraints. | `ConfigSource`, `ConfigIndex`, and graph validation in [`resolve.rs`][resolve-source]; one explicit set invocation in [`materialise-containers.nix`][materialiser-source]. | Missing, disabled, self, cross-target, duplicate, identity-membership, and mixed-cycle resolver tests; Quadlet dependency and network checks in [`flake.nix`][flake-source]. |
+| **GRAFT-TM-05** | A resolved workload is materialised only by the module matching its effective `system` or `user` target; `user` selects manager scope, not an enforced non-root UID. | Target filtering in [`materialise-containers.nix`][materialiser-source]; separate [`nixos.nix`][nixos-source] and [`home-manager.nix`][home-manager-source] destinations. | Module assertions prove opposite-target files are absent; [`activation.nix`][activation-test] proves rootful system execution and rootless user-manager execution for its non-root test accounts. |
+| **GRAFT-TM-06** | Materialisation does not imply startup. Typed startup has only fixed system/user targets, and dependency activation remains explicit. | Resolver maps `startup` to `multi-user.target` or `default.target`; absent intent renders no `[Install]`. | Resolver startup tests; `quadlet-activation` generator checks; manager transitions and foreign-unit preservation in [`activation.nix`][activation-test]. |
+| **GRAFT-TM-07** | Workload packages resolve only from host-selected sources: mandatory `graft-pause` from the configured Graft package and other TOML package names from `pkgs`; the rootfs and `/nix/store` lower content are rendered read-only, with writes directed to runtime overlay state. | Package mapping and rootfs construction in [`materialise-containers.nix`][materialiser-source]; fixed `Rootfs=:O` and read-only store mount in [`render-quadlet.nix`][renderer-source]. | Nix module and real Quadlet generator checks in [`flake.nix`][flake-source]. Runtime overlay durability is explicitly excluded. |
+| **GRAFT-TM-08** | Implemented non-default network namespaces are typed as `none` or a validated same-target Graft workload reference. | Network resolver and graph validation; source-unit rendering lets Quadlet own runtime identity and dependencies. | Resolver network matrix; `quadlet-network` generation; rootless no-network and shared-loopback checks in [`network.sh`][network-test]. |
+| **GRAFT-TM-09** | Current declarative startup changes do not implicitly remove mounted state, workspace markers, or foreign units. | Modules replace managed source-unit declarations only; no Graft cleanup control plane exists. | Removal, reboot, restoration, and preservation scenarios in [`activation.nix`][activation-test]. |
+| **GRAFT-TM-10** | External-unit dependency intent remains an exact, validated, visible same-manager unit name rather than host command text. | Strict concrete unit-name validation and fixed dependency axes in [`resolve.rs`][resolve-source]. | External-name, identity-collision, module parity, real Quadlet translation, and `systemd-analyze verify` tests. Unit existence and safety are host review responsibilities. |
+| **GRAFT-TM-11** | Repository quality gates detect known dependency advisories, dependency-policy violations, secrets present in the current tracked-file snapshot, and unsafe workflow patterns before merge. | Pinned Nix tools and commit-pinned GitHub Actions. | `cargo-audit`, `cargo-deny`, the tracked-file gitleaks scan, zizmor, actionlint, named CI jobs, and coverage in [`ci.yml`][ci-source]. These checks do not scan removed secrets in Git history and reduce supply-chain risk without proving dependencies benign. |
 
 ## Threats, controls, and residual risk
 
@@ -216,12 +221,13 @@ parse every upstream grammar, or prove the resulting host policy safe.
 ### Runtime privilege and container escape
 
 System targets use rootful Podman. Their TOML is host-privileged and must not be
-accepted from an untrusted workload author. User targets use rootless Podman,
-but current Graft does not yet enforce per-container subordinate identities,
-capability drops, no-new-privileges, read-only mode, seccomp policy, security
-labels, a mandatory non-root container user, or workdir-only writes. Typed host
-device mappings are unavailable and fail closed; the runtime's standard device
-set remains upstream policy.
+accepted from an untrusted workload author. User targets use the current Home
+Manager account's authority: Podman is rootless for a non-root account and
+rootful under UID 0. Graft does not enforce that account UID or per-container
+subordinate identities, capability drops, no-new-privileges, read-only mode,
+seccomp policy, security labels, a mandatory non-root container user, or
+workdir-only writes. Typed host device mappings are unavailable and fail closed;
+the runtime's standard device set remains upstream policy.
 
 All explicit `config.security.*` intent currently fails closed. Therefore the
 runtime receives upstream defaults, not Graft's future secure defaults. Policy
@@ -316,8 +322,8 @@ risk. Rootfs construction currently tolerates some package `/etc` copy errors;
 
 | Context | Required assumption | Current boundary |
 | --- | --- | --- |
-| Local development | The operator reviews selected TOML and package intent. Repository code and data processed inside the workload may be untrusted. | Prefer a user target. Current Graft has no automatic workspace mount or interactive shell contract; explicit volumes carry their own host-file risk. |
-| Unattended server | Host administrators own account, linger, authentication, firewall, updates, logging, storage, and recovery policy. | Rootless is preferred, but secure defaults and per-container identities are not implemented. Early-alpha Graft is not a strong production isolation claim. |
+| Local development | The operator reviews selected TOML and package intent. Repository code and data processed inside the workload may be untrusted. | Prefer a user target under a non-root account. Current Graft has no automatic workspace mount or interactive shell contract; explicit volumes carry their own host-file risk. |
+| Unattended server | Host administrators own account, UID, linger, authentication, firewall, updates, logging, storage, and recovery policy. | Rootless under a non-root account is preferred, but secure defaults and per-container identities are not implemented. Early-alpha Graft is not a strong production isolation claim. |
 | Remote deployment | Any transport, credentials, host selection, approval, rollback, and remote Nix activation are trusted external tooling. | Graft has no remote deployment control plane yet; design and implementation remain in [#161] and [#174]. |
 | Temporary agents | Hostile code would require strict identity, mount, network, secret, TTL, cleanup, concurrency, and resource contracts. | Those contracts are not implemented. Do not treat current containers as disposable-agent isolation; use a VM when a shared kernel is insufficient. See [#151], [#153], and [#169]. |
 
@@ -326,8 +332,8 @@ risk. Rootfs construction currently tolerates some package `/etc` copy errors;
 For the current alpha, Graft explicitly does not guarantee:
 
 - VM-equivalent isolation or protection from host-kernel/runtime compromise;
-- safe execution of unreviewed selected TOML or untrusted system/rootful
-  workloads;
+- safe execution of unreviewed selected TOML or untrusted system/rootful or
+  root-owned user-target workloads;
 - isolation from other processes running as the same rootless host account;
 - secure container defaults, per-container UID/GID isolation, mount policy,
   resource limits, secret transport, or egress control;
@@ -352,7 +358,8 @@ A security-sensitive design or implementation must:
 2. state whether it narrows or deliberately expands authority;
 3. classify intent under [#128] as first-class, dangerous, or forbidden;
 4. expose effective defaults and relaxations in resolved/inspectable output;
-5. cover system/rootful and user/rootless targets separately;
+5. cover system/rootful, non-root user/rootless, and root-owned user/rootful
+   manager contexts separately;
 6. add negative tests for accidental activation, injection, target crossing, and
    incompatible combinations; and
 7. update this model when assumptions or accepted residual risks change.
@@ -363,7 +370,7 @@ by [#107] and [#108]. Related isolation, mount, secret, resource, shadowing,
 remote, and temporary-agent work is linked in the risk sections above.
 
 Suspected violations of these boundaries must follow the private
-[security reporting policy](../SECURITY.md), not a public issue.
+[security reporting policy][security-policy], not a public issue.
 
 [#107]: https://github.com/Patrick-Kappen/graft/issues/107
 [#108]: https://github.com/Patrick-Kappen/graft/issues/108
@@ -382,3 +389,15 @@ Suspected violations of these boundaries must follow the private
 [#171]: https://github.com/Patrick-Kappen/graft/issues/171
 [#174]: https://github.com/Patrick-Kappen/graft/issues/174
 [#193]: https://github.com/Patrick-Kappen/graft/issues/193
+[activation-test]: https://github.com/Patrick-Kappen/graft/blob/main/tests/nixos/activation.nix
+[ci-source]: https://github.com/Patrick-Kappen/graft/blob/main/.github/workflows/ci.yml
+[flake-source]: https://github.com/Patrick-Kappen/graft/blob/main/flake.nix
+[home-manager-source]: https://github.com/Patrick-Kappen/graft/blob/main/modules/home-manager.nix
+[materialiser-source]: https://github.com/Patrick-Kappen/graft/blob/main/modules/lib/materialise-containers.nix
+[network-test]: https://github.com/Patrick-Kappen/graft/blob/main/tests/runtime/network.sh
+[nixos-source]: https://github.com/Patrick-Kappen/graft/blob/main/modules/nixos.nix
+[renderer-source]: https://github.com/Patrick-Kappen/graft/blob/main/modules/lib/render-quadlet.nix
+[resolve-source]: https://github.com/Patrick-Kappen/graft/blob/main/crates/graft/src/resolve.rs
+[schema-source]: https://github.com/Patrick-Kappen/graft/blob/main/crates/graft/src/config/schema.rs
+[schema-tests]: https://github.com/Patrick-Kappen/graft/blob/main/crates/graft/tests/schema.rs
+[security-policy]: https://github.com/Patrick-Kappen/graft/blob/main/SECURITY.md

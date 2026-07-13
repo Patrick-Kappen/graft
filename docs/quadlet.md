@@ -16,8 +16,8 @@ TOML → CLI resolved JSON → NixOS/Home Manager module → .container
 
 | Resolved target | Scope | Path |
 | --- | --- | --- |
-| `system` | system/rootful | `/etc/containers/systemd/` |
-| `user` | user/rootless | `~/.config/containers/systemd/` |
+| `system` | system manager, rootful | `/etc/containers/systemd/` |
+| `user` | current account's user manager; rootless only when non-root | `~/.config/containers/systemd/` |
 
 Symlinks are supported. NixOS can build a file in the store and link it through
 `environment.etc`. Home Manager can link a file through `xdg.configFile`.
@@ -217,8 +217,10 @@ Reviewable overlay inspection, diff, and promotion are future work in
 [#175](https://github.com/Patrick-Kappen/graft/issues/175).
 
 System containers (`target = "system"`) use rootful Podman with kernel overlayfs
-through `:O`. User containers (`target = "user"`) use rootless Podman and
-rootless overlay support such as `fuse-overlayfs`.
+through `:O`. User-target containers run through the current Home Manager
+account's user manager. Podman and rootless overlay support such as
+`fuse-overlayfs` apply only when that account is non-root; a root-owned user
+manager remains rootful.
 
 ## Lifecycle
 

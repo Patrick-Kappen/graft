@@ -191,8 +191,9 @@ renders the corresponding `[Install]` relationship; see
 - No downloads happen at runtime.
 
 System containers (`target = "system"`) use rootful Podman and kernel overlayfs
-via `:O`. User containers (`target = "user"`) use rootless Podman and rootless
-overlay support such as `fuse-overlayfs`.
+via `:O`. User-target containers run through the current Home Manager account's
+user manager. Podman and rootless overlay support such as `fuse-overlayfs` apply
+only when that account is non-root; a root-owned user manager remains rootful.
 
 ## Everything is a service
 
@@ -200,8 +201,9 @@ All managed container runtime instances are Quadlet/systemd services. There is
 no separate shell-container concept in the current config model. A container
 stays alive as long as its resolved `Exec=` process stays alive.
 
-Other systemd units can trigger a generated service. An external user timer may
-trigger a rootless workload with `service.lifecycle = "job"`; native typed timer
+Other systemd units can trigger a generated service. An external non-root user
+timer may trigger a rootless workload with `service.lifecycle = "job"`; native
+typed timer
 generation remains in [#134](https://github.com/Patrick-Kappen/graft/issues/134).
 See [Workload lifecycle semantics](lifecycle.md) for finite and retained-job
 behavior. Host policy remains

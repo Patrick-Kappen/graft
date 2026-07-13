@@ -29,7 +29,7 @@ The concepts remain distinct:
 | Intent | Field | Meaning |
 | --- | --- | --- |
 | Materialise the workload | `deploy.enable` | Whether the target module renders the Quadlet source unit |
-| Select the service manager | `deploy.target` | System/rootful or user/rootless materialisation |
+| Select the service manager | `deploy.target` | System manager or current Home Manager account's user manager; rootless only when that account is non-root |
 | Request at manager startup | `deploy.activation` | Optional startup relationship |
 | Describe process behavior | `config.service.lifecycle` | Long-running service, finite job, or retained setup |
 | Start through another workload | `dependencies[].requirement` or typed resource reference | Dependency activation owned by the typed dependency or resource contract |
@@ -71,8 +71,12 @@ activation side effect.
 
 ## User-manager and linger boundary
 
-For a user workload, `startup` means user-manager startup, not an unconditional
-host-boot guarantee:
+For a user workload, `startup` means startup of the current Home Manager
+account's user manager, not an unconditional host-boot guarantee. Podman is
+rootless only when that account is non-root; the module does not reject UID 0,
+so a root-owned user manager retains root authority.
+
+Manager availability still depends on host policy:
 
 - with declarative linger, the user manager can start during host boot;
 - without linger, it normally starts when the user logs in;
@@ -81,8 +85,8 @@ host-boot guarantee:
 Linger, user creation, login sessions, and manager availability are host policy.
 Graft TOML does not mutate them. Future `graft doctor` diagnostics in
 [#101](https://github.com/Patrick-Kappen/graft/issues/101) may report that a
-requested rootless startup workload lacks the required host policy, but must not
-enable linger implicitly.
+requested non-root rootless startup workload lacks the required host policy,
+but must not enable linger implicitly.
 
 ## Lifecycle combinations
 

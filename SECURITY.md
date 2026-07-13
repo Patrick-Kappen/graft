@@ -42,7 +42,8 @@ the issue:
 
 - affected Graft release or commit;
 - NixOS system or Home Manager user scope;
-- system/rootful or user/rootless target;
+- system or user target, the effective host UID, and whether Podman is rootful
+  or rootless;
 - architecture and relevant Nixpkgs, Podman, Quadlet, and systemd versions;
 - a minimal sanitized TOML or generated-unit fragment;
 - reproduction steps, expected behavior, and observed security impact;
@@ -54,10 +55,12 @@ dumps, or complete logs. Replace sensitive values with clear placeholders.
 
 ## Isolation and trust boundaries
 
-Rootless containers are the preferred direction for unattended server
-workloads, but containers share the host kernel and are not a VM-equivalent
-security boundary. System-target workloads are rootful. Repository intent must
-remain constrained by trusted host and security policy.
+Rootless containers under a non-root account are the preferred direction for
+unattended server workloads, but containers share the host kernel and are not a
+VM-equivalent security boundary. System-target workloads are rootful. A user
+target selects the current Home Manager account's user manager; it is rootless
+only when that account is non-root, and Graft does not enforce the UID.
+Repository intent must remain constrained by trusted host and security policy.
 
 The current assumptions, invariants, and accepted residual risks are defined in
 [Threat model and trust boundaries](docs/threat-model.md). Secure defaults and
