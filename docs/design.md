@@ -171,8 +171,9 @@ That is CLI logic.
 ## Rootfs and Quadlet
 
 The current `rootfs-store` mode uses a rootfs from the Nix store, not container
-images. Later artifact backend decisions are described in
-[Long-term vision](vision.md).
+images. Non-rootfs artifact scope remains undecided in
+[#150](https://github.com/Patrick-Kappen/graft/issues/150); no future syntax is
+promised.
 
 ```ini
 [Container]
@@ -214,8 +215,10 @@ The resolved JSON is a Nix store artefact, not a committed file.
 ## Current boundary
 
 The current implementation focuses on the rootfs-store materialisation path.
-The TOML schema is broader than what the MVP renders today, but the renderer now
-covers the common fields listed in [Reference](reference.md).
+The generated TOML schema exposes only implemented intent; reserved parser
+fields fail closed. [Reference](reference.md) documents field semantics, while
+[Capability status](capabilities.md) records which pipeline stages each field
+reaches and separates current, deferred, dangerous, and forbidden behavior.
 
 Currently proven:
 

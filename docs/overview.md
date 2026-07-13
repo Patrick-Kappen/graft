@@ -6,8 +6,9 @@ materialise rootfs paths and Quadlet `.container` files.
 
 The current `rootfs-store` backend is a Nix-native container workflow with no
 image pulls, no ad-hoc package installs inside containers, and no hand-written
-Quadlet boilerplate. See [Long-term vision](vision.md) for later artifact and
-placement directions.
+Quadlet boilerplate. Non-rootfs artifact scope remains undecided in
+[#150](https://github.com/Patrick-Kappen/graft/issues/150); placement direction
+is kept separately in [Long-term vision](vision.md).
 
 ## Core flow
 
@@ -64,6 +65,7 @@ Current CLI rules:
 
 - require `version = 1`
 - validate container names and supported values before JSON output
+- reject every explicitly configured reserved field instead of discarding it
 - add `graft-pause` to every rootfs
 - use `/bin/graft-pause` when the user did not set a command
 - preserve user commands exactly
@@ -214,9 +216,11 @@ the container.
 ## Current scope
 
 The current MVP proves the rootfs-store path for both NixOS and Home Manager.
-It renders a useful subset of Quadlet fields, while the TOML schema remains
-broader than the implemented renderer. See [Reference](reference.md) for the
-current field list and [Non-goals](non-goals.md) for deliberate exclusions.
+The generated schema contains only intent that reaches the implemented pipeline;
+parser-recognised roadmap fields fail closed instead of disappearing. See
+[Reference](reference.md) for current semantics,
+[Capability status](capabilities.md) for every pipeline stage, and
+[Non-goals](non-goals.md) for deliberate exclusions.
 
 For the active implementation direction, see [Roadmap](roadmap.md). For the
 later portable workload direction, see [Long-term vision](vision.md).
@@ -232,10 +236,12 @@ graft/
   crates/
     graft/             # Rust package: CLI resolver + graft-pause
   examples/
-    reference.toml     # annotated TOML reference
+    quickstart/        # schema-validated runnable examples
   docs/
     design.md          # design decisions and principles
     overview.md        # this file
+    reference.md       # current configuration contract
+    capabilities.md    # authoritative pipeline and status matrix
     vision.md          # long-term product direction
     quadlet.md         # Quadlet output notes
     roadmap.md         # roadmap and future direction

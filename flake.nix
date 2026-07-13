@@ -485,6 +485,84 @@
             assert !(lib.hasInfix "WorkingDir=" quickstartHomeManagerRendered);
             pkgs.writeText "graft-home-manager-module-eval" homeManagerRendered;
 
+          documentation-drift =
+            pkgs.runCommand "graft-documentation-drift"
+              {
+                nativeBuildInputs = [ pkgs.python3 ];
+              }
+              ''
+                python3 - "${./crates/graft/schema/graft-v1.schema.json}" "${./docs/capabilities.md}" <<'PY'
+                import json
+                import sys
+                from collections import Counter
+                from pathlib import Path
+
+                schema_path, documentation_path = map(Path, sys.argv[1:])
+                schema = json.loads(schema_path.read_text())
+                definitions = schema["$defs"]
+
+                def resolve_reference(node):
+                    if "$ref" in node:
+                        return definitions[node["$ref"].rsplit("/", 1)[1]]
+                    for variant in node.get("anyOf", []):
+                        if "$ref" in variant:
+                            return resolve_reference(variant)
+                    return node
+
+                def collect_fields(node, prefix, fields):
+                    for name, raw_property in node["properties"].items():
+                        path = f"{prefix}.{name}" if prefix else name
+                        resolved_property = resolve_reference(raw_property)
+                        nested_properties = resolved_property.get("properties")
+                        if nested_properties is not None:
+                            collect_fields(resolved_property, path, fields)
+                            continue
+
+                        fields.add(path)
+                        items = resolved_property.get("items")
+                        if items is None:
+                            continue
+                        resolved_items = resolve_reference(items)
+                        if resolved_items.get("properties") is not None:
+                            collect_fields(resolved_items, f"{path}[]", fields)
+
+                schema_fields = set()
+                collect_fields(schema, "", schema_fields)
+
+                documentation = documentation_path.read_text()
+                start_marker = "<!-- supported-schema-fields:start -->"
+                end_marker = "<!-- supported-schema-fields:end -->"
+                if documentation.count(start_marker) != 1 or documentation.count(end_marker) != 1:
+                    raise SystemExit("capability documentation must contain exactly one supported-field marker pair")
+
+                table = documentation.split(start_marker, 1)[1].split(end_marker, 1)[0]
+                documented_fields = [
+                    line.split("`", 2)[1]
+                    for line in table.splitlines()
+                    if line.startswith("| `")
+                ]
+                duplicates = sorted(
+                    field for field, count in Counter(documented_fields).items() if count > 1
+                )
+                if duplicates:
+                    raise SystemExit(
+                        "duplicate supported capability field(s): " + ", ".join(duplicates)
+                    )
+
+                documented_field_set = set(documented_fields)
+                missing = sorted(schema_fields - documented_field_set)
+                extra = sorted(documented_field_set - schema_fields)
+                if missing or extra:
+                    messages = []
+                    if missing:
+                        messages.append("missing from capability documentation: " + ", ".join(missing))
+                    if extra:
+                        messages.append("absent from supported schema: " + ", ".join(extra))
+                    raise SystemExit("\n".join(messages))
+                PY
+                touch $out
+              '';
+
           network-runtime-rootfs = pkgs.runCommand "graft-network-runtime-rootfs" { } ''
             mkdir -p $out/bin $out/etc $out/tmp $out/www
             cp ${pkgs.pkgsStatic.busybox}/bin/busybox $out/bin/busybox
@@ -723,6 +801,7 @@
               git
               gitleaks
               llvmPackages.llvm
+              lychee
               markdownlint-cli2
               mdbook
               nixfmt
@@ -732,6 +811,7 @@
               shellcheck
               statix
               taplo
+              typos
               zizmor
             ];
           };

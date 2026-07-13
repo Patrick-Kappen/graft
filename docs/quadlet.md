@@ -1,7 +1,9 @@
 # Quadlet — Graft output
 
 Quadlet is a Podman systemd generator. It reads `.container` files and generates
-ordinary systemd `.service` units from them.
+ordinary systemd `.service` units from them. Current generator checks use Podman
+5.8.2 and systemd 260; see the versioned links in
+[Capability status](capabilities.md#tested-upstream-context).
 
 In Graft, Quadlet is output. Users write TOML; the CLI resolves it to JSON; the
 NixOS and Home Manager modules render `.container` files.
@@ -58,7 +60,9 @@ JSON:
 ## Rootfs-store mapping
 
 The current `rootfs-store` mode uses a rootfs from the Nix store, not images.
-Later artifact backend decisions are described in [Long-term vision](vision.md).
+Non-rootfs artifact scope remains undecided in
+[#150](https://github.com/Patrick-Kappen/graft/issues/150); no future syntax is
+promised.
 
 | Quadlet option | Source |
 | --- | --- |
@@ -106,16 +110,11 @@ This avoids default dependencies on `bashInteractive`, `coreutils`, or
 
 ## Optional container keys
 
-Graft renders optional Quadlet container keys only when the resolved JSON contains
-them:
-
-- `HostName=` from `config.container.hostname`
-- `User=` from `config.container.user`
-- `Group=` from `config.container.group`
-- `WorkingDir=` from `config.container.workingDir`
-- `EnvironmentFile=` from `config.container.environmentFile`
-- `PublishPort=` from `config.network.publish`
-- `Volume=` from `config.filesystem.volumes`
+Graft renders optional Quadlet keys only when the resolved JSON contains them.
+The authoritative TOML → resolved JSON → Nix → Quadlet mapping is the
+[current-field capability matrix](capabilities.md#current-graft-v1-fields).
+This page describes output-specific behavior rather than maintaining a second
+field reference.
 
 Typed `Network=` output supports `none` and resolved `.container` source-unit
 references. The source-unit form lets Quadlet add automatic `Requires=` and

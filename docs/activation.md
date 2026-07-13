@@ -251,6 +251,6 @@ This design was checked against Podman/Quadlet 5.8.2 and systemd's unit model:
 - Podman's fixture verifies the generated install symlinks for every supported
   relationship:
   [upstream fixture](https://github.com/containers/podman/blob/5b263b5f5b48004a87caac44e67349a8266d9ef4/test/e2e/quadlet/install.container#L1-L26).
-- systemd defines `WantedBy=` as the install-time reverse of a weak `Wants=`
+- systemd 260 defines `WantedBy=` as the install-time reverse of a weak `Wants=`
   dependency and distinguishes it from ordering:
-  [`systemd.unit`](https://www.freedesktop.org/software/systemd/man/latest/systemd.unit.html#%5BInstall%5D%20Section%20Options).
+  [`systemd.unit`](https://www.freedesktop.org/software/systemd/man/260/systemd.unit.html#%5BInstall%5D%20Section%20Options).

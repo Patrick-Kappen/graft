@@ -22,7 +22,9 @@ The current implementation proves the core rootfs-store path:
   quoted environment, environment files, published ports, volumes, and service
   timing.
 
-The MVP intentionally does not cover the full TOML schema yet.
+The generated TOML schema intentionally exposes only the implemented MVP
+contract. Additional parser-recognised roadmap fields fail closed; their status
+is recorded in [Capability status](capabilities.md).
 
 ## Direction
 
@@ -171,9 +173,10 @@ modules.
 
 ## Broader Quadlet coverage
 
-The TOML schema already contains more concepts than the MVP renders. The current
-renderer covers useful basics, but later phases should map more of the schema
-into resolved JSON and Quadlet output.
+The parser contains reserved roadmap concepts beyond the generated supported
+schema. The current renderer covers useful basics, and later phases may promote
+typed fields into the schema, resolved JSON, and Quadlet output only when their
+full contract is implemented.
 
 Remaining areas include:
 
@@ -183,9 +186,9 @@ Remaining areas include:
 - resources and health checks
 - labels and annotations
 - DNS, aliases, and network policy
-- podman args / explicit escape hatches
 
-Escape hatches must not override keys owned by Graft.
+Unrestricted Podman or Quadlet escape hatches are not a coverage goal. New needs
+must become typed intent and cannot override keys owned by Graft.
 
 ## Non-goals and constraints
 
