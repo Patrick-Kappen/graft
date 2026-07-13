@@ -1,13 +1,14 @@
 # =============================================================================
 # GRAFT - reference.toml
 # Annotated schema reference for Graft TOML.
-# Some fields are parse-only today and do not affect Quadlet output yet.
+# Parser-recognised fields marked as reserved are rejected during normal resolution until implemented; they never disappear silently.
 # =============================================================================
 
 
 # -----------------------------------------------------------------------------
-# Current primary schema
-# See docs/reference.md for the fields rendered today.
+# Current primary parser shape
+# See docs/reference.md and the generated JSON Schema for the fields supported today.
+# Lines marked as reserved are parser-only and fail normal resolution when configured.
 # Rendered command argv and environment-file entries are quoted for systemd parsing; generated command-line arguments escape systemd % specifiers and $ variables.
 # -----------------------------------------------------------------------------
 
@@ -15,7 +16,7 @@
 # name =
 
 # [parents]
-# add =
+# add =                           # reserved; normal resolution rejects it
 
 # [deploy]
 # enable =
@@ -28,15 +29,15 @@
 # command =                      # rendered as quoted Quadlet Exec argv; entries non-empty, no control characters
 
 # [config.container]
-# name =
+# name =                         # reserved; normal resolution rejects it
 # hostname =                     # literal Quadlet HostName; non-empty, no control characters; no template expansion yet
-# entrypoint =
+# entrypoint =                   # reserved; normal resolution rejects it
 # user =                         # literal Quadlet User; non-empty, no control characters; no UID validation yet
 # group =                        # literal Quadlet Group; requires user; non-empty, no control characters; no GID validation yet
 # workingDir =                   # literal Quadlet WorkingDir; non-empty, no control characters; no path existence check
 # environmentFile =              # quoted literal Quadlet EnvironmentFile entries; non-empty, no control characters; user order preserved; files are not generated
-# stopSignal =
-# stopTimeout =
+# stopSignal =                   # reserved; normal resolution rejects it
+# stopTimeout =                  # reserved; normal resolution rejects it
 
 # [config.container.environment]
 # KEY =                          # quoted Quadlet Environment="KEY=value"; sorted; key non-empty/no whitespace/no '='; value no control chars; quotes/backslashes/%/$ escaped
@@ -52,8 +53,8 @@
 # publish =                      # literal Quadlet PublishPort entries; default mode only; non-empty, no control characters; user order preserved
 
 # [config.security]
-# dropCapabilities =
-# noNewPrivileges =
+# dropCapabilities =             # reserved; normal resolution rejects it
+# noNewPrivileges =              # reserved; normal resolution rejects it
 
 # [config.service]
 # lifecycle =                    # long-running | job | setup; finite lifecycles require an explicit command
@@ -71,6 +72,8 @@
 # =============================================================================
 # Roadmap
 # =============================================================================
+# Parser-recognised fields below fail normal resolution until their capabilities are implemented.
+# Illustrative fields not recognised by the parser fail TOML parsing instead.
 
 
 # -----------------------------------------------------------------------------
@@ -87,7 +90,7 @@
 # set =                          # ["child/name"]
 
 # [validation]
-# level =                        # off | warn | strict
+# level =                        # reserved; off | warn | strict all fail closed
 
 # [config.runtime.packageOps]
 # add =                          # ["pkg"]
@@ -227,10 +230,10 @@
 # startDelay =                   # string (e.g. "500ms", "2s")
 
 # [config.service] - remaining option
-# restartIfChanged =             # reserved; not implemented
+# restartIfChanged =             # reserved; normal resolution rejects it
 
-# [config.quadlet.container]    # raw passthrough (cannot set Rootfs, ContainerName, Exec, Network, Volume)
-# [config.quadlet.service]      # raw passthrough
+# [config.quadlet.container]    # rejected; raw passthrough is not supported
+# [config.quadlet.service]      # rejected; raw passthrough is not supported
 # [config.quadlet.install]      # rejected; use [deploy] activation = "startup"
 
 

@@ -186,8 +186,11 @@ human-reference split in #180.
 
 Adding a parser field does not automatically make it supported intent. Expose it
 in the machine-readable schema only when the resolver and materialiser implement
-it; #106 owns fail-closed handling for reserved fields still accepted by the
-parser.
+it. Normal resolution fails closed for every explicitly configured reserved
+field, including `false`, zero, and empty leaf values; empty parent sections with
+no configured fields remain valid. `validation.level` cannot downgrade this
+contract. Classify every new parser field in the exhaustive unsupported-intent
+validation and extend its field-path matrix before merging it.
 
 ## Standard checks
 

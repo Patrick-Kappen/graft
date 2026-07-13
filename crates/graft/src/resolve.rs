@@ -6,8 +6,9 @@ use anyhow::{bail, Context, Result};
 use serde::Serialize;
 
 use crate::config::schema::{
-    Container, ContainerConfig, DeployActivation, DeployTarget, Filesystem, FilesystemVolume,
-    Network, NetworkMode, Runtime, Service, ServiceLifecycle,
+    Attach, Config, Container, ContainerConfig, Deploy, DeployActivation, DeployTarget, Filesystem,
+    FilesystemVolume, GraphRefs, Health, Home, Network, NetworkMode, PackageOps, Quadlet,
+    Resources, Runtime, Security, Service, ServiceLifecycle, Validation, Workspace,
 };
 
 const SUPPORTED_VERSION: u32 = 1;
@@ -323,11 +324,434 @@ fn requires_config_index(sources: &[ConfigSource<'_>]) -> bool {
     })
 }
 
+macro_rules! reject {
+    ($value:expr, $field:literal) => {
+        if $value.is_some() {
+            bail!(concat!($field, " is configured but not implemented"));
+        }
+    };
+}
+
+fn validate_no_unsupported_intent(source: &ContainerConfig) -> Result<()> {
+    // Keep these patterns exhaustive so every parser field must be classified.
+    let ContainerConfig {
+        version: _,
+        name: _,
+        parents,
+        children,
+        deploy,
+        validation,
+        config,
+    } = source;
+
+    if let Some(GraphRefs { add, remove, set }) = parents {
+        reject!(add, "parents.add");
+        reject!(remove, "parents.remove");
+        reject!(set, "parents.set");
+    }
+    if let Some(GraphRefs { add, remove, set }) = children {
+        reject!(add, "children.add");
+        reject!(remove, "children.remove");
+        reject!(set, "children.set");
+    }
+    if let Some(deploy) = deploy {
+        let Deploy {
+            enable: _,
+            target: _,
+            activation: _,
+        } = deploy;
+    }
+    if let Some(Validation { level }) = validation {
+        if level.is_some() {
+            bail!(
+                "validation.level is configured but not implemented; normal resolution always fails closed"
+            );
+        }
+    }
+
+    let Some(Config {
+        runtime,
+        container,
+        filesystem,
+        network,
+        networks,
+        volumes,
+        security,
+        resources,
+        secrets,
+        workspace,
+        home,
+        attach,
+        service,
+        quadlet,
+    }) = config
+    else {
+        return Ok(());
+    };
+
+    reject!(networks, "config.networks");
+    reject!(volumes, "config.volumes");
+    reject!(secrets, "config.secrets");
+
+    validate_unsupported_runtime_intent(runtime.as_ref())?;
+
+    validate_unsupported_container_intent(container.as_ref())?;
+
+    validate_unsupported_filesystem_intent(filesystem.as_ref())?;
+
+    validate_unsupported_network_intent(network.as_ref())?;
+
+    validate_unsupported_security_intent(security.as_ref())?;
+
+    validate_unsupported_resources_intent(resources.as_ref())?;
+
+    validate_unsupported_state_intent(workspace.as_ref(), home.as_ref(), attach.as_ref())?;
+
+    validate_unsupported_service_intent(service.as_ref())?;
+    validate_unsupported_quadlet_intent(quadlet.as_ref())?;
+
+    Ok(())
+}
+
+fn validate_unsupported_runtime_intent(runtime: Option<&Runtime>) -> Result<()> {
+    let Some(Runtime {
+        mode: _,
+        packages: _,
+        command: _,
+        package_ops,
+    }) = runtime
+    else {
+        return Ok(());
+    };
+
+    if let Some(PackageOps {
+        add,
+        remove,
+        replace,
+    }) = package_ops
+    {
+        reject!(add, "config.runtime.packageOps.add");
+        reject!(remove, "config.runtime.packageOps.remove");
+        reject!(replace, "config.runtime.packageOps.replace");
+    }
+
+    Ok(())
+}
+
+fn validate_unsupported_container_intent(container: Option<&Container>) -> Result<()> {
+    let Some(Container {
+        name,
+        hostname: _,
+        pod,
+        entrypoint,
+        stop_signal,
+        stop_timeout,
+        working_dir: _,
+        user: _,
+        group: _,
+        timezone,
+        notify,
+        run_init,
+        annotations,
+        environment: _,
+        environment_file: _,
+        environment_host,
+        podman_args,
+        global_args,
+        ip,
+        ip6,
+        network_alias,
+        expose_host_port,
+        uid_map,
+        gid_map,
+        sub_uid_map,
+        sub_gid_map,
+        shm_size,
+        mask,
+        unmask_paths,
+        sysctl,
+        log_driver,
+        health,
+    }) = container
+    else {
+        return Ok(());
+    };
+
+    reject!(name, "config.container.name");
+    reject!(pod, "config.container.pod");
+    reject!(entrypoint, "config.container.entrypoint");
+    reject!(stop_signal, "config.container.stopSignal");
+    reject!(stop_timeout, "config.container.stopTimeout");
+    reject!(timezone, "config.container.timezone");
+    reject!(notify, "config.container.notify");
+    reject!(run_init, "config.container.runInit");
+    reject!(annotations, "config.container.annotations");
+    reject!(environment_host, "config.container.environmentHost");
+    reject!(podman_args, "config.container.podmanArgs");
+    reject!(global_args, "config.container.globalArgs");
+    reject!(ip, "config.container.ip");
+    reject!(ip6, "config.container.ip6");
+    reject!(network_alias, "config.container.networkAlias");
+    reject!(expose_host_port, "config.container.exposeHostPort");
+    reject!(uid_map, "config.container.uidMap");
+    reject!(gid_map, "config.container.gidMap");
+    reject!(sub_uid_map, "config.container.subUidMap");
+    reject!(sub_gid_map, "config.container.subGidMap");
+    reject!(shm_size, "config.container.shmSize");
+    reject!(mask, "config.container.mask");
+    reject!(unmask_paths, "config.container.unmaskPaths");
+    reject!(sysctl, "config.container.sysctl");
+    reject!(log_driver, "config.container.logDriver");
+    validate_unsupported_health_intent(health.as_ref())
+}
+
+fn validate_unsupported_health_intent(health: Option<&Health>) -> Result<()> {
+    let Some(Health {
+        cmd,
+        interval,
+        timeout,
+        retries,
+        start_period,
+        on_failure,
+        startup_cmd,
+        startup_interval,
+        startup_retries,
+        startup_success,
+        startup_timeout,
+    }) = health
+    else {
+        return Ok(());
+    };
+
+    reject!(cmd, "config.container.health.cmd");
+    reject!(interval, "config.container.health.interval");
+    reject!(timeout, "config.container.health.timeout");
+    reject!(retries, "config.container.health.retries");
+    reject!(start_period, "config.container.health.startPeriod");
+    reject!(on_failure, "config.container.health.onFailure");
+    reject!(startup_cmd, "config.container.health.startupCmd");
+    reject!(startup_interval, "config.container.health.startupInterval");
+    reject!(startup_retries, "config.container.health.startupRetries");
+    reject!(startup_success, "config.container.health.startupSuccess");
+    reject!(startup_timeout, "config.container.health.startupTimeout");
+
+    Ok(())
+}
+
+fn validate_unsupported_filesystem_intent(filesystem: Option<&Filesystem>) -> Result<()> {
+    let Some(Filesystem {
+        read_only,
+        read_only_tmpfs,
+        tmpfs,
+        mounts,
+        volumes: _,
+        devices,
+    }) = filesystem
+    else {
+        return Ok(());
+    };
+
+    reject!(read_only, "config.filesystem.readOnly");
+    reject!(read_only_tmpfs, "config.filesystem.readOnlyTmpfs");
+    reject!(tmpfs, "config.filesystem.tmpfs");
+    reject!(mounts, "config.filesystem.mounts");
+    reject!(devices, "config.filesystem.devices");
+
+    Ok(())
+}
+
+fn validate_unsupported_network_intent(network: Option<&Network>) -> Result<()> {
+    let Some(Network {
+        mode: _,
+        container: _,
+        publish: _,
+        dns,
+        dns_option,
+        dns_search,
+        add_host,
+    }) = network
+    else {
+        return Ok(());
+    };
+
+    reject!(dns, "config.network.dns");
+    reject!(dns_option, "config.network.dnsOption");
+    reject!(dns_search, "config.network.dnsSearch");
+    reject!(add_host, "config.network.addHost");
+
+    Ok(())
+}
+
+fn validate_unsupported_security_intent(security: Option<&Security>) -> Result<()> {
+    let Some(Security {
+        drop_capabilities,
+        add_capabilities,
+        no_new_privileges,
+        privileged,
+        seccomp_profile,
+        security_label_disable,
+        security_label_file_type,
+        security_label_level,
+        security_label_nested,
+        security_label_type,
+        security_opt,
+        userns,
+    }) = security
+    else {
+        return Ok(());
+    };
+
+    reject!(drop_capabilities, "config.security.dropCapabilities");
+    reject!(add_capabilities, "config.security.addCapabilities");
+    reject!(no_new_privileges, "config.security.noNewPrivileges");
+    reject!(privileged, "config.security.privileged");
+    reject!(seccomp_profile, "config.security.seccompProfile");
+    reject!(
+        security_label_disable,
+        "config.security.securityLabelDisable"
+    );
+    reject!(
+        security_label_file_type,
+        "config.security.securityLabelFileType"
+    );
+    reject!(security_label_level, "config.security.securityLabelLevel");
+    reject!(security_label_nested, "config.security.securityLabelNested");
+    reject!(security_label_type, "config.security.securityLabelType");
+    reject!(security_opt, "config.security.securityOpt");
+    reject!(userns, "config.security.userns");
+
+    Ok(())
+}
+
+fn validate_unsupported_resources_intent(resources: Option<&Resources>) -> Result<()> {
+    let Some(Resources {
+        memory,
+        memory_swap,
+        cpus,
+        cpu_quota,
+        pids_limit,
+        ulimits,
+    }) = resources
+    else {
+        return Ok(());
+    };
+
+    reject!(memory, "config.resources.memory");
+    reject!(memory_swap, "config.resources.memorySwap");
+    reject!(cpus, "config.resources.cpus");
+    reject!(cpu_quota, "config.resources.cpuQuota");
+    reject!(pids_limit, "config.resources.pidsLimit");
+    reject!(ulimits, "config.resources.ulimits");
+
+    Ok(())
+}
+
+fn validate_unsupported_state_intent(
+    workspace: Option<&Workspace>,
+    home: Option<&Home>,
+    attach: Option<&Attach>,
+) -> Result<()> {
+    if let Some(Workspace {
+        mode,
+        source,
+        target,
+        review,
+        promote,
+        exclude_patterns,
+    }) = workspace
+    {
+        reject!(mode, "config.workspace.mode");
+        reject!(source, "config.workspace.source");
+        reject!(target, "config.workspace.target");
+        reject!(review, "config.workspace.review");
+        reject!(promote, "config.workspace.promote");
+        reject!(exclude_patterns, "config.workspace.excludePatterns");
+    }
+
+    if let Some(Home {
+        mode,
+        source,
+        target,
+        review,
+        promote,
+        ephemeral,
+        shadow,
+    }) = home
+    {
+        reject!(mode, "config.home.mode");
+        reject!(source, "config.home.source");
+        reject!(target, "config.home.target");
+        reject!(review, "config.home.review");
+        reject!(promote, "config.home.promote");
+        reject!(ephemeral, "config.home.ephemeral");
+        reject!(shadow, "config.home.shadow");
+    }
+
+    if let Some(Attach {
+        tmux_session,
+        shell,
+        start_delay,
+    }) = attach
+    {
+        reject!(tmux_session, "config.attach.tmuxSession");
+        reject!(shell, "config.attach.shell");
+        reject!(start_delay, "config.attach.startDelay");
+    }
+
+    Ok(())
+}
+
+fn validate_unsupported_service_intent(service: Option<&Service>) -> Result<()> {
+    let Some(Service {
+        lifecycle: _,
+        service_type,
+        restart: _,
+        restart_sec: _,
+        timeout_start_sec: _,
+        timeout_stop_sec: _,
+        remain_after_exit,
+        restart_if_changed,
+    }) = service
+    else {
+        return Ok(());
+    };
+
+    if service_type.is_some() {
+        bail!("config.service.type is not supported; use config.service.lifecycle");
+    }
+    if remain_after_exit.is_some() {
+        bail!("config.service.remainAfterExit is not supported; use config.service.lifecycle");
+    }
+    reject!(restart_if_changed, "config.service.restartIfChanged");
+
+    Ok(())
+}
+
+fn validate_unsupported_quadlet_intent(quadlet: Option<&Quadlet>) -> Result<()> {
+    let Some(Quadlet {
+        container,
+        service,
+        install,
+    }) = quadlet
+    else {
+        return Ok(());
+    };
+
+    reject!(container, "config.quadlet.container");
+    reject!(service, "config.quadlet.service");
+    if install.is_some() {
+        bail!("config.quadlet.install is not supported; use deploy.activation = \"startup\"");
+    }
+
+    Ok(())
+}
+
 fn resolve_internal(
     config: &ContainerConfig,
     context: Option<&ConfigIndex>,
 ) -> Result<ResolvedContainer> {
     validate_version(config)?;
+    validate_no_unsupported_intent(config)?;
 
     let name = resolve_name(config)?;
     let runtime = config
@@ -737,6 +1161,7 @@ impl ConfigIndex {
 
 fn index_source(source: &ConfigSource<'_>) -> Result<(WorkloadKey, IndexedWorkload)> {
     validate_version(source.config)?;
+    validate_no_unsupported_intent(source.config)?;
     if !is_safe_container_name(source.unit_name) {
         bail!(
             "Quadlet source unit name contains unsupported characters: {}",
@@ -1075,14 +1500,6 @@ fn resolve_service_lifecycle(
         return Ok((None, None));
     };
 
-    if service.service_type.is_some() {
-        bail!("config.service.type is not supported; use config.service.lifecycle");
-    }
-
-    if service.remain_after_exit.is_some() {
-        bail!("config.service.remainAfterExit is not supported; use config.service.lifecycle");
-    }
-
     match service.lifecycle {
         None => Ok((None, None)),
         Some(ServiceLifecycle::LongRunning) => Ok((Some(ResolvedServiceType::Notify), None)),
@@ -1269,6 +1686,474 @@ mod tests {
             }),
             ..ContainerConfig::default()
         }
+    }
+
+    fn config_with_toml(snippet: &str) -> ContainerConfig {
+        toml::from_str(&format!("version = 1\nname = \"dev\"\n\n{snippet}\n")).unwrap()
+    }
+
+    const UNSUPPORTED_FIELD_CASES: &[(&str, &str)] = &[
+        ("[parents]\nadd = [\"base\"]", "parents.add"),
+        ("[parents]\nremove = [\"base\"]", "parents.remove"),
+        ("[parents]\nset = [\"base\"]", "parents.set"),
+        ("[children]\nadd = [\"worker\"]", "children.add"),
+        ("[children]\nremove = [\"worker\"]", "children.remove"),
+        ("[children]\nset = [\"worker\"]", "children.set"),
+        (
+            "[config.runtime.packageOps]\nadd = [\"curl\"]",
+            "config.runtime.packageOps.add",
+        ),
+        (
+            "[config.runtime.packageOps]\nremove = [\"curl\"]",
+            "config.runtime.packageOps.remove",
+        ),
+        (
+            "[[config.runtime.packageOps.replace]]\nname = \"curl\"\nwith = \"wget\"",
+            "config.runtime.packageOps.replace",
+        ),
+        (
+            "[config]\nnetworks = [{ name = \"private\" }]",
+            "config.networks",
+        ),
+        (
+            "[config]\nvolumes = [{ name = \"data\" }]",
+            "config.volumes",
+        ),
+        (
+            "[config]\nsecrets = [{ name = \"token\" }]",
+            "config.secrets",
+        ),
+        (
+            "[config.container]\nname = \"runtime-name\"",
+            "config.container.name",
+        ),
+        (
+            "[config.container]\npod = \"app.pod\"",
+            "config.container.pod",
+        ),
+        (
+            "[config.container]\nentrypoint = [\"/bin/sh\"]",
+            "config.container.entrypoint",
+        ),
+        (
+            "[config.container]\nstopSignal = \"SIGTERM\"",
+            "config.container.stopSignal",
+        ),
+        (
+            "[config.container]\nstopTimeout = 0",
+            "config.container.stopTimeout",
+        ),
+        (
+            "[config.container]\ntimezone = \"UTC\"",
+            "config.container.timezone",
+        ),
+        (
+            "[config.container]\nnotify = \"healthy\"",
+            "config.container.notify",
+        ),
+        (
+            "[config.container]\nrunInit = false",
+            "config.container.runInit",
+        ),
+        (
+            "[config.container]\nannotations = { role = \"worker\" }",
+            "config.container.annotations",
+        ),
+        (
+            "[config.container]\nenvironmentHost = false",
+            "config.container.environmentHost",
+        ),
+        (
+            "[config.container]\npodmanArgs = [\"--privileged\"]",
+            "config.container.podmanArgs",
+        ),
+        (
+            "[config.container]\nglobalArgs = [\"--log-level=debug\"]",
+            "config.container.globalArgs",
+        ),
+        (
+            "[config.container]\nip = \"10.0.0.2\"",
+            "config.container.ip",
+        ),
+        (
+            "[config.container]\nip6 = \"fd00::2\"",
+            "config.container.ip6",
+        ),
+        (
+            "[config.container]\nnetworkAlias = [\"api\"]",
+            "config.container.networkAlias",
+        ),
+        (
+            "[config.container]\nexposeHostPort = [\"8080\"]",
+            "config.container.exposeHostPort",
+        ),
+        (
+            "[config.container]\nuidMap = [\"0:100000:65536\"]",
+            "config.container.uidMap",
+        ),
+        (
+            "[config.container]\ngidMap = [\"0:100000:65536\"]",
+            "config.container.gidMap",
+        ),
+        (
+            "[config.container]\nsubUidMap = \"@user\"",
+            "config.container.subUidMap",
+        ),
+        (
+            "[config.container]\nsubGidMap = \"@user\"",
+            "config.container.subGidMap",
+        ),
+        (
+            "[config.container]\nshmSize = \"64m\"",
+            "config.container.shmSize",
+        ),
+        (
+            "[config.container]\nmask = [\"/proc/kcore\"]",
+            "config.container.mask",
+        ),
+        (
+            "[config.container]\nunmaskPaths = [\"/proc/acpi\"]",
+            "config.container.unmaskPaths",
+        ),
+        (
+            "[config.container]\nsysctl = [\"net.ipv4.ip_forward=1\"]",
+            "config.container.sysctl",
+        ),
+        (
+            "[config.container]\nlogDriver = \"journald\"",
+            "config.container.logDriver",
+        ),
+        (
+            "[config.container.health]\ncmd = \"/bin/true\"",
+            "config.container.health.cmd",
+        ),
+        (
+            "[config.container.health]\ninterval = \"30s\"",
+            "config.container.health.interval",
+        ),
+        (
+            "[config.container.health]\ntimeout = \"10s\"",
+            "config.container.health.timeout",
+        ),
+        (
+            "[config.container.health]\nretries = 0",
+            "config.container.health.retries",
+        ),
+        (
+            "[config.container.health]\nstartPeriod = \"5s\"",
+            "config.container.health.startPeriod",
+        ),
+        (
+            "[config.container.health]\nonFailure = \"kill\"",
+            "config.container.health.onFailure",
+        ),
+        (
+            "[config.container.health]\nstartupCmd = \"/bin/true\"",
+            "config.container.health.startupCmd",
+        ),
+        (
+            "[config.container.health]\nstartupInterval = \"5s\"",
+            "config.container.health.startupInterval",
+        ),
+        (
+            "[config.container.health]\nstartupRetries = 0",
+            "config.container.health.startupRetries",
+        ),
+        (
+            "[config.container.health]\nstartupSuccess = 0",
+            "config.container.health.startupSuccess",
+        ),
+        (
+            "[config.container.health]\nstartupTimeout = \"5s\"",
+            "config.container.health.startupTimeout",
+        ),
+        (
+            "[config.filesystem]\nreadOnly = false",
+            "config.filesystem.readOnly",
+        ),
+        (
+            "[config.filesystem]\nreadOnlyTmpfs = false",
+            "config.filesystem.readOnlyTmpfs",
+        ),
+        (
+            "[config.filesystem]\ntmpfs = [\"/tmp\"]",
+            "config.filesystem.tmpfs",
+        ),
+        (
+            "[config.filesystem]\nmounts = [\"type=bind,src=/tmp,dst=/data\"]",
+            "config.filesystem.mounts",
+        ),
+        (
+            "[config.filesystem]\ndevices = [{ source = \"/dev/null\" }]",
+            "config.filesystem.devices",
+        ),
+        (
+            "[config.network]\ndns = [\"1.1.1.1\"]",
+            "config.network.dns",
+        ),
+        (
+            "[config.network]\ndnsOption = [\"ndots:1\"]",
+            "config.network.dnsOption",
+        ),
+        (
+            "[config.network]\ndnsSearch = [\"example.test\"]",
+            "config.network.dnsSearch",
+        ),
+        (
+            "[config.network]\naddHost = [\"api:127.0.0.1\"]",
+            "config.network.addHost",
+        ),
+        (
+            "[config.security]\ndropCapabilities = [\"all\"]",
+            "config.security.dropCapabilities",
+        ),
+        (
+            "[config.security]\naddCapabilities = [\"NET_BIND_SERVICE\"]",
+            "config.security.addCapabilities",
+        ),
+        (
+            "[config.security]\nnoNewPrivileges = false",
+            "config.security.noNewPrivileges",
+        ),
+        (
+            "[config.security]\nprivileged = false",
+            "config.security.privileged",
+        ),
+        (
+            "[config.security]\nseccompProfile = \"default.json\"",
+            "config.security.seccompProfile",
+        ),
+        (
+            "[config.security]\nsecurityLabelDisable = false",
+            "config.security.securityLabelDisable",
+        ),
+        (
+            "[config.security]\nsecurityLabelFileType = \"container_file_t\"",
+            "config.security.securityLabelFileType",
+        ),
+        (
+            "[config.security]\nsecurityLabelLevel = \"s0:c1,c2\"",
+            "config.security.securityLabelLevel",
+        ),
+        (
+            "[config.security]\nsecurityLabelNested = false",
+            "config.security.securityLabelNested",
+        ),
+        (
+            "[config.security]\nsecurityLabelType = \"container_t\"",
+            "config.security.securityLabelType",
+        ),
+        (
+            "[config.security]\nsecurityOpt = [\"no-new-privileges\"]",
+            "config.security.securityOpt",
+        ),
+        (
+            "[config.security]\nuserns = \"keep-id\"",
+            "config.security.userns",
+        ),
+        (
+            "[config.resources]\nmemory = \"512m\"",
+            "config.resources.memory",
+        ),
+        (
+            "[config.resources]\nmemorySwap = \"1g\"",
+            "config.resources.memorySwap",
+        ),
+        (
+            "[config.resources]\ncpus = \"0.5\"",
+            "config.resources.cpus",
+        ),
+        (
+            "[config.resources]\ncpuQuota = \"50%\"",
+            "config.resources.cpuQuota",
+        ),
+        (
+            "[config.resources]\npidsLimit = 0",
+            "config.resources.pidsLimit",
+        ),
+        (
+            "[config.resources]\nulimits = [\"nofile=1024:1024\"]",
+            "config.resources.ulimits",
+        ),
+        (
+            "[config.workspace]\nmode = \"copy\"",
+            "config.workspace.mode",
+        ),
+        (
+            "[config.workspace]\nsource = \".\"",
+            "config.workspace.source",
+        ),
+        (
+            "[config.workspace]\ntarget = \"/workspace\"",
+            "config.workspace.target",
+        ),
+        (
+            "[config.workspace]\nreview = \"diff\"",
+            "config.workspace.review",
+        ),
+        (
+            "[config.workspace]\npromote = \"off\"",
+            "config.workspace.promote",
+        ),
+        (
+            "[config.workspace]\nexcludePatterns = [\".git\"]",
+            "config.workspace.excludePatterns",
+        ),
+        ("[config.home]\nmode = \"ephemeral\"", "config.home.mode"),
+        ("[config.home]\nsource = \"~/.home\"", "config.home.source"),
+        (
+            "[config.home]\ntarget = \"/home/user\"",
+            "config.home.target",
+        ),
+        ("[config.home]\nreview = \"diff\"", "config.home.review"),
+        ("[config.home]\npromote = \"never\"", "config.home.promote"),
+        ("[config.home]\nephemeral = false", "config.home.ephemeral"),
+        (
+            "[config.home]\nshadow = [{ container = \"/cache\", host = \"~/.cache\" }]",
+            "config.home.shadow",
+        ),
+        (
+            "[config.attach]\ntmuxSession = \"main\"",
+            "config.attach.tmuxSession",
+        ),
+        (
+            "[config.attach]\nshell = \"/bin/bash\"",
+            "config.attach.shell",
+        ),
+        (
+            "[config.attach]\nstartDelay = \"500ms\"",
+            "config.attach.startDelay",
+        ),
+        (
+            "[config.service]\nrestartIfChanged = false",
+            "config.service.restartIfChanged",
+        ),
+        (
+            "[config.quadlet.container]\nPodmanArgs = [\"--privileged\"]",
+            "config.quadlet.container",
+        ),
+        (
+            "[config.quadlet.service]\nEnvironment = [\"MODE=unsafe\"]",
+            "config.quadlet.service",
+        ),
+    ];
+
+    #[test]
+    fn configured_unsupported_fields_return_field_specific_errors() {
+        for &(snippet, field) in UNSUPPORTED_FIELD_CASES {
+            let config = config_with_toml(snippet);
+            let error = resolve(&config).unwrap_err();
+
+            assert_eq!(
+                error.to_string(),
+                format!("{field} is configured but not implemented"),
+                "unexpected diagnostic for {field}"
+            );
+        }
+    }
+
+    #[test]
+    fn validation_level_cannot_disable_fail_closed_resolution() {
+        for level in ["off", "warn", "strict"] {
+            let config = config_with_toml(&format!(
+                "[validation]\nlevel = \"{level}\"\n\n[config.security]\nprivileged = true"
+            ));
+            let error = resolve(&config).unwrap_err();
+
+            assert_eq!(
+                error.to_string(),
+                "validation.level is configured but not implemented; normal resolution always fails closed"
+            );
+        }
+    }
+
+    #[test]
+    fn explicit_empty_unsupported_leaf_values_return_errors() {
+        let cases = [
+            ("[parents]\nadd = []", "parents.add"),
+            ("[config]\nnetworks = []", "config.networks"),
+            (
+                "[config.container]\npodmanArgs = []",
+                "config.container.podmanArgs",
+            ),
+            (
+                "[config.container]\nannotations = {}",
+                "config.container.annotations",
+            ),
+            (
+                "[config.security]\ndropCapabilities = []",
+                "config.security.dropCapabilities",
+            ),
+            ("[config.quadlet.container]", "config.quadlet.container"),
+        ];
+
+        for (snippet, field) in cases {
+            let config = config_with_toml(snippet);
+            let error = resolve(&config).unwrap_err();
+
+            assert_eq!(
+                error.to_string(),
+                format!("{field} is configured but not implemented"),
+                "unexpected diagnostic for {field}"
+            );
+        }
+    }
+
+    #[test]
+    fn empty_reserved_sections_do_not_create_false_positives() {
+        let config = config_with_toml(
+            "[parents]\n\
+             [children]\n\
+             [validation]\n\
+             [deploy]\n\
+             [config]\n\
+             [config.runtime]\n\
+             [config.runtime.packageOps]\n\
+             [config.container]\n\
+             [config.container.health]\n\
+             [config.filesystem]\n\
+             [config.network]\n\
+             [config.security]\n\
+             [config.resources]\n\
+             [config.workspace]\n\
+             [config.home]\n\
+             [config.attach]\n\
+             [config.service]\n\
+             [config.quadlet]",
+        );
+
+        let resolved = resolve(&config).unwrap();
+
+        assert_eq!(resolved.name, "dev");
+        assert_eq!(resolved.runtime.command, [GRAFT_PAUSE_COMMAND]);
+    }
+
+    #[test]
+    fn unsupported_context_intent_returns_field_and_origin() {
+        let worker = contextual_workload(
+            "worker",
+            ResolvedDeployTarget::System,
+            None,
+            None,
+            Some(container_network("database")),
+        );
+        let mut database =
+            contextual_workload("database", ResolvedDeployTarget::System, None, None, None);
+        database.config.as_mut().unwrap().resources = Some(Resources {
+            memory: Some("512m".to_string()),
+            ..Resources::default()
+        });
+        let sources = [
+            ConfigSource::with_origin("worker", "worker.toml", &worker),
+            ConfigSource::with_origin("database", "database.toml", &database),
+        ];
+
+        let error = resolve_with_context(&worker, &sources).unwrap_err();
+
+        assert_eq!(
+            format!("{error:#}"),
+            "invalid config context: database.toml: config.resources.memory is configured but not implemented"
+        );
     }
 
     #[test]
