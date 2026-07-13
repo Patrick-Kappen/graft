@@ -239,9 +239,12 @@ mod tests {
             set_files: vec![worker, database],
         };
 
-        let CliOutput::Set(resolved) = resolve_cli(&cli).unwrap() else {
-            panic!("set CLI should return containers by TOML filename");
+        let set_output = |output| match output {
+            CliOutput::Set(resolved) => Some(resolved),
+            CliOutput::Single(_) => None,
         };
+        let resolved = set_output(resolve_cli(&cli).unwrap())
+            .expect("set CLI should return containers by TOML filename");
         let dependencies = resolved["worker.toml"].dependencies.as_ref().unwrap();
 
         assert_eq!(
@@ -252,6 +255,9 @@ mod tests {
             dependencies.after,
             ["database-source.container".to_string()]
         );
+
+        let single_output = CliOutput::Single(Box::new(resolved["worker.toml"].clone()));
+        assert!(set_output(single_output).is_none());
     }
 
     #[test]
