@@ -75,8 +75,9 @@ checks:
 
 - **Typed TOML intent:** workload authors do not need to write per-workload Nix
   modules, raw Quadlet, or Podman command lines.
-- **Nix-built rootfs:** package names resolve from the target host's pinned
-  `pkgs`; the running container performs no package installation.
+- **Nix-built rootfs:** `graft-pause` comes from the host-selected Graft
+  package, while other names resolve from the target host's pinned `pkgs`; the
+  running container performs no package installation.
 - **Systemd-native lifecycle:** Quadlet generates normal systemd services instead
   of introducing a separate container supervisor.
 - **Typed dependencies:** validated workload and explicit external-unit
