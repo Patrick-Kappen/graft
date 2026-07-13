@@ -110,8 +110,8 @@ Podman runs the containers. See [Design](docs/design.md) and
 
 | Horizon | Status |
 | --- | --- |
-| **Available now** | TOML-to-JSON resolution; Nix-store rootfs; NixOS system and Home Manager user materialisation; explicit packages and commands; selected identity, environment, filesystem, network, and service fields; manual systemd lifecycle. |
-| **Active roadmap** | Fail-closed configuration; typed timers; `up`/`down`, status and logs; secure rootless defaults; secrets, mounts, networking, limits, temporary instances, deterministic merging, and explicit multi-host deployment. |
+| **Available now** | Fail-closed TOML-to-JSON resolution; Nix-store rootfs; NixOS system and Home Manager user materialisation; explicit packages and commands; selected identity, environment, filesystem, network, lifecycle, and startup fields. |
+| **Active roadmap** | Typed timers; `up`/`down`, status and logs; secure rootless defaults; secrets, mounts, networking, limits, temporary instances, deterministic merging, and explicit multi-host deployment. |
 | **Long-term vision** | Repository-defined environments whose components may be placed locally, on explicit remote hosts, or in temporary instances; reviewed OCI and development-environment integrations; possible TUI or optional web control surface. |
 
 Only the first row describes current functionality. See the
@@ -150,7 +150,7 @@ boundary.
 
 | Approach | Where it is stronger or different |
 | --- | --- |
-| [Podman Quadlet](https://docs.podman.io/en/latest/markdown/podman-systemd.unit.5.html) | Direct access to the full upstream unit format; Graft intentionally exposes a smaller typed intent model. |
+| [Podman Quadlet](docs/capabilities.md#tested-upstream-context) | Direct access to the full upstream unit format; Graft intentionally exposes a smaller typed intent model and records its tested upstream version. |
 | [`quadlet-nix`](https://github.com/SEIAROTg/quadlet-nix) and [the mirkolenz implementation](https://github.com/mirkolenz/quadlet-nix) | Broader direct Quadlet coverage through Nix today; Graft uses TOML intent and automatically builds its current rootfs from package names. |
 | [Home Manager Podman](https://nix-community.github.io/home-manager/options.xhtml#opt-services.podman.enable) | Native Nix configuration for user-scoped Podman resources; Graft shares one TOML model across NixOS and Home Manager. |
 | [compose2nix](https://github.com/aksiksi/compose2nix) and [Arion](https://github.com/hercules-ci/arion) | OCI image and Compose workflows; Graft does not currently implement an OCI backend. |
@@ -169,8 +169,8 @@ recorded separately rather than advertised as implemented.
 - **Understand the system:** [Overview](docs/overview.md) ·
   [Design](docs/design.md) · [Quadlet output](docs/quadlet.md)
 - **Configure it:** [Reference](docs/reference.md) ·
-  [Supported JSON Schema](crates/graft/schema/graft-v1.schema.json) ·
-  [Annotated roadmap TOML](examples/reference.toml)
+  [Capability status](docs/capabilities.md) ·
+  [Supported JSON Schema](crates/graft/schema/graft-v1.schema.json)
 - **Track direction:** [Roadmap](docs/roadmap.md) ·
   [Vision](docs/vision.md) · [Non-goals](docs/non-goals.md)
 - **Security:** [Security policy and private reporting](SECURITY.md)

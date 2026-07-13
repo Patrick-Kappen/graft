@@ -48,7 +48,7 @@ During implementation, update:
 - Home Manager module rendering
 - Nix module-eval assertions in `flake.nix`
 - `docs/reference.md`
-- `examples/reference.toml`
+- the current-field pipeline in `docs/capabilities.md`
 - other manual pages when the user-facing behaviour changes
 
 ## Ordering policy
@@ -114,7 +114,7 @@ If the resolver rejects or requires something, update:
 
 - Rust tests
 - `docs/reference.md`
-- `examples/reference.toml`
+- `docs/capabilities.md`
 
 If the behaviour affects generated Quadlet output, also update
 `docs/quadlet.md`. If the behaviour changes the visible project scope, update
@@ -180,9 +180,10 @@ nix develop .#ci -c bash -lc 'cd crates/graft && cargo run --example generate-sc
 The `schema` integration test compares generated and tracked JSON byte for byte
 and asserts the supported property sets. `.taplo.toml` applies the schema to
 runnable examples and `tests/nix` fixtures; `taplo lint` therefore checks parser
-shape, examples, and fixture drift in CI. The broader commented
-`examples/reference.toml` is intentionally outside that rule until its
-human-reference split in #180.
+shape, examples, and fixture drift in CI. The `documentation-drift` Nix check
+recursively compares every supported semantic schema path with the marked
+current-field rows in `docs/capabilities.md`; missing, extra, and duplicate rows
+fail the build.
 
 Adding a parser field does not automatically make it supported intent. Expose it
 in the machine-readable schema only when the resolver and materialiser implement
@@ -258,6 +259,9 @@ nix develop .#ci -c bash -lc 'git ls-files "*.nix" -z | xargs -0 nixfmt --check'
 nix develop .#ci -c bash -lc 'git ls-files "*.toml" -z | xargs -0 taplo format --check'
 nix develop .#ci -c bash -lc 'git ls-files "*.toml" -z | xargs -0 taplo lint'
 nix develop .#ci -c bash -lc 'git ls-files "*.md" -z | xargs -0 markdownlint-cli2 --config .markdownlint.jsonc'
+nix develop .#ci -c bash -lc 'git ls-files "*.md" | lychee --files-from - --offline --include-fragments --no-progress'
+nix develop .#ci -c bash -lc '{ git ls-files "*.md"; git ls-files "examples/quickstart/**"; } | typos --file-list -'
+nix build .#checks.x86_64-linux.documentation-drift --print-out-paths
 nix develop .#ci -c statix check .
 nix develop .#ci -c deadnix --fail .
 nix build \

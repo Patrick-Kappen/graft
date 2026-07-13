@@ -157,9 +157,9 @@ carry future exposure intent for a shared namespace.
 
 DNS servers, DNS search domains and options, host entries, aliases, static
 addresses, and generated network references are invalid with Phase A modes
-until their Phase B combinations are explicitly implemented. The fail-closed
-resolver work in [#106](https://github.com/Patrick-Kappen/graft/issues/106)
-must reject those reserved fields rather than silently discard them.
+until their Phase B combinations are explicitly implemented. Normal resolution
+rejects those reserved fields with exact paths under the fail-closed contract in
+[Capability status](capabilities.md#reserved-parser-fields).
 
 ## Reference resolution
 
@@ -219,35 +219,27 @@ long-running contract uses Quadlet/conmon readiness; typed health and
 application-notify behavior remains tracked by
 [#146](https://github.com/Patrick-Kappen/graft/issues/146).
 
-## Migration from the reserved string field
+## Rejected legacy string syntax
 
-The parser currently reserves `config.network.mode` as an unchecked string, but
-the resolver ignores it. A value such as:
+The network mode parser is typed. It rejects the old runtime-shaped value:
 
 ```toml
 [config.network]
 mode = "container:database-runtime-name"
 ```
 
-is not preserved as supported syntax. The implementation must provide an
-actionable diagnostic directing users to:
+with a migration diagnostic directing users to:
 
 ```toml
 [config.network]
 mode = "container"
-container = "database"
+container = "database-runtime-name"
 ```
 
-The diagnostic should identify the old value and show both replacement fields,
-for example:
-
-```text
-config.network.mode = "container:database" is not supported; use
-config.network.mode = "container" with config.network.container = "database"
-```
-
-The reference uses the Graft workload name. It must not depend on a separately
-configured or generated Podman runtime name.
+The replacement value is interpreted as a Graft workload name and resolved to a
+Quadlet source unit. It never becomes an unchecked Podman runtime identity.
+`mode = "host"` receives a separate dangerous-capability diagnostic, while all
+other unknown values list the supported `none` and `container` variants.
 
 ## Implemented Phase A and tests
 
@@ -272,8 +264,9 @@ Runtime tests avoid claiming stronger isolation than they observe. In
 particular, `none` tests should not mount host communication sockets, and shared
 namespace tests should prove both connectivity and port-space sharing.
 
-Phase A completion unblocks #106. Dangerous host networking and the broader
-Phase B remain in [#193](https://github.com/Patrick-Kappen/graft/issues/193).
+Phase A and the fail-closed contract are implemented. Dangerous host networking
+and the broader Phase B remain in
+[#193](https://github.com/Patrick-Kappen/graft/issues/193).
 
 ## Phase B boundary
 

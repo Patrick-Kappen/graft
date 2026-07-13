@@ -84,9 +84,9 @@ promised syntax or schedule.
 
 ## Use the manual
 
-- **Configure workloads:** [Reference](reference.md), the supported schema at
-  `crates/graft/schema/graft-v1.schema.json`, and the broader
-  [annotated TOML source](https://github.com/Patrick-Kappen/graft/blob/main/examples/reference.toml)
+- **Configure workloads:** [Reference](reference.md),
+  [Capability status](capabilities.md), and the generated supported schema at
+  `crates/graft/schema/graft-v1.schema.json`
 - **Understand output:** [Overview](overview.md), [Design](design.md), and
   [Quadlet output](quadlet.md)
 - **Understand boundaries:** [Non-goals and deferred scope](non-goals.md)

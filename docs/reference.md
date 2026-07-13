@@ -1,25 +1,221 @@
 # Reference
 
-Complete runnable onboarding paths:
-[NixOS system-container quickstart](quickstart/nixos.md) and
-[Home Manager user-container quickstart](quickstart/home-manager.md).
+This page documents only the current Graft configuration contract. Use the
+[NixOS system-container quickstart](quickstart/nixos.md) or
+[Home Manager user-container quickstart](quickstart/home-manager.md) for a
+complete runnable workload.
 
-The machine-readable schema for current supported intent is tracked at
-`crates/graft/schema/graft-v1.schema.json`. Taplo associates it with runnable
-quickstarts and Nix fixtures through `.taplo.toml`, so editors and CI diagnose
-unknown fields, wrong basic types, unsupported enums, and missing required
-fields before Graft runs.
+Related authoritative sources:
 
-The broader annotated roadmap reference lives in
-[`examples/reference.toml`](https://github.com/Patrick-Kappen/graft/blob/main/examples/reference.toml).
-It is intentionally not schema-validated as a runnable workload: many fields are
-parse-only today and normal resolution rejects them instead of silently omitting
-configured intent.
+- [Graft v1 JSON Schema](https://github.com/Patrick-Kappen/graft/blob/main/crates/graft/schema/graft-v1.schema.json) — accepted current TOML shape;
+- [Capability status](capabilities.md) — each field's parser, resolver, Nix, and Quadlet stages plus deferred and forbidden boundaries;
+- [Roadmap](roadmap.md) — planned implementation direction;
+- [Non-goals and deferred scope](non-goals.md) — deliberate current exclusions.
 
-This page summarises the currently implemented module options and resolver
-behaviour. Passing the machine-readable schema means a field is current
-supported intent; it does not promise host prerequisites, path existence, or
-all semantic cross-field validation.
+Taplo applies the generated schema to runnable quickstarts and Nix fixtures
+through `.taplo.toml`. Unknown fields, wrong basic types, unsupported enum
+values, and missing required fields therefore fail before Graft runs. The Rust
+resolver performs the remaining semantic and cross-field validation.
+
+## Fail-closed input contract
+
+A parser-recognised field is not supported merely because it can deserialize.
+Normal resolution rejects every explicitly configured reserved leaf with its
+exact TOML path, including `false`, zero, an empty list, or an empty map. Empty
+parent tables remain valid when none of their fields are set.
+
+`validation.level` is reserved and cannot downgrade this behavior. The generated
+schema excludes all reserved fields, so schema-valid input represents current
+supported intent. See [Capability status](capabilities.md#reserved-parser-fields)
+for the complete status boundary.
+
+## Top-level fields
+
+| Field | Type | Default | Contract |
+| --- | --- | --- | --- |
+| `version` | integer | required | Must be exactly `1`. |
+| `name` | string | required | Must match `^[A-Za-z0-9][A-Za-z0-9._-]*$`. |
+| `deploy` | table | optional | Materialisation target, enable state, and startup intent. |
+| `config` | table | optional | Runtime, container, filesystem, network, and service intent. |
+
+The generated `.container` filename and systemd service stem currently come
+from the TOML filename, while `ContainerName=` comes from `name`. Keep the file
+stem and `name` equal until
+[#107](https://github.com/Patrick-Kappen/graft/issues/107) defines the final
+identity contract.
+
+## Deployment
+
+```toml
+[deploy]
+enable = true
+target = "system"
+activation = "startup"
+```
+
+| Field | Accepted values | Default | Effect |
+| --- | --- | --- | --- |
+| `deploy.enable` | `true`, `false` | materialise | `false` prevents both NixOS and Home Manager from rendering the workload. |
+| `deploy.target` | `system`, `user` | `system` | Selects NixOS system/rootful or Home Manager user/rootless materialisation. |
+| `deploy.activation` | `startup` | absent | Requests the workload from a fixed target during manager startup. |
+
+Startup maps system workloads to `WantedBy=multi-user.target` and user workloads
+to `WantedBy=default.target`. Absence renders no `[Install]` relationship.
+Disabled workloads may retain dormant startup intent but are not materialised.
+See [Workload startup activation](activation.md) for manager, linger, lifecycle,
+and rebuild boundaries.
+
+## Runtime
+
+```toml
+[config.runtime]
+mode = "rootfs-store"
+packages = ["bash"]
+command = ["bash", "-c", "exec /bin/graft-pause"]
+```
+
+| Field | Type | Default | Validation and effect |
+| --- | --- | --- | --- |
+| `config.runtime.mode` | string | `rootfs-store` | Only `rootfs-store` is supported. |
+| `config.runtime.packages` | list of strings | `[]` | Entries must be non-empty and contain no whitespace or control characters. Names resolve from the target configuration's trusted `pkgs`. |
+| `config.runtime.command` | non-empty list of strings | `[/bin/graft-pause]` | Entries must be non-empty and contain no control characters. The argv is preserved and rendered as quoted `Exec=`. |
+
+`graft-pause` is always added to the resolved package list. No default shell,
+`coreutils`, restart policy, or startup activation is added. Custom package names
+require an explicitly trusted host overlay or package-set extension; TOML never
+evaluates arbitrary repository Nix.
+
+## Container
+
+```toml
+[config.container]
+hostname = "worker.local"
+user = "1000"
+group = "1000"
+workingDir = "/workspace"
+environmentFile = ["/run/graft/worker.env"]
+
+[config.container.environment]
+LOG_LEVEL = "debug"
+GREETING = "hello world"
+```
+
+| Field | Type | Validation | Quadlet output |
+| --- | --- | --- | --- |
+| `config.container.hostname` | string | Non-empty; no control characters; no DNS/FQDN validation. | `HostName=` |
+| `config.container.user` | string | Non-empty; no control characters; no UID syntax validation. | `User=` |
+| `config.container.group` | string | Requires `user`; non-empty; no control characters; no GID syntax validation. | `Group=` |
+| `config.container.workingDir` | string | Non-empty; no control characters; no existence or creation check. | `WorkingDir=` |
+| `config.container.environment` | string map | Keys are non-empty, contain no control characters, whitespace, or `=`; values contain no control characters. | Sorted, quoted `Environment="KEY=value"` lines. |
+| `config.container.environmentFile` | list of strings | Ordered entries are non-empty and contain no control characters; files are not generated or checked. | Ordered, quoted `EnvironmentFile=` lines. |
+
+`workingDir` sets only the process directory inside the container. It does not
+copy a workspace or create a host mount. Environment values are not a secret
+transport, and Graft does not generate environment files or import the host
+environment.
+
+## Filesystem volumes
+
+```toml
+[[config.filesystem.volumes]]
+target = "/cache"
+
+[[config.filesystem.volumes]]
+source = "/srv/data"
+target = "/data"
+mode = "ro"
+```
+
+`config.filesystem.volumes` preserves user order and renders each entry
+mechanically as `target`, `source:target`, or `source:target:mode`.
+
+| Field | Required | Validation |
+| --- | --- | --- |
+| `target` | yes | Non-empty; no control characters or `:`. |
+| `source` | no | Non-empty when present; no control characters or `:`. No path existence check. |
+| `mode` | no | Requires `source`; non-empty; no control characters or `:`. No option allowlist. |
+
+A mode without `ro` may create a writable host mount. The current contract does
+not attest path safety or confinement; review such mounts explicitly. Typed
+mount policy remains tracked by
+[#142](https://github.com/Patrick-Kappen/graft/issues/142) and
+[#164](https://github.com/Patrick-Kappen/graft/issues/164).
+
+## Network
+
+### Implicit default and published ports
+
+```toml
+[config.network]
+publish = ["127.0.0.1:8080:8080"]
+```
+
+When `mode` is absent, Graft renders no `Network=` and preserves Podman's
+target-specific default. Published-port entries are ordered literal
+`PublishPort=` values; each must be non-empty and contain no control characters.
+Graft currently performs no port-syntax validation and manages no firewall.
+
+### No external IP network
+
+```toml
+[config.network]
+mode = "none"
+```
+
+This renders `Network=none`. It leaves loopback available and does not claim
+isolation from communication through mounted sockets or devices.
+
+### Shared workload namespace
+
+```toml
+[config.network]
+mode = "container"
+container = "database"
+```
+
+`container` names another Graft workload, not a Podman runtime identity. The
+resolver requires that workload to exist, be enabled, use the same target, and
+have the effective `long-running` lifecycle. It rejects self-references,
+duplicates, missing references, target mismatches, and cycles.
+
+The resolved source-unit reference renders as `Network=<source>.container`,
+allowing Quadlet to generate the runtime identity and service dependencies.
+`publish` is incompatible with both explicit modes. See
+[Container network intent](networking.md) for namespace and exposure details.
+
+## Service
+
+```toml
+[config.service]
+lifecycle = "long-running"
+restart = "on-failure"
+restartSec = "10s"
+timeoutStartSec = "2m"
+timeoutStopSec = "30s"
+```
+
+| Field | Accepted values | Default | Validation and effect |
+| --- | --- | --- | --- |
+| `config.service.lifecycle` | `long-running`, `job`, `setup` | effective `long-running` | Maps typed intent to `Type=` and finite `RemainAfterExit=`. `job` and `setup` require an explicit command. |
+| `config.service.restart` | `no`, `on-success`, `on-failure`, `on-abnormal`, `on-watchdog`, `on-abort`, `always` | absent | Rendered only when set. Finite lifecycles reject `always`, `on-success`, and currently `on-watchdog`. |
+| `config.service.restartSec` | string | absent | Non-empty, no control characters, and requires restart other than `no`. Rendered verbatim. |
+| `config.service.timeoutStartSec` | string | absent | Non-empty and no control characters. Rendered verbatim. |
+| `config.service.timeoutStopSec` | string | absent | Non-empty and no control characters. Rendered verbatim. |
+
+No timespan parser is applied to service timing values. See
+[Workload lifecycle semantics](lifecycle.md) for state transitions, finite jobs,
+restart restrictions, and generator-owned cleanup.
+
+## Renderer escaping
+
+The renderer preserves literal TOML semantics while producing systemd-safe
+Quadlet values. Command argv and environment-file paths are quoted; literal
+quotes, backslashes, `%` specifiers, and `$` substitutions are escaped according
+to their generated command-line context. Environment maps are sorted; ordered
+lists retain source order. `[Service]` timing values are copied verbatim because
+Quadlet places them directly in the generated service section.
+
+See [Quadlet output](quadlet.md) for the complete output contract and examples.
 
 ## NixOS module
 
@@ -41,25 +237,13 @@ all semantic cross-field validation.
 
 | Option | Type | Default | Description |
 | --- | --- | --- | --- |
-| `services.graft.enable` | bool | `false` | Enable system/rootful Graft containers. |
-| `services.graft.package` | package or null | `null` | Package providing `graft` and `graft-pause`; required by the underlying module when `configRoot` or `configRoots` is set. The exported flake module supplies the default package. |
-| `services.graft.configRoot` | path or null | `null` | Directory containing `*.toml` container definitions. |
-| `services.graft.configRoots` | list of paths | `[]` | Additional directories containing `*.toml` container definitions, read after `configRoot` in list order. |
+| `services.graft.enable` | bool | `false` | Enable system/rootful Graft materialisation. |
+| `services.graft.package` | package or null | `null` | Package providing `graft` and `graft-pause`; the exported flake module supplies a default. |
+| `services.graft.configRoot` | path or null | `null` | First directory containing `*.toml` workloads. |
+| `services.graft.configRoots` | list of paths | `[]` | Additional workload directories, read in list order. |
 
-The NixOS module renders only resolved containers with `target = "system"` and
-places files under `/etc/containers/systemd/`.
-
-`configRoot` is kept for single-root configurations. When both `configRoot` and
-`configRoots` are set, Graft reads `configRoot` first and then each
-`configRoots` entry in order. Configured roots must exist. In a Git flake, new
-roots and TOML files must be tracked before Nix can evaluate them. Duplicate
-TOML filenames across roots fail evaluation, and duplicate resolved container
-names within the same target fail evaluation.
-
-The exported `inputs.graft.nixosModules.graft` module sets
-`services.graft.package` with `mkDefault`. Set it explicitly only to override
-the Graft package; importing `modules/nixos.nix` directly requires an explicit
-package when roots are configured.
+The module renders only effective `target = "system"` workloads under
+`/etc/containers/systemd/`.
 
 ## Home Manager module
 
@@ -81,248 +265,17 @@ package when roots are configured.
 
 | Option | Type | Default | Description |
 | --- | --- | --- | --- |
-| `programs.graft.enable` | bool | `false` | Enable user/rootless Graft containers. |
-| `programs.graft.package` | package or null | `null` | Package providing `graft` and `graft-pause`; required by the underlying module when `configRoot` or `configRoots` is set. The exported flake module supplies the default package. |
-| `programs.graft.configRoot` | path or null | `null` | Directory containing `*.toml` container definitions. |
-| `programs.graft.configRoots` | list of paths | `[]` | Additional directories containing `*.toml` container definitions, read after `configRoot` in list order. |
+| `programs.graft.enable` | bool | `false` | Enable user/rootless Graft materialisation. |
+| `programs.graft.package` | package or null | `null` | Package providing `graft` and `graft-pause`; the exported flake module supplies a default. |
+| `programs.graft.configRoot` | path or null | `null` | First directory containing `*.toml` workloads. |
+| `programs.graft.configRoots` | list of paths | `[]` | Additional workload directories, read in list order. |
 
-The Home Manager module renders only resolved containers with `target = "user"`
-and places files under `~/.config/containers/systemd/`.
+The module renders only effective `target = "user"` workloads under
+`~/.config/containers/systemd/`.
 
-`configRoot` and `configRoots` use the same ordering, tracked-source, and
-collision rules as the NixOS module.
-
-The exported `inputs.graft.homeManagerModules.graft` module sets
-`programs.graft.package` with `mkDefault`. Set it explicitly only to override
-the Graft package; importing `modules/home-manager.nix` directly requires an
-explicit package when roots are configured.
-
-## Current TOML behaviour
-
-Graft fails closed for parser-recognised fields that are not implemented. An
-explicit unsupported leaf produces an error containing its exact TOML path,
-even when its value is `false`, `0`, an empty list, or an empty map. Empty parent
-sections remain valid when none of their fields are set. `validation.level` is
-itself reserved and cannot downgrade this behaviour to a warning or disable it.
-Passing the generated schema avoids these reserved fields entirely.
-
-Implemented today:
-
-- `version = 1` is required.
-- `name` is required and must be a safe container name.
-- The current generated `.container` filename and systemd service stem come from
-  the TOML filename; `ContainerName=` comes from `name`. Keep both values equal
-  until [#107](https://github.com/Patrick-Kappen/graft/issues/107) defines the
-  final identity contract.
-- `deploy.target` defaults to `system`.
-- `deploy.enable = false` prevents rendering.
-- `deploy.activation = "startup"` renders a fixed target-specific `[Install]` relationship; absence renders none.
-- `config.container.hostname` is rendered as Quadlet `HostName=` when explicitly set.
-- `config.container.user` is rendered as Quadlet `User=` when explicitly set.
-- `config.container.group` is rendered as Quadlet `Group=` when explicitly set together with `config.container.user`.
-- `config.container.workingDir` is rendered as Quadlet `WorkingDir=` when explicitly set.
-- `config.container.environment` is rendered as sorted, quoted Quadlet `Environment="KEY=value"` lines when explicitly set.
-- `config.container.environmentFile` is rendered as ordered, quoted Quadlet `EnvironmentFile="..."` lines when explicitly set.
-- `config.filesystem.volumes` is rendered as ordered Quadlet `Volume=` lines when explicitly set.
-- `config.network.publish` is rendered as ordered Quadlet `PublishPort=` lines when explicitly set.
-- absent `config.network.mode` preserves Quadlet's target-specific default.
-- `config.network.mode = "none"` renders Quadlet `Network=none`.
-- `config.network.mode = "container"` requires `config.network.container` and renders a validated Graft workload reference as `Network=<source>.container`.
-- `config.runtime.mode` supports only `rootfs-store`.
-- `config.runtime.packages` are mapped to packages in the target configuration's
-  `pkgs`; the host flake pin controls their versions.
-- Custom package names require an explicitly trusted host overlay or package-set
-  extension; TOML does not evaluate arbitrary repository Nix.
-- `graft-pause` is always added to the package list.
-- missing `config.runtime.command` becomes `['/bin/graft-pause']`.
-- explicit `config.runtime.command` is preserved.
-- `config.service.lifecycle` accepts `long-running`, `job`, or `setup` and renders typed systemd lifecycle fields.
-- `config.service.restart` is rendered only when explicitly set.
-- `config.service.restartSec`, `timeoutStartSec`, and `timeoutStopSec` are rendered only when explicitly set.
-
-### Startup activation
-
-The supported typed form is:
-
-```toml
-[deploy]
-activation = "startup"
-```
-
-It maps system workloads to `WantedBy=multi-user.target` and user workloads to
-`WantedBy=default.target`. Absence renders no `[Install]` section. Disabled
-workloads may retain dormant startup intent but are not materialised. See
-[Workload startup activation](activation.md) for lifecycle, linger, rebuild, and
-removal boundaries.
-
-### Renderer escaping
-
-Rendered `[Container]` values use systemd-safe escaping while preserving
-literal TOML semantics. Command argv and `EnvironmentFile=` entries are
-rendered as quoted systemd arguments, escaping double quotes and backslashes.
-Literal `%` characters are written as `%%` so systemd does not treat them as
-specifiers after Quadlet places them in generated service command lines. Values
-that become generated command-line arguments also write literal `$` as `$$` so
-systemd does not perform environment variable substitution. Quoted
-`Environment="KEY=value"` lines also escape double quotes and backslashes for
-systemd syntax. `[Service]` values are rendered verbatim because Quadlet copies
-them into the generated unit service section.
-
-### Container field validation
-
-`config.container.hostname` is treated as a literal value for Quadlet
-`HostName=`.
-
-Current hostname validation:
-
-- must not be empty or whitespace-only
-- must not contain control characters
-- no template expansion is performed
-- no DNS/FQDN validation is performed yet
-
-`config.container.user` is treated as a literal value for Quadlet `User=`.
-
-Current user validation:
-
-- must not be empty or whitespace-only
-- must not contain control characters
-- no UID syntax validation is performed yet
-
-`config.container.group` is treated as a literal value for Quadlet `Group=`.
-It requires `config.container.user` because Quadlet rejects `Group=` without
-`User=`.
-
-Current group validation:
-
-- requires `config.container.user`
-- must not be empty or whitespace-only
-- must not contain control characters
-- no GID syntax validation is performed yet
-- UID/GID maps, user namespaces, and security fields are reserved and rejected when configured; `GroupAdd=` and supplemental groups are not parser fields
-
-`config.container.workingDir` is treated as a literal value for Quadlet
-`WorkingDir=`.
-
-Current working directory validation:
-
-- must not be empty or whitespace-only
-- must not contain control characters
-- no path existence validation is performed
-- no automatic directory creation is performed
-- no workspace copy or host disk mount is created
-
-Future copied workspace support belongs under `config.workspace`; `workingDir`
-only sets the process working directory inside the container.
-
-`config.container.environment` is rendered as quoted Quadlet `Environment=`
-assignments. Output is sorted by key for deterministic builds. The whole
-`KEY=value` assignment is double-quoted so values may contain spaces or `=`.
-Double quotes, backslashes, `%` specifier markers, and literal `$` characters
-are escaped for systemd syntax and command-line substitution.
-
-Current environment validation:
-
-- keys must not be empty or whitespace-only
-- keys must not contain control characters
-- keys must not contain whitespace or `=`
-- values may be empty
-- values may contain whitespace or `=`
-- values must not contain control characters
-- no secret handling is performed
-- no environment file generation or host environment passthrough is performed
-
-`config.container.environmentFile` is treated as literal Quadlet
-`EnvironmentFile=` entries. Entries are rendered as quoted systemd arguments so
-paths may contain spaces or backslashes. User order is preserved.
-
-Current environment file validation:
-
-- entries must not be empty or whitespace-only
-- entries must not contain control characters
-- no env file generation is performed
-- no secrets materialisation is performed
-- no host environment passthrough is performed
-
-`config.filesystem.volumes` is treated as literal Quadlet `Volume=` entries.
-User order is preserved. Entries are rendered mechanically as `target`,
-`source:target`, or `source:target:mode`.
-
-Current filesystem volume validation:
-
-- `target` is required by the TOML schema
-- `target` must not be empty or whitespace-only
-- `target` must not contain control characters
-- `target` must not contain `:` because Graft assembles colon-separated `Volume=` text
-- optional `source`, when present, must not be empty or whitespace-only
-- optional `source`, when present, must not contain control characters
-- optional `source`, when present, must not contain `:` because Graft assembles colon-separated `Volume=` text
-- optional `mode`, when present, requires `source`
-- optional `mode`, when present, must not be empty or whitespace-only
-- optional `mode`, when present, must not contain control characters
-- optional `mode`, when present, must not contain `:` because Graft assembles colon-separated `Volume=` text
-- no path existence validation is performed
-- no mode allowlist is applied yet
-- no Quadlet `.volume` units are generated
-- tmpfs, device, raw mount, workspace, home, and promote fields are reserved and rejected when configured
-
-`config.network.publish` is treated as literal Quadlet `PublishPort=` entries.
-User order is preserved.
-
-Current published port validation:
-
-- entries must not be empty or whitespace-only
-- entries must not contain control characters
-- no port syntax validation is performed yet
-- no Quadlet `.network` units are generated
-- DNS settings and network aliases are reserved and rejected when configured
-- no automatic firewall rules are managed
-
-Current network namespace validation:
-
-- absence is the only representation of Quadlet's target-specific default
-- `none` and `container` are the only supported mode values
-- `container` requires a safe top-level Graft workload name
-- the referenced workload must exist, be enabled, share the deploy target, and
-  use the effective `long-running` lifecycle
-- self-references, duplicate identities, missing references, and cycles fail
-  before materialisation
-- `publish` is incompatible with both supported explicit modes
-- old `container:<runtime-name>` values receive a migration diagnostic
-- DNS settings and host entries remain reserved and are rejected when configured
-- dangerous host networking and advanced settings remain tracked by
-  [#193](https://github.com/Patrick-Kappen/graft/issues/193)
-
-See [Container network intent](networking.md) for namespace and security
-boundaries.
-
-`config.service.lifecycle` is typed workload intent:
-
-- absent keeps Quadlet's implicit long-running notify behavior
-- `long-running` renders `Type=notify`
-- `job` renders `Type=oneshot` and `RemainAfterExit=no`
-- `setup` renders `Type=oneshot` and `RemainAfterExit=yes`
-- `job` and `setup` require an explicit non-empty `config.runtime.command`
-- `always`, `on-success`, and `on-watchdog` restart policies are rejected for finite lifecycles
-- raw `type` and `remainAfterExit` fields are rejected with migration diagnostics
-
-See [Workload lifecycle semantics](lifecycle.md) for state transitions and timer
-boundaries.
-
-`config.service.restartSec`, `timeoutStartSec`, and `timeoutStopSec` are treated
-as literal systemd service timing values. A `[Service]` section is rendered when
-at least one supported service field is set. Timing values are rendered verbatim
-and are not `%`-escaped by Graft.
-
-Current service timing validation:
-
-- values must not be empty or whitespace-only
-- values must not contain control characters
-- `restartSec` requires `restart` other than `no`
-- no systemd timespan parsing is performed yet
-- only typed startup activation may render `[Install]`; arbitrary install maps
-  and `restartIfChanged` are rejected when configured
-
-Not all fields from the annotated TOML reference are rendered yet. Fields that
-are parsed but not listed above are reserved/roadmap fields and fail normal
-resolution when explicitly configured. See [Roadmap](roadmap.md) for planned
-coverage.
+Both modules read `configRoot` first and then `configRoots` in order. Every
+configured root must exist. New files must be tracked before Git flakes can see
+them. Duplicate TOML filenames across roots and duplicate effective workload
+names within one target fail materialisation. Importing the underlying module
+files directly requires an explicit package; the exported flake modules provide
+it with `mkDefault`.

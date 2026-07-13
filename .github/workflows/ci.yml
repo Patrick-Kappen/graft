@@ -166,8 +166,11 @@ jobs:
             trap - EXIT
 
             git ls-files "*.md" -z | xargs -0 markdownlint-cli2 --config .markdownlint.jsonc
+            git ls-files "*.md" | lychee --files-from - --offline --include-fragments --no-progress
+            { git ls-files "*.md"; git ls-files "examples/quickstart/**"; } | typos --file-list -
             mdbook build
           '
+          nix build .#checks.x86_64-linux.documentation-drift --print-out-paths
 
   nix:
     name: nix

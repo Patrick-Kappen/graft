@@ -241,8 +241,8 @@ Lifecycle does not imply a health policy:
 - unhealthy action, graceful stop ordering, reload, and watchdog behavior remain
   owned by [#146](https://github.com/Patrick-Kappen/graft/issues/146).
 
-Until that issue lands, explicit unsupported health or notify fields must fail
-closed under [#106](https://github.com/Patrick-Kappen/graft/issues/106).
+Until that issue lands, explicit unsupported health or notify fields fail
+closed as recorded in [Capability status](capabilities.md#reserved-parser-fields).
 
 ## Implementation boundary
 
@@ -272,7 +272,7 @@ compatibility matrix remains owned by
   oneshot: [generator source](https://github.com/containers/podman/blob/5b263b5f5b48004a87caac44e67349a8266d9ef4/pkg/systemd/quadlet/quadlet.go#L726-L749).
 - Podman documents why `RemainAfterExit=yes` blocks repeated timer activation:
   [Podman 5.8.2 documentation](https://github.com/containers/podman/blob/5b263b5f5b48004a87caac44e67349a8266d9ef4/docs/source/markdown/podman-systemd.unit.5.md#L103-L120).
-- systemd defines oneshot state behavior and restart restrictions in
-  [`systemd.service`](https://www.freedesktop.org/software/systemd/man/latest/systemd.service.html#Type=).
-- systemd defines the no-overlap and retained-active timer behavior in
-  [`systemd.timer`](https://www.freedesktop.org/software/systemd/man/latest/systemd.timer.html#Description).
+- systemd 260 defines oneshot state behavior and restart restrictions in
+  [`systemd.service`](https://www.freedesktop.org/software/systemd/man/260/systemd.service.html#Type=).
+- systemd 260 defines the no-overlap and retained-active timer behavior in
+  [`systemd.timer`](https://www.freedesktop.org/software/systemd/man/260/systemd.timer.html#Description).

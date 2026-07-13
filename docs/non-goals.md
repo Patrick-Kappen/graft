@@ -8,9 +8,11 @@ not implement it without a separate issue or design pass.
 
 ## Current v0.2 scope
 
-The v0.2 renderer work focuses on safe, useful Quadlet output from resolved TOML.
-It intentionally does not try to cover the full TOML schema or every Podman,
-Quadlet, and systemd feature.
+The v0.2 renderer work focuses on safe, useful Quadlet output from supported
+TOML. The generated schema exposes only that current contract; reserved parser
+fields fail closed. Graft intentionally does not try to cover every Podman,
+Quadlet, and systemd feature. See [Capability status](capabilities.md) for the
+authoritative boundary.
 
 Deferred for v0.2:
 
