@@ -18,7 +18,8 @@ The current implementation proves the core rootfs-store path:
 - `target = "user"` renders into the current Home Manager account's user
   manager; Podman is rootless only for a non-root account.
 - Containers start and stop through systemd.
-- `graft-pause` provides a tiny default keep-alive command.
+- `graft-pause` provides the default keep-alive command for implicit and
+  long-running lifecycle intent; finite workloads require a command.
 - Common Quadlet fields are rendered for container identity, working directory,
   quoted environment, environment files, published ports, volumes, service
   timing, and typed systemd dependency relationships.

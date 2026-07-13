@@ -115,8 +115,12 @@ the generated rootfs.
 Rules:
 
 ```text
-no user command → command = ["/bin/graft-pause"]
-user command    → command = user command
+implicit or long-running lifecycle + no user command
+  → command = ["/bin/graft-pause"]
+job or setup lifecycle + no user command
+  → resolution error
+user command
+  → command = user command
 
 packages = ["graft-pause", ...user packages]
 ```
@@ -136,7 +140,7 @@ The CLI may only add defaults that belong to Graft semantics.
 | `version` | required; currently only `1` is supported |
 | `name` | required; must be safe for container and unit output |
 | `config.runtime.packages` | always `graft-pause` + user packages |
-| `config.runtime.command` | user command, or `/bin/graft-pause` if missing |
+| `config.runtime.command` | user command; `/bin/graft-pause` if missing for implicit or long-running lifecycle; required for `job` and `setup` |
 | `deploy.target` | default `system`, unless user sets `user` |
 | `config.runtime.mode` | currently only `rootfs-store` |
 | supported container fields | no defaults; include only if user sets them |
@@ -195,10 +199,13 @@ Important details:
 - The current mode configures no persistent, inspectable upperdir. Do not rely
   on overlay writes after the runtime container is removed; reviewable
   diff/promote is future work tracked by [#160](https://github.com/Patrick-Kappen/graft/issues/160).
-- `/nix/store` is mounted read-only inside the container.
-- If a package is not in the generated rootfs/store closure, it is not available
-  inside the container.
-- No downloads happen at container runtime.
+- The renderer adds a fixed read-only `/nix/store` bind. Explicit volumes are
+  emitted later and can overlap that target or expose a store path elsewhere;
+  effective mount protection remains operator-reviewed.
+- Graft adds no package outside the generated rootfs/store closure; an explicit
+  volume may expose other host content.
+- Graft performs no package installation or image pull at container runtime;
+  the workload itself remains able to use its configured network access.
 
 System containers use rootful Podman and kernel overlayfs through `:O`.
 User-target containers run in the current Home Manager account's user manager;

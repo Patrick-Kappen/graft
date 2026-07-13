@@ -67,7 +67,8 @@ Current CLI rules:
 - validate container names and supported values before JSON output
 - reject every explicitly configured reserved field instead of discarding it
 - add `graft-pause` to every rootfs
-- use `/bin/graft-pause` when the user did not set a command
+- use `/bin/graft-pause` when an implicit or long-running lifecycle has no
+  command; require an explicit command for `job` and `setup`
 - preserve user commands exactly
 - default `deploy.target` to `system`
 - support only `rootfs-store` today
@@ -133,8 +134,12 @@ CLI.
 Rules:
 
 ```text
-no user command → packages = ["graft-pause", ...], command = ["/bin/graft-pause"]
-user command    → packages = ["graft-pause", ...], command = user command
+implicit or long-running lifecycle + no user command
+  → packages = ["graft-pause", ...], command = ["/bin/graft-pause"]
+job or setup lifecycle + no user command
+  → resolution error
+user command
+  → packages = ["graft-pause", ...], command = user command
 ```
 
 `graft-pause` exits cleanly on `SIGTERM` and `SIGINT`, so stopping a Quadlet
@@ -145,7 +150,8 @@ There is no default `bashInteractive`, no default `coreutils`, and no default
 
 ## Rendered Quadlet example
 
-A TOML without a command resolves to a Quadlet file like:
+A TOML with implicit or long-running lifecycle and no command resolves to a
+Quadlet file like:
 
 ```ini
 [Container]
@@ -188,9 +194,13 @@ renders the corresponding `[Install]` relationship; see
 - The current mode configures no persistent, inspectable upperdir. Do not rely
   on overlay writes after the runtime container is removed; diff/promote is
   future work tracked by [#160](https://github.com/Patrick-Kappen/graft/issues/160).
-- `/nix/store` from the host is mounted read-only inside the container.
-- Not in the store means not available in the container.
-- No downloads happen at runtime.
+- The renderer adds a fixed read-only `/nix/store` bind. Explicit volumes can
+  overlap that target or expose a store path elsewhere, so effective mount
+  protection remains operator-reviewed.
+- Graft itself adds only content from the generated rootfs/store closure;
+  explicit volumes or the running application may introduce other content.
+- Graft performs no package installation or image pull at runtime; the workload
+  itself can still use its configured network access.
 
 System containers (`target = "system"`) use rootful Podman and kernel overlayfs
 via `:O`. User-target containers run through the current Home Manager account's
