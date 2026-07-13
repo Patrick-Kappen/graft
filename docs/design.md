@@ -135,16 +135,16 @@ The CLI may only add defaults that belong to Graft semantics.
 | --- | --- |
 | `version` | required; currently only `1` is supported |
 | `name` | required; must be safe for container and unit output |
-| `runtime.packages` | always `graft-pause` + user packages |
-| `runtime.command` | user command, or `/bin/graft-pause` if missing |
+| `config.runtime.packages` | always `graft-pause` + user packages |
+| `config.runtime.command` | user command, or `/bin/graft-pause` if missing |
 | `deploy.target` | default `system`, unless user sets `user` |
-| `runtime.mode` | currently only `rootfs-store` |
+| `config.runtime.mode` | currently only `rootfs-store` |
 | supported container fields | no defaults; include only if user sets them |
 | environment, publish, volumes | no defaults; preserve deterministic ordering rules |
 | `dependencies` | no defaults; typed relations resolve to sorted concrete source-unit or external-unit identities |
-| `network.mode` | absent preserves Quadlet's target-specific default; `none` and typed container references are supported |
-| `service.lifecycle` | absent means Quadlet's long-running notify default; explicit intent resolves to typed service fields |
-| `service.restart` and timing | no defaults; include only if user sets them |
+| `config.network.mode` | absent preserves Quadlet's target-specific default; `none` and typed container references are supported |
+| `config.service.lifecycle` | absent means Quadlet's long-running notify default; explicit intent resolves to typed service fields |
+| `config.service.restart` and timing fields | no defaults; include only if user sets them |
 | `deploy.enable` | no default in JSON; modules render unless explicitly `false` |
 | `deploy.activation` | `startup` resolves a fixed system/user `[Install]` target; absent means no startup relationship |
 
