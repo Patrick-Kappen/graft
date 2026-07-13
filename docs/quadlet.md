@@ -124,8 +124,11 @@ references. The source-unit form lets Quadlet add automatic `Requires=` and
 `After=` relationships; see [Container network intent](networking.md).
 
 Environment files, published ports, and volumes preserve user order. Environment
-variables are sorted by key. Environment files and command argv are quoted for
-systemd argument parsing. Container values render literal `%` as `%%` and
+variables are sorted by key. Environment-file path values and command argv are
+quoted for systemd argument parsing. Quadlet resolves relative environment-file
+paths against the source-unit directory and passes each as one Podman
+`--env-file` argument; this is not systemd service `EnvironmentFile=` wildcard
+or optional-file syntax. Container values render literal `%` as `%%` and
 literal `$` as `$$` when they become generated command-line arguments.
 
 ## Environment variables

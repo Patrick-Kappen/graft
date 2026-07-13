@@ -86,7 +86,7 @@ effective value of dangerous intent rather than making it implicit.
 
 Current narrow passthroughs that predate this policy are not automatically safe.
 Host-path, sensitive-source, or writable-host `Volume=` entries, host
-environment-file references, and exact external-systemd-unit relationships
+environment-file path references, and exact external-systemd-unit relationships
 remain explicit current host crossings with residual risk. Their policy and
 diagnostics are tracked by [#142], [#143], [#163], [#166], and [#171].
 
@@ -119,7 +119,7 @@ but it does not make the original escape hatch acceptable.
 | Qualified CDI resource name without target remapping or permissions | First-class | Planned in [#203] | Host registry/spec is trusted; Graft validates and renders only the qualified name. |
 | Direct host device paths or directories, optional-device prefixes, target remapping, and permission modes | Dangerous | Deferred to [#142] and [#164] | Requires explicit device policy, target-specific behavior, and runtime authorization tests. |
 | Host-path, sensitive-source, or writable-host mounts, recursive propagation, and host sockets | Dangerous | Partly current; policy planned in [#142] and [#163] | Existing literal volumes are an acknowledged narrow gap, not precedent for broader passthrough. |
-| Host environment-file references | Dangerous | Current; credential replacement planned in [#143] and [#166] | Exact explicit paths only; Graft does not attest file ownership, permissions, lifecycle, or disclosure. |
+| Host environment-file path references | Dangerous | Current; credential replacement planned in [#143] and [#166] | One ordered non-empty, control-free path value per entry; Quadlet resolves relative paths against the source-unit directory. Graft does not attest traversal, symlinks, existence, ownership, permissions, lifecycle, or disclosure. |
 | Exact external systemd unit relationships | Dangerous | Current | Exact validated names only; implementation and authorization of the selected-manager unit remain host responsibility. |
 | Privileged containers | Dangerous | Deferred; [#163] keeps unsupported privileged intent rejected | No generic runtime argument path or implied opt-in is permitted. |
 | Capability additions | Dangerous | Policy planned in [#139], approved controls implemented by [#163] | Capability drops and secure defaults are separate first-class controls. |
