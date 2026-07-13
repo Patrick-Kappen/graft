@@ -138,15 +138,17 @@ must not be mistaken for user/rootless execution during review.
 
 Resolved JSON is the only semantic input consumed by the Nix materialiser. The
 resolver owns defaults, target selection, graph decisions, and concrete unit
-identities. Nix selects package attributes only from the host-provided `pkgs`
-set, constructs the rootfs, filters containers by target, and renders fixed
-keys.
+identities. Nix resolves the mandatory `graft-pause` package from the
+host-selected Graft `cfg.package`, resolves other package names from the
+host-provided `pkgs` set, constructs the rootfs, filters containers by target,
+and renders fixed keys.
 
 Resolved JSON, generated Quadlet text, package paths, commands, and configured
 environment values may enter world-readable Nix-store objects. They are not a
 secret channel. TOML cannot contain arbitrary Nix expressions or select a new
 package repository, but a trusted config author can choose code from the
-host-provided package set and run it inside the selected target.
+host-provided package set and the host selects the Graft package that supplies
+`graft-pause`.
 
 ### 3. Quadlet and manager materialisation
 
@@ -191,7 +193,7 @@ invariant; it does not extend the invariant beyond its stated scope.
 | **GRAFT-TM-04** | Graft workload references use only the explicit source set and cannot silently cross target, identity, enablement, or lifecycle constraints. | `ConfigSource`, `ConfigIndex`, and graph validation in [`resolve.rs`](../crates/graft/src/resolve.rs); one explicit set invocation in [`materialise-containers.nix`](../modules/lib/materialise-containers.nix). | Missing, disabled, self, cross-target, duplicate, identity-membership, and mixed-cycle resolver tests; Quadlet dependency and network checks in [`flake.nix`](../flake.nix). |
 | **GRAFT-TM-05** | A resolved workload is materialised only by the module matching its effective `system` or `user` target. | Target filtering in [`materialise-containers.nix`](../modules/lib/materialise-containers.nix); separate [`nixos.nix`](../modules/nixos.nix) and [`home-manager.nix`](../modules/home-manager.nix) destinations. | NixOS/Home Manager module assertions prove opposite-target files are absent; [`activation.nix`](../tests/nixos/activation.nix) proves rootful system and rootless user-manager execution. |
 | **GRAFT-TM-06** | Materialisation does not imply startup. Typed startup has only fixed system/user targets, and dependency activation remains explicit. | Resolver maps `startup` to `multi-user.target` or `default.target`; absent intent renders no `[Install]`. | Resolver startup tests; `quadlet-activation` generator checks; manager transitions and foreign-unit preservation in [`activation.nix`](../tests/nixos/activation.nix). |
-| **GRAFT-TM-07** | TOML package names resolve only from the host-selected package set; the rootfs and `/nix/store` lower content are rendered read-only, with writes directed to runtime overlay state. | Package lookup and rootfs construction in [`materialise-containers.nix`](../modules/lib/materialise-containers.nix); fixed `Rootfs=:O` and read-only store mount in [`render-quadlet.nix`](../modules/lib/render-quadlet.nix). | Nix module and real Quadlet generator checks in [`flake.nix`](../flake.nix). Runtime overlay durability is explicitly excluded. |
+| **GRAFT-TM-07** | Workload packages resolve only from host-selected sources: mandatory `graft-pause` from the configured Graft package and other TOML package names from `pkgs`; the rootfs and `/nix/store` lower content are rendered read-only, with writes directed to runtime overlay state. | Package mapping and rootfs construction in [`materialise-containers.nix`](../modules/lib/materialise-containers.nix); fixed `Rootfs=:O` and read-only store mount in [`render-quadlet.nix`](../modules/lib/render-quadlet.nix). | Nix module and real Quadlet generator checks in [`flake.nix`](../flake.nix). Runtime overlay durability is explicitly excluded. |
 | **GRAFT-TM-08** | Implemented non-default network namespaces are typed as `none` or a validated same-target Graft workload reference. | Network resolver and graph validation; source-unit rendering lets Quadlet own runtime identity and dependencies. | Resolver network matrix; `quadlet-network` generation; rootless no-network and shared-loopback checks in [`network.sh`](../tests/runtime/network.sh). |
 | **GRAFT-TM-09** | Current declarative startup changes do not implicitly remove mounted state, workspace markers, or foreign units. | Modules replace managed source-unit declarations only; no Graft cleanup control plane exists. | Removal, reboot, restoration, and preservation scenarios in [`activation.nix`](../tests/nixos/activation.nix). |
 | **GRAFT-TM-10** | External-unit dependency intent remains an exact, validated, visible same-manager unit name rather than host command text. | Strict concrete unit-name validation and fixed dependency axes in [`resolve.rs`](../crates/graft/src/resolve.rs). | External-name, identity-collision, module parity, real Quadlet translation, and `systemd-analyze verify` tests. Unit existence and safety are host review responsibilities. |
