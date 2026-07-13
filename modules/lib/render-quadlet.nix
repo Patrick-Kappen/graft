@@ -12,6 +12,21 @@ let
     { ctr, env }:
     let
       cmd = lib.concatStringsSep " " (map quoteSystemdExecArg ctr.runtime.command);
+      dependencies = ctr.dependencies or { };
+      requires = dependencies.requires or [ ];
+      wants = dependencies.wants or [ ];
+      after = dependencies.after or [ ];
+      before = dependencies.before or [ ];
+      partOf = dependencies.partOf or [ ];
+      bindsTo = dependencies.bindsTo or [ ];
+      unitLines =
+        lib.optionalString (requires != [ ]) "Requires=${lib.concatStringsSep " " requires}\n"
+        + lib.optionalString (wants != [ ]) "Wants=${lib.concatStringsSep " " wants}\n"
+        + lib.optionalString (after != [ ]) "After=${lib.concatStringsSep " " after}\n"
+        + lib.optionalString (before != [ ]) "Before=${lib.concatStringsSep " " before}\n"
+        + lib.optionalString (partOf != [ ]) "PartOf=${lib.concatStringsSep " " partOf}\n"
+        + lib.optionalString (bindsTo != [ ]) "BindsTo=${lib.concatStringsSep " " bindsTo}\n";
+      unitSection = lib.optionalString (unitLines != "") "[Unit]\n${unitLines}\n";
       container = ctr.container or { };
       hostname = container.hostname or null;
       user = container.user or null;
@@ -84,7 +99,8 @@ let
         wantedBy != null
       ) "\n[Install]\nWantedBy=${toString wantedBy}\n";
     in
-    ''
+    unitSection
+    + ''
       [Container]
       ContainerName=${escapeSystemdExecArg ctr.name}
       Rootfs=${escapeSystemdExecArg env}:O

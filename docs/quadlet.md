@@ -38,7 +38,8 @@ The CLI translates TOML to resolved JSON:
 - command / `Exec=`
 - deploy target
 - optional service settings
-- Graft defaults and implicit dependencies
+- typed concrete dependency identities
+- Graft defaults and automatic resource references
 
 The CLI does not render `.container` files.
 
@@ -53,6 +54,7 @@ JSON:
 - `Rootfs=` comes from the generated rootfs store path.
 - `Exec=` comes from resolved `runtime.command`.
 - `Volume=/nix/store:/nix/store:ro` is always rendered for store symlinks.
+- Optional `[Unit]` dependency keys are rendered only from concrete resolved identities.
 - Optional `[Service]` keys are rendered only when resolved JSON contains them.
 - `[Container]` values that become generated command-line arguments escape `%` specifiers and `$` variables.
 - `[Install]` is not rendered by default.
@@ -140,6 +142,29 @@ Environment="QUOTED=say \"hi\""
 The whole `KEY=value` assignment is quoted. Double quotes, backslashes, `%`
 specifier markers, and literal `$` characters are escaped before rendering.
 Environment values are not a secret transport.
+
+## Unit dependencies
+
+A `[Unit]` section is rendered only when resolved typed dependencies contain at
+least one relationship. The resolver sorts concrete identity lists; Nix joins
+them mechanically without accepting free-form keys:
+
+```ini
+[Unit]
+Requires=database.container
+After=database.container
+PartOf=database.container
+```
+
+For Graft workload targets, Quadlet translates `.container` source-unit names
+to generated `.service` identities and fails generation if the source unit is
+missing. Exact `externalUnit` identities remain unchanged. Resource-specific
+references such as `Network=database.container` continue to let Quadlet add
+their automatic dependencies instead of duplicating lines here.
+
+See [Typed workload dependencies](dependencies.md) for input, validation,
+relation semantics, and external-unit boundaries. Raw `[Unit]` maps remain
+unsupported.
 
 ## Service settings
 

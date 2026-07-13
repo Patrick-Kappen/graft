@@ -6,15 +6,30 @@ use anyhow::{bail, Context, Result};
 use serde::Serialize;
 
 use crate::config::schema::{
-    Attach, Config, Container, ContainerConfig, Deploy, DeployActivation, DeployTarget, Filesystem,
-    FilesystemVolume, GraphRefs, Health, Home, Network, NetworkMode, PackageOps, Quadlet,
-    Resources, Runtime, Security, Service, ServiceLifecycle, Validation, Workspace,
+    Attach, Config, Container, ContainerConfig, Dependency, DependencyLifecycle,
+    DependencyOrdering, DependencyRequirement, DependencyTarget, Deploy, DeployActivation,
+    DeployTarget, ExternalUnitDependencyTarget, Filesystem, FilesystemVolume, GraphRefs, Health,
+    Home, Network, NetworkMode, PackageOps, Quadlet, Resources, Runtime, Security, Service,
+    ServiceLifecycle, Validation, WorkloadDependencyTarget, Workspace,
 };
 
 const SUPPORTED_VERSION: u32 = 1;
 const GRAFT_PAUSE_PACKAGE: &str = "graft-pause";
 const GRAFT_PAUSE_COMMAND: &str = "/bin/graft-pause";
 const ROOTFS_STORE_MODE: &str = "rootfs-store";
+const SYSTEMD_UNIT_SUFFIXES: [&str; 11] = [
+    "service",
+    "socket",
+    "device",
+    "mount",
+    "automount",
+    "swap",
+    "target",
+    "path",
+    "timer",
+    "slice",
+    "scope",
+];
 
 /// Fully resolved container spec for the NixOS/Home Manager modules.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -27,6 +42,9 @@ pub struct ResolvedContainer {
     /// Optional resolved Quadlet install relationship.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub install: Option<ResolvedInstall>,
+    /// Optional concrete systemd unit dependencies.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dependencies: Option<ResolvedDependencies>,
     /// Runtime settings used to build the rootfs and Quadlet `Exec=`.
     pub runtime: ResolvedRuntime,
     /// Optional container settings rendered into Quadlet `[Container]`.
@@ -81,6 +99,30 @@ pub enum ResolvedInstallTarget {
     /// User manager default startup target.
     #[serde(rename = "default.target")]
     Default,
+}
+
+/// Concrete dependencies rendered into Quadlet's systemd `[Unit]` section.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolvedDependencies {
+    /// Units required for activation and successful startup.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub requires: Vec<String>,
+    /// Units requested without activation-failure coupling.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub wants: Vec<String>,
+    /// Units that must finish starting before this workload starts.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub after: Vec<String>,
+    /// Units ordered after this workload.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub before: Vec<String>,
+    /// Units whose stop and restart operations propagate to this workload.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub part_of: Vec<String>,
+    /// Units whose active state this workload is bound to.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub binds_to: Vec<String>,
 }
 
 /// Resolved runtime settings.
@@ -214,6 +256,21 @@ struct IndexedWorkload {
     enabled: bool,
     lifecycle: ServiceLifecycle,
     network_container: Option<String>,
+    dependencies: Vec<DependencyRequest>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+enum DependencyTargetRequest {
+    Workload(String),
+    ExternalUnit(String),
+}
+
+#[derive(Debug, Clone)]
+struct DependencyRequest {
+    target: DependencyTargetRequest,
+    requirement: Option<DependencyRequirement>,
+    ordering: Option<DependencyOrdering>,
+    lifecycle: Option<DependencyLifecycle>,
 }
 
 #[derive(Debug)]
@@ -315,12 +372,24 @@ pub fn resolve_set(sources: &[ConfigSource<'_>]) -> Result<Vec<ResolvedContainer
 
 fn requires_config_index(sources: &[ConfigSource<'_>]) -> bool {
     sources.iter().any(|source| {
-        source
+        let uses_container_network = source
             .config
             .config
             .as_ref()
             .and_then(|config| config.network.as_ref())
-            .is_some_and(|network| network.mode == Some(NetworkMode::Container))
+            .is_some_and(|network| network.mode == Some(NetworkMode::Container));
+        let uses_workload_dependency =
+            source
+                .config
+                .dependencies
+                .as_ref()
+                .is_some_and(|dependencies| {
+                    dependencies.iter().any(|dependency| {
+                        matches!(dependency.target, DependencyTarget::Workload(_))
+                    })
+                });
+
+        uses_container_network || uses_workload_dependency
     })
 }
 
@@ -339,6 +408,7 @@ fn validate_no_unsupported_intent(source: &ContainerConfig) -> Result<()> {
         name: _,
         parents,
         children,
+        dependencies: _,
         deploy,
         validation,
         config,
@@ -776,6 +846,7 @@ fn resolve_internal(
             target: deploy_target,
         },
         install,
+        dependencies: resolve_dependencies(config, context)?,
         runtime: ResolvedRuntime {
             mode: ROOTFS_STORE_MODE.to_string(),
             packages: resolve_packages(runtime)?,
@@ -996,6 +1067,99 @@ enum NetworkRequest<'a> {
     Container(&'a str),
 }
 
+fn dependency_requests(dependencies: Option<&[Dependency]>) -> Result<Vec<DependencyRequest>> {
+    let Some(dependencies) = dependencies else {
+        return Ok(Vec::new());
+    };
+    let mut targets = BTreeSet::new();
+    let mut requests = Vec::with_capacity(dependencies.len());
+
+    for dependency in dependencies {
+        let Dependency {
+            target,
+            requirement,
+            ordering,
+            lifecycle,
+        } = dependency;
+        let target = match target {
+            DependencyTarget::Workload(target) => {
+                let WorkloadDependencyTarget { workload } = target;
+                validate_not_empty_or_whitespace("dependency workload reference", workload)?;
+                if !is_safe_container_name(workload) {
+                    bail!("dependency workload reference contains unsupported characters");
+                }
+                DependencyTargetRequest::Workload(workload.clone())
+            }
+            DependencyTarget::ExternalUnit(target) => {
+                let ExternalUnitDependencyTarget { external_unit } = target;
+                validate_external_unit_name(external_unit)?;
+                DependencyTargetRequest::ExternalUnit(external_unit.clone())
+            }
+        };
+        let target_name = match &target {
+            DependencyTargetRequest::Workload(name) => format!("workload:{name}"),
+            DependencyTargetRequest::ExternalUnit(name) => format!("externalUnit:{name}"),
+        };
+
+        if requirement.is_none() && ordering.is_none() && lifecycle.is_none() {
+            bail!("dependency target '{target_name}' must configure at least one relationship");
+        }
+        if *lifecycle == Some(DependencyLifecycle::Bound) && requirement.is_some() {
+            bail!(
+                "dependency target '{target_name}' cannot combine requirement with lifecycle = \"bound\"; BindsTo already activates the target"
+            );
+        }
+        if !targets.insert(target.clone()) {
+            bail!("duplicate dependency target '{target_name}'");
+        }
+
+        requests.push(DependencyRequest {
+            target,
+            requirement: *requirement,
+            ordering: *ordering,
+            lifecycle: *lifecycle,
+        });
+    }
+
+    Ok(requests)
+}
+
+fn validate_external_unit_name(name: &str) -> Result<()> {
+    validate_non_empty_no_control("dependency externalUnit", name)?;
+
+    if name.len() > 255 {
+        bail!("dependency externalUnit cannot exceed 255 characters");
+    }
+    if !name.is_ascii() || name.chars().any(char::is_whitespace) {
+        bail!("dependency externalUnit contains unsupported characters");
+    }
+
+    let Some((prefix, suffix)) = name.rsplit_once('.') else {
+        bail!("dependency externalUnit must include a supported systemd unit suffix");
+    };
+    if prefix.is_empty() || !SYSTEMD_UNIT_SUFFIXES.contains(&suffix) {
+        bail!("dependency externalUnit must include a supported systemd unit suffix");
+    }
+
+    let mut prefix_chars = prefix.chars();
+    let first = prefix_chars
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("dependency externalUnit prefix disappeared"))?;
+    if !(first.is_ascii_alphanumeric() || first == '-')
+        || prefix_chars
+            .any(|ch| !(ch.is_ascii_alphanumeric() || matches!(ch, ':' | '-' | '_' | '.' | '@')))
+    {
+        bail!("dependency externalUnit contains unsupported characters");
+    }
+
+    let at_count = prefix.chars().filter(|ch| *ch == '@').count();
+    if at_count > 1 || prefix.starts_with('@') || prefix.ends_with('@') {
+        bail!("dependency externalUnit must name a concrete non-template unit");
+    }
+
+    Ok(())
+}
+
 impl ConfigIndex {
     fn build(sources: &[ConfigSource<'_>]) -> Result<Self> {
         let mut workloads = BTreeMap::new();
@@ -1025,6 +1189,8 @@ impl ConfigIndex {
         let index = Self { workloads };
         index.validate_references()?;
         index.validate_cycles()?;
+        index.validate_dependency_references()?;
+        index.validate_dependency_cycles()?;
         Ok(index)
     }
 
@@ -1145,6 +1311,127 @@ impl ConfigIndex {
         Ok(format!("{} ({})", key.name, workload.origin))
     }
 
+    fn validate_dependency_references(&self) -> Result<()> {
+        for (key, workload) in &self.workloads {
+            for dependency in &workload.dependencies {
+                let DependencyTargetRequest::Workload(reference) = &dependency.target else {
+                    continue;
+                };
+                let referenced_key = WorkloadKey {
+                    target: key.target,
+                    name: reference.clone(),
+                };
+
+                if &referenced_key == key {
+                    bail!(
+                        "workload '{}' cannot depend on itself in config context {}",
+                        key.name,
+                        workload.origin
+                    );
+                }
+
+                let Some(referenced) = self.workloads.get(&referenced_key) else {
+                    if self
+                        .workloads
+                        .keys()
+                        .any(|candidate| candidate.name == *reference)
+                    {
+                        bail!(
+                            "dependency workload reference '{}' for workload '{}' has a different deploy target in config context {}",
+                            reference,
+                            key.name,
+                            workload.origin
+                        );
+                    }
+                    bail!(
+                        "dependency workload reference '{}' for workload '{}' was not found in config context {}",
+                        reference,
+                        key.name,
+                        workload.origin
+                    );
+                };
+
+                if !referenced.enabled {
+                    bail!(
+                        "dependency workload reference '{}' for workload '{}' is disabled in config context {}",
+                        reference,
+                        key.name,
+                        workload.origin
+                    );
+                }
+                if dependency.lifecycle == Some(DependencyLifecycle::Bound)
+                    && referenced.lifecycle == ServiceLifecycle::Job
+                {
+                    bail!(
+                        "dependency workload reference '{}' for workload '{}' cannot bind to the inactive result of a job lifecycle in config context {}",
+                        reference,
+                        key.name,
+                        workload.origin
+                    );
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn validate_dependency_cycles(&self) -> Result<()> {
+        let mut complete = BTreeSet::new();
+        let mut path = Vec::new();
+
+        for key in self.workloads.keys() {
+            self.visit_dependency(key, &mut complete, &mut path)?;
+        }
+
+        Ok(())
+    }
+
+    fn visit_dependency(
+        &self,
+        key: &WorkloadKey,
+        complete: &mut BTreeSet<WorkloadKey>,
+        path: &mut Vec<WorkloadKey>,
+    ) -> Result<()> {
+        if complete.contains(key) {
+            return Ok(());
+        }
+        if let Some(start) = path.iter().position(|candidate| candidate == key) {
+            let mut members = path[start..]
+                .iter()
+                .map(|candidate| self.cycle_member(candidate))
+                .collect::<Result<Vec<_>>>()?;
+            members.push(self.cycle_member(key)?);
+            bail!("workload dependency cycle: {}", members.join(" -> "));
+        }
+
+        path.push(key.clone());
+        let workload = self
+            .workloads
+            .get(key)
+            .ok_or_else(|| anyhow::anyhow!("validated dependency source disappeared"))?;
+        let mut references = workload
+            .dependencies
+            .iter()
+            .filter_map(|dependency| match &dependency.target {
+                DependencyTargetRequest::Workload(reference) => Some(reference),
+                DependencyTargetRequest::ExternalUnit(_) => None,
+            })
+            .collect::<BTreeSet<_>>();
+        if let Some(reference) = workload.network_container.as_ref() {
+            references.insert(reference);
+        }
+        for reference in references {
+            let referenced_key = WorkloadKey {
+                target: key.target,
+                name: reference.clone(),
+            };
+            self.visit_dependency(&referenced_key, complete, path)?;
+        }
+        path.pop();
+        complete.insert(key.clone());
+        Ok(())
+    }
+
     fn referenced_unit(&self, config: &ContainerConfig, reference: &str) -> Result<String> {
         let current = workload_key(config)?;
         let referenced = WorkloadKey {
@@ -1154,7 +1441,7 @@ impl ConfigIndex {
         let workload = self
             .workloads
             .get(&referenced)
-            .ok_or_else(|| anyhow::anyhow!("validated network reference disappeared"))?;
+            .ok_or_else(|| anyhow::anyhow!("validated workload reference disappeared"))?;
         Ok(format!("{}.container", workload.unit_name))
     }
 }
@@ -1190,6 +1477,7 @@ fn index_source(source: &ConfigSource<'_>) -> Result<(WorkloadKey, IndexedWorklo
             != Some(false),
         lifecycle: effective_lifecycle(source.config),
         network_container,
+        dependencies: dependency_requests(source.config.dependencies.as_deref())?,
     };
 
     Ok((key, workload))
@@ -1223,6 +1511,79 @@ fn effective_lifecycle(config: &ContainerConfig) -> ServiceLifecycle {
         .and_then(|config| config.service.as_ref())
         .and_then(|service| service.lifecycle)
         .unwrap_or(ServiceLifecycle::LongRunning)
+}
+
+fn resolve_dependencies(
+    config: &ContainerConfig,
+    context: Option<&ConfigIndex>,
+) -> Result<Option<ResolvedDependencies>> {
+    let requests = dependency_requests(config.dependencies.as_deref())?;
+    if requests.is_empty() {
+        return Ok(None);
+    }
+
+    let mut identities = BTreeSet::new();
+    let mut requires = BTreeSet::new();
+    let mut wants = BTreeSet::new();
+    let mut after = BTreeSet::new();
+    let mut before = BTreeSet::new();
+    let mut part_of = BTreeSet::new();
+    let mut binds_to = BTreeSet::new();
+
+    for request in requests {
+        let unit = match &request.target {
+            DependencyTargetRequest::Workload(reference) => {
+                let Some(index) = context else {
+                    bail!("workload dependencies require explicit workload context");
+                };
+                index.referenced_unit(config, reference)?
+            }
+            DependencyTargetRequest::ExternalUnit(unit) => unit.clone(),
+        };
+        let identity = unit
+            .strip_suffix(".container")
+            .map_or_else(|| unit.clone(), |stem| format!("{stem}.service"));
+        if !identities.insert(identity.clone()) {
+            bail!("multiple dependency targets resolve to unit '{identity}'");
+        }
+
+        match request.requirement {
+            Some(DependencyRequirement::Required) => {
+                requires.insert(unit.clone());
+            }
+            Some(DependencyRequirement::Optional) => {
+                wants.insert(unit.clone());
+            }
+            None => {}
+        }
+        match request.ordering {
+            Some(DependencyOrdering::After) => {
+                after.insert(unit.clone());
+            }
+            Some(DependencyOrdering::Before) => {
+                before.insert(unit.clone());
+            }
+            None => {}
+        }
+        match request.lifecycle {
+            Some(DependencyLifecycle::PartOf) => {
+                part_of.insert(unit.clone());
+            }
+            Some(DependencyLifecycle::Bound) => {
+                binds_to.insert(unit);
+            }
+            None => {}
+        }
+    }
+
+    Ok(Some(ResolvedDependencies {
+        requires: requires.into_iter().collect(),
+        wants: wants.into_iter().collect(),
+        after: after.into_iter().collect(),
+        before: before.into_iter().collect(),
+        part_of: part_of.into_iter().collect(),
+        binds_to: binds_to.into_iter().collect(),
+    }))
 }
 
 fn resolve_network(
@@ -1657,6 +2018,38 @@ mod tests {
             mode: Some(NetworkMode::Container),
             container: Some(reference.to_string()),
             ..Network::default()
+        }
+    }
+
+    fn workload_dependency(
+        workload: &str,
+        requirement: Option<DependencyRequirement>,
+        ordering: Option<DependencyOrdering>,
+        lifecycle: Option<DependencyLifecycle>,
+    ) -> Dependency {
+        Dependency {
+            target: DependencyTarget::Workload(WorkloadDependencyTarget {
+                workload: workload.to_string(),
+            }),
+            requirement,
+            ordering,
+            lifecycle,
+        }
+    }
+
+    fn external_unit_dependency(
+        unit: &str,
+        requirement: Option<DependencyRequirement>,
+        ordering: Option<DependencyOrdering>,
+        lifecycle: Option<DependencyLifecycle>,
+    ) -> Dependency {
+        Dependency {
+            target: DependencyTarget::ExternalUnit(ExternalUnitDependencyTarget {
+                external_unit: unit.to_string(),
+            }),
+            requirement,
+            ordering,
+            lifecycle,
         }
     }
 
@@ -3181,6 +3574,526 @@ mod tests {
         assert_eq!(
             error.to_string(),
             "filesystem volume mode cannot contain ':'"
+        );
+    }
+
+    #[test]
+    fn external_unit_dependencies_resolve_to_sorted_concrete_relations() {
+        let mut config = named_config();
+        config.dependencies = Some(vec![
+            external_unit_dependency(
+                "zeta.service",
+                Some(DependencyRequirement::Required),
+                Some(DependencyOrdering::After),
+                None,
+            ),
+            external_unit_dependency(
+                "foreign.target",
+                Some(DependencyRequirement::Optional),
+                Some(DependencyOrdering::Before),
+                None,
+            ),
+            external_unit_dependency(
+                "bound.service",
+                None,
+                None,
+                Some(DependencyLifecycle::Bound),
+            ),
+            external_unit_dependency(
+                "alpha.service",
+                Some(DependencyRequirement::Required),
+                Some(DependencyOrdering::After),
+                Some(DependencyLifecycle::PartOf),
+            ),
+        ]);
+
+        let resolved = resolve(&config).unwrap();
+
+        assert_eq!(
+            resolved.dependencies,
+            Some(ResolvedDependencies {
+                requires: vec!["alpha.service".to_string(), "zeta.service".to_string()],
+                wants: vec!["foreign.target".to_string()],
+                after: vec!["alpha.service".to_string(), "zeta.service".to_string()],
+                before: vec!["foreign.target".to_string()],
+                part_of: vec!["alpha.service".to_string()],
+                binds_to: vec!["bound.service".to_string()],
+            })
+        );
+        let json = serde_json::to_value(&resolved).unwrap();
+        assert_eq!(json["dependencies"]["partOf"][0], "alpha.service");
+        assert_eq!(json["dependencies"]["bindsTo"][0], "bound.service");
+    }
+
+    #[test]
+    fn empty_dependencies_are_omitted() {
+        let mut config = named_config();
+        config.dependencies = Some(Vec::new());
+
+        let resolved = resolve(&config).unwrap();
+
+        assert_eq!(resolved.dependencies, None);
+        let json = serde_json::to_value(&resolved).unwrap();
+        assert_eq!(json.get("dependencies"), None);
+    }
+
+    #[test]
+    fn dependency_without_relationship_returns_error() {
+        let mut config = named_config();
+        config.dependencies = Some(vec![external_unit_dependency(
+            "database.service",
+            None,
+            None,
+            None,
+        )]);
+
+        let error = resolve(&config).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "dependency target 'externalUnit:database.service' must configure at least one relationship"
+        );
+    }
+
+    #[test]
+    fn bound_lifecycle_rejects_separate_requirement_axis() {
+        let mut config = named_config();
+        config.dependencies = Some(vec![external_unit_dependency(
+            "database.service",
+            Some(DependencyRequirement::Optional),
+            None,
+            Some(DependencyLifecycle::Bound),
+        )]);
+
+        let error = resolve(&config).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "dependency target 'externalUnit:database.service' cannot combine requirement with lifecycle = \"bound\"; BindsTo already activates the target"
+        );
+    }
+
+    #[test]
+    fn concrete_external_systemd_unit_names_are_accepted() {
+        for unit in [
+            "postgresql.service",
+            "worker@one.service",
+            "api.socket",
+            "dev-disk.device",
+            "-.mount",
+            "data.automount",
+            "paging.swap",
+            "network-online.target",
+            "watch.path",
+            "schedule.timer",
+            "work.slice",
+            "transient.scope",
+        ] {
+            let mut config = named_config();
+            config.dependencies = Some(vec![external_unit_dependency(
+                unit,
+                Some(DependencyRequirement::Required),
+                None,
+                None,
+            )]);
+
+            let resolved = resolve(&config).unwrap();
+
+            assert_eq!(resolved.dependencies.unwrap().requires, [unit.to_string()]);
+        }
+    }
+
+    #[test]
+    fn invalid_external_systemd_unit_names_return_specific_errors() {
+        let cases = [
+            ("", "dependency externalUnit cannot be empty"),
+            (
+                "database",
+                "dependency externalUnit must include a supported systemd unit suffix",
+            ),
+            (
+                "database.invalid",
+                "dependency externalUnit must include a supported systemd unit suffix",
+            ),
+            (
+                "database@.service",
+                "dependency externalUnit must name a concrete non-template unit",
+            ),
+            (
+                "database@one@two.service",
+                "dependency externalUnit must name a concrete non-template unit",
+            ),
+            (
+                "database/path.service",
+                "dependency externalUnit contains unsupported characters",
+            ),
+            (
+                "database %n.service",
+                "dependency externalUnit contains unsupported characters",
+            ),
+            (
+                "dátabase.service",
+                "dependency externalUnit contains unsupported characters",
+            ),
+        ];
+
+        for (unit, expected) in cases {
+            let mut config = named_config();
+            config.dependencies = Some(vec![external_unit_dependency(
+                unit,
+                Some(DependencyRequirement::Required),
+                None,
+                None,
+            )]);
+
+            let error = resolve(&config).unwrap_err();
+
+            assert_eq!(error.to_string(), expected);
+        }
+    }
+
+    #[test]
+    fn overlong_external_systemd_unit_name_returns_error() {
+        let unit = format!("{}.service", "a".repeat(248));
+        let mut config = named_config();
+        config.dependencies = Some(vec![external_unit_dependency(
+            &unit,
+            Some(DependencyRequirement::Required),
+            None,
+            None,
+        )]);
+
+        let error = resolve(&config).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "dependency externalUnit cannot exceed 255 characters"
+        );
+    }
+
+    #[test]
+    fn workload_dependency_resolves_quadlet_source_unit_from_context() {
+        let mut worker =
+            contextual_workload("worker", ResolvedDeployTarget::User, None, None, None);
+        worker.dependencies = Some(vec![workload_dependency(
+            "database",
+            Some(DependencyRequirement::Required),
+            Some(DependencyOrdering::After),
+            Some(DependencyLifecycle::PartOf),
+        )]);
+        let database =
+            contextual_workload("database", ResolvedDeployTarget::User, None, None, None);
+        let sources = [
+            ConfigSource::new("worker", &worker),
+            ConfigSource::new("database-source", &database),
+        ];
+
+        let resolved = resolve_with_context(&worker, &sources).unwrap();
+
+        assert_eq!(
+            resolved.dependencies,
+            Some(ResolvedDependencies {
+                requires: vec!["database-source.container".to_string()],
+                wants: Vec::new(),
+                after: vec!["database-source.container".to_string()],
+                before: Vec::new(),
+                part_of: vec!["database-source.container".to_string()],
+                binds_to: Vec::new(),
+            })
+        );
+    }
+
+    #[test]
+    fn finite_workloads_can_be_dependency_targets() {
+        for lifecycle in [ServiceLifecycle::Job, ServiceLifecycle::Setup] {
+            let mut worker =
+                contextual_workload("worker", ResolvedDeployTarget::System, None, None, None);
+            worker.dependencies = Some(vec![workload_dependency(
+                "prerequisite",
+                Some(DependencyRequirement::Required),
+                Some(DependencyOrdering::After),
+                None,
+            )]);
+            let mut prerequisite = contextual_workload(
+                "prerequisite",
+                ResolvedDeployTarget::System,
+                None,
+                Some(lifecycle),
+                None,
+            );
+            prerequisite.config.as_mut().unwrap().runtime = Some(Runtime {
+                command: Some(vec!["/bin/true".to_string()]),
+                ..Runtime::default()
+            });
+            let sources = [
+                ConfigSource::new("worker", &worker),
+                ConfigSource::new("prerequisite", &prerequisite),
+            ];
+
+            let resolved = resolve_set(&sources).unwrap();
+
+            assert_eq!(resolved.len(), 2);
+            assert_eq!(
+                resolved[0].dependencies.as_ref().unwrap().after,
+                ["prerequisite.container".to_string()]
+            );
+        }
+    }
+
+    #[test]
+    fn bound_dependency_rejects_job_target() {
+        let mut worker =
+            contextual_workload("worker", ResolvedDeployTarget::System, None, None, None);
+        worker.dependencies = Some(vec![workload_dependency(
+            "prerequisite",
+            None,
+            Some(DependencyOrdering::After),
+            Some(DependencyLifecycle::Bound),
+        )]);
+        let mut prerequisite = contextual_workload(
+            "prerequisite",
+            ResolvedDeployTarget::System,
+            None,
+            Some(ServiceLifecycle::Job),
+            None,
+        );
+        prerequisite.config.as_mut().unwrap().runtime = Some(Runtime {
+            command: Some(vec!["/bin/true".to_string()]),
+            ..Runtime::default()
+        });
+        let sources = [
+            ConfigSource::with_origin("worker", "worker.toml", &worker),
+            ConfigSource::with_origin("prerequisite", "prerequisite.toml", &prerequisite),
+        ];
+
+        let error = resolve_with_context(&worker, &sources).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "dependency workload reference 'prerequisite' for workload 'worker' cannot bind to the inactive result of a job lifecycle in config context worker.toml"
+        );
+    }
+
+    #[test]
+    fn workload_dependency_requires_explicit_context() {
+        let mut worker = named_config();
+        worker.dependencies = Some(vec![workload_dependency(
+            "database",
+            Some(DependencyRequirement::Required),
+            None,
+            None,
+        )]);
+
+        let error = resolve(&worker).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "workload dependencies require explicit workload context"
+        );
+    }
+
+    #[test]
+    fn unsafe_workload_dependency_name_returns_error() {
+        let mut worker = named_config();
+        worker.dependencies = Some(vec![workload_dependency(
+            "bad/name",
+            Some(DependencyRequirement::Required),
+            None,
+            None,
+        )]);
+        let sources = [ConfigSource::new("worker", &worker)];
+
+        let error = resolve_with_context(&worker, &sources).unwrap_err();
+        let diagnostic = format!("{error:#}");
+
+        assert!(
+            diagnostic.contains("dependency workload reference contains unsupported characters")
+        );
+    }
+
+    #[test]
+    fn invalid_workload_dependency_relationships_return_errors() {
+        let cases = [
+            (
+                "missing",
+                None,
+                ResolvedDeployTarget::System,
+                "was not found",
+            ),
+            (
+                "disabled",
+                Some(false),
+                ResolvedDeployTarget::System,
+                "is disabled",
+            ),
+            (
+                "other-target",
+                None,
+                ResolvedDeployTarget::User,
+                "has a different deploy target",
+            ),
+        ];
+
+        for (name, enable, target, expected) in cases {
+            let mut worker =
+                contextual_workload("worker", ResolvedDeployTarget::System, None, None, None);
+            worker.dependencies = Some(vec![workload_dependency(
+                name,
+                Some(DependencyRequirement::Required),
+                None,
+                None,
+            )]);
+            let dependency_name = if name == "missing" { "present" } else { name };
+            let dependency = contextual_workload(dependency_name, target, enable, None, None);
+            let sources = [
+                ConfigSource::with_origin("worker", "worker.toml", &worker),
+                ConfigSource::with_origin(dependency_name, "dependency.toml", &dependency),
+            ];
+
+            let error = resolve_with_context(&worker, &sources).unwrap_err();
+
+            assert!(error.to_string().contains(expected));
+            assert!(error.to_string().contains("worker.toml"));
+        }
+    }
+
+    #[test]
+    fn self_workload_dependency_returns_error() {
+        let mut worker =
+            contextual_workload("worker", ResolvedDeployTarget::System, None, None, None);
+        worker.dependencies = Some(vec![workload_dependency(
+            "worker",
+            Some(DependencyRequirement::Required),
+            None,
+            None,
+        )]);
+        let sources = [ConfigSource::with_origin("worker", "worker.toml", &worker)];
+
+        let error = resolve_with_context(&worker, &sources).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "workload 'worker' cannot depend on itself in config context worker.toml"
+        );
+    }
+
+    #[test]
+    fn duplicate_dependency_target_returns_error() {
+        let mut config = named_config();
+        config.dependencies = Some(vec![
+            external_unit_dependency(
+                "database.service",
+                Some(DependencyRequirement::Required),
+                None,
+                None,
+            ),
+            external_unit_dependency(
+                "database.service",
+                None,
+                Some(DependencyOrdering::After),
+                None,
+            ),
+        ]);
+
+        let error = resolve(&config).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "duplicate dependency target 'externalUnit:database.service'"
+        );
+    }
+
+    #[test]
+    fn dependency_targets_resolving_to_same_service_return_error() {
+        let mut worker =
+            contextual_workload("worker", ResolvedDeployTarget::System, None, None, None);
+        worker.dependencies = Some(vec![
+            workload_dependency(
+                "database",
+                Some(DependencyRequirement::Required),
+                None,
+                None,
+            ),
+            external_unit_dependency(
+                "database.service",
+                None,
+                Some(DependencyOrdering::After),
+                None,
+            ),
+        ]);
+        let database =
+            contextual_workload("database", ResolvedDeployTarget::System, None, None, None);
+        let sources = [
+            ConfigSource::new("worker", &worker),
+            ConfigSource::new("database", &database),
+        ];
+
+        let error = resolve_with_context(&worker, &sources).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "multiple dependency targets resolve to unit 'database.service'"
+        );
+    }
+
+    #[test]
+    fn workload_dependency_cycle_returns_path() {
+        let mut first =
+            contextual_workload("first", ResolvedDeployTarget::System, None, None, None);
+        first.dependencies = Some(vec![workload_dependency(
+            "second",
+            Some(DependencyRequirement::Required),
+            None,
+            None,
+        )]);
+        let mut second =
+            contextual_workload("second", ResolvedDeployTarget::System, None, None, None);
+        second.dependencies = Some(vec![workload_dependency(
+            "first",
+            None,
+            Some(DependencyOrdering::After),
+            None,
+        )]);
+        let sources = [
+            ConfigSource::new("first", &first),
+            ConfigSource::new("second", &second),
+        ];
+
+        let error = resolve_with_context(&first, &sources).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "workload dependency cycle: first (first) -> second (second) -> first (first)"
+        );
+    }
+
+    #[test]
+    fn mixed_network_and_workload_dependency_cycle_returns_error() {
+        let first = contextual_workload(
+            "first",
+            ResolvedDeployTarget::System,
+            None,
+            None,
+            Some(container_network("second")),
+        );
+        let mut second =
+            contextual_workload("second", ResolvedDeployTarget::System, None, None, None);
+        second.dependencies = Some(vec![workload_dependency(
+            "first",
+            Some(DependencyRequirement::Optional),
+            None,
+            None,
+        )]);
+        let sources = [
+            ConfigSource::new("first", &first),
+            ConfigSource::new("second", &second),
+        ];
+
+        let error = resolve_with_context(&first, &sources).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "workload dependency cycle: first (first) -> second (second) -> first (first)"
         );
     }
 

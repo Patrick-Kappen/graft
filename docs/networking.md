@@ -175,14 +175,16 @@ references:
 - top-level workload name;
 - effective deploy target and enable state;
 - effective service lifecycle;
-- typed network reference, when present.
+- typed network reference, when present; and
+- typed workload dependency targets, when present.
 
 The Nix module stages the concrete, deterministically ordered TOML source set
 under its original filenames and submits it to one `graft --set` invocation.
 The CLI parses each source once, validates the shared index, resolves workload
 names to source-unit identities, and reports source paths with duplicates,
-missing references, target mismatches, cycles, and semantic errors. Nix does not
-interpret dependency semantics. The resolver must not scan ambient directories,
+missing references, target mismatches, cycles, including cycles mixed with
+[generic workload dependencies](dependencies.md), and semantic errors. Nix does
+not interpret dependency semantics. The resolver must not scan ambient directories,
 read environment-provided roots, or infer hidden state.
 
 This index is not configuration merging. Parent/child precedence, overlays, and

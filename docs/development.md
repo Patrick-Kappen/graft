@@ -100,6 +100,9 @@ Examples:
 
 - volume rendering: `target`, `source:target`, `source:target:mode`
 - invalid volume rendering: `mode` without `source`
+- dependency rendering: requirement, ordering, lifecycle, and composed axes
+- invalid dependency graphs: empty relation, duplicate, missing, self, target
+  mismatch, disabled target, and cycles
 - service rendering: restart-only, timing-only, restart plus timing
 - container identity: user-only, invalid group-only, user plus group, neither
 
@@ -268,6 +271,7 @@ nix build \
   .#checks.x86_64-linux.nixos-module-eval \
   .#checks.x86_64-linux.home-manager-module-eval \
   .#checks.x86_64-linux.quadlet-activation \
+  .#checks.x86_64-linux.quadlet-dependencies \
   .#checks.x86_64-linux.quadlet-lifecycle \
   .#checks.x86_64-linux.quadlet-network \
   --print-out-paths
@@ -280,8 +284,11 @@ git diff --check
 ```
 
 The module-eval and Quadlet generator checks use IFD, so build them explicitly.
-The activation check verifies fixed system/user target links, lifecycle
-combinations, absent intent, dependency activation, and generator reruns. The
+The dependency check verifies all supported relations, Graft source-unit
+translation, unchanged explicit external units, target parity, and
+`systemd-analyze verify`. The activation check verifies fixed system/user target
+links, lifecycle combinations, absent intent, dependency activation, and
+generator reruns. The
 separate activation runtime package validates actual system and user-manager
 transitions in a VM. `nix flake check` may omit these IFD-backed checks and must
 not be the only Nix module or generated-service gate. The rootless network

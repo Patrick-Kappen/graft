@@ -8,6 +8,7 @@
 - [Design](design.md)
 - [Workload lifecycle semantics](lifecycle.md)
 - [Workload startup activation](activation.md)
+- [Typed workload dependencies](dependencies.md)
 - [Container network intent](networking.md)
 - [Quadlet output](quadlet.md)
 - [Roadmap](roadmap.md)

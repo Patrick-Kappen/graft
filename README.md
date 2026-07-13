@@ -78,6 +78,9 @@ checks:
   `pkgs`; the running container performs no package installation.
 - **Systemd-native lifecycle:** Quadlet generates normal systemd services instead
   of introducing a separate container supervisor.
+- **Typed dependencies:** validated workload and explicit external-unit
+  relationships cover common activation, ordering, and lifecycle coupling without
+  raw `[Unit]` maps.
 - **System and user scope:** one intent model targets NixOS system/rootful or
   Home Manager user/rootless materialisation.
 - **Explicit host policy:** apart from the generated read-only `/nix/store`
@@ -110,7 +113,7 @@ Podman runs the containers. See [Design](docs/design.md) and
 
 | Horizon | Status |
 | --- | --- |
-| **Available now** | Fail-closed TOML-to-JSON resolution; Nix-store rootfs; NixOS system and Home Manager user materialisation; explicit packages and commands; selected identity, environment, filesystem, network, lifecycle, and startup fields. |
+| **Available now** | Fail-closed TOML-to-JSON resolution; Nix-store rootfs; NixOS system and Home Manager user materialisation; explicit packages and commands; selected identity, environment, filesystem, network, lifecycle, startup, and typed dependency fields. |
 | **Active roadmap** | Typed timers; `up`/`down`, status and logs; secure rootless defaults; secrets, mounts, networking, limits, temporary instances, deterministic merging, and explicit multi-host deployment. |
 | **Long-term vision** | Repository-defined environments whose components may be placed locally, on explicit remote hosts, or in temporary instances; reviewed OCI and development-environment integrations; possible TUI or optional web control surface. |
 
@@ -167,7 +170,8 @@ recorded separately rather than advertised as implemented.
 - **Get started:** [NixOS quickstart](docs/quickstart/nixos.md) ·
   [Home Manager quickstart](docs/quickstart/home-manager.md)
 - **Understand the system:** [Overview](docs/overview.md) ·
-  [Design](docs/design.md) · [Quadlet output](docs/quadlet.md)
+  [Design](docs/design.md) · [Quadlet output](docs/quadlet.md) ·
+  [Typed dependencies](docs/dependencies.md)
 - **Configure it:** [Reference](docs/reference.md) ·
   [Capability status](docs/capabilities.md) ·
   [Supported JSON Schema](crates/graft/schema/graft-v1.schema.json)

@@ -75,7 +75,7 @@ resolvedByFilename = builtins.fromJSON (builtins.readFile resolvedSetJson);
 The CLI owns business logic:
 
 - applying Graft defaults
-- adding implicit dependencies
+- resolving typed workload and external-unit dependencies
 - selecting the keep-alive command
 - validating supported runtime modes
 - preserving explicit user choices
@@ -90,7 +90,8 @@ resolution. The modules stage sources under their original filenames and invoke
 set once before returning resolved JSON keyed by TOML filename. Nix remains a
 mechanical caller and does not resolve dependency semantics. This reference
 index is distinct from future parent/child configuration merging; see
-[Container network intent](networking.md).
+[Container network intent](networking.md) and
+[Typed workload dependencies](dependencies.md).
 
 Checks that evaluate this IFD path should be built explicitly, for example with
 `nix build .#checks.x86_64-linux.nixos-module-eval`. `nix flake check` may omit
@@ -138,6 +139,7 @@ The CLI may only add defaults that belong to Graft semantics.
 | `runtime.mode` | currently only `rootfs-store` |
 | supported container fields | no defaults; include only if user sets them |
 | environment, publish, volumes | no defaults; preserve deterministic ordering rules |
+| `dependencies` | no defaults; typed relations resolve to sorted concrete source-unit or external-unit identities |
 | `network.mode` | absent preserves Quadlet's target-specific default; `none` and typed container references are supported |
 | `service.lifecycle` | absent means Quadlet's long-running notify default; explicit intent resolves to typed service fields |
 | `service.restart` and timing | no defaults; include only if user sets them |

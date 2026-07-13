@@ -32,7 +32,7 @@ The concepts remain distinct:
 | Select the service manager | `deploy.target` | System/rootful or user/rootless materialisation |
 | Request at manager startup | `deploy.activation` | Optional startup relationship |
 | Describe process behavior | `config.service.lifecycle` | Long-running service, finite job, or retained setup |
-| Start through another workload | typed reference | Dependency activation owned by the relevant resource contract |
+| Start through another workload | `dependencies[].requirement` or typed resource reference | Dependency activation owned by the typed dependency or resource contract |
 | Run on a schedule | future typed timer | Timer activation owned by #134 |
 
 ## Target mapping
@@ -107,8 +107,8 @@ so one workload does not silently gain two independent triggers.
 
 A retained `setup` records successful completion through `active/exited`. The
 startup relationship alone does not make another workload wait for that setup.
-Typed workload ordering remains owned by
-[#133](https://github.com/Patrick-Kappen/graft/issues/133).
+Use a typed [`required` and `after` dependency](dependencies.md) when another
+workload must request and wait for it.
 
 ## Dependency and ordering boundary
 
@@ -122,8 +122,8 @@ Consequences:
 - a workload failure does not by itself fail the target startup transaction;
 - application readiness remains separate from startup activation;
 - stopping a target is not Graft's workload stop contract;
-- one workload that needs another must use a typed resource or dependency
-  contract rather than relying on target order.
+- one workload that needs another must use a typed [workload dependency](dependencies.md)
+  or resource contract rather than relying on target order.
 
 The existing shared-network reference remains a valid example of independent
 dependency activation: starting a dependent service asks Quadlet/systemd to
@@ -184,7 +184,8 @@ Quadlet 5.8.2 supports `Alias`, `WantedBy`, `RequiredBy`, and `UpheldBy`, but th
 first Graft contract exposes only the fixed `WantedBy` mapping above:
 
 - arbitrary `WantedBy` would make target policy user-injected systemd syntax;
-- `RequiredBy` changes failure coupling and belongs with typed dependencies;
+- `RequiredBy` changes reverse failure coupling and remains outside the current
+  typed dependency contract;
 - `UpheldBy` adds continuous activation semantics that overlap lifecycle and
   restart policy;
 - `Alias` changes unit identity and must wait for the identity contract in

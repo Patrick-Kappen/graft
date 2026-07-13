@@ -46,6 +46,12 @@ consumed before that pipeline stage and intentionally has no output there.
 | --- | --- | --- | --- | --- | --- | --- |
 | `version` | Required integer; exactly `1` | Consumed during validation | — | — | Both | Current |
 | `name` | Required safe container name; keep equal to the TOML filename stem until [#107] | `name` | Selects rootfs/container identity | `ContainerName=` | Both | Current |
+| `dependencies` | Optional typed dependency list; empty is omitted; duplicate or cyclic workload targets fail | Optional concrete `dependencies` relation lists | Passed to the shared renderer | Optional `[Unit]` section | Both | Current |
+| `dependencies[].target.workload` | Required safe Graft name for a workload target; validates existence, target, enablement, self-reference, ambiguity, and cycles | Concrete `.container` source-unit identity in applicable relation lists | Passed through mechanically | Quadlet translates the source unit to its generated service | Both | Current |
+| `dependencies[].target.externalUnit` | Exact concrete systemd unit name; strict line, character, suffix, length, and template validation; manager existence is not inspected | Concrete external identity in applicable relation lists | Passed through mechanically | Exact selected-manager unit identity | Target-specific | Current |
+| `dependencies[].requirement` | Optional `required` or `optional`; every dependency needs at least one relationship axis | `dependencies.requires` or `dependencies.wants` | Passed through mechanically | `Requires=` or `Wants=` | Both | Current |
+| `dependencies[].ordering` | Optional `after` or `before`; no ordering is inferred | `dependencies.after` or `dependencies.before` | Passed through mechanically | `After=` or `Before=` | Both | Current |
+| `dependencies[].lifecycle` | Optional `part-of` or `bound`; `bound` already activates its target, rejects a separate requirement, and cannot target a Graft `job` | `dependencies.partOf` or `dependencies.bindsTo` | Passed through mechanically | `PartOf=` or `BindsTo=` | Both | Current |
 | `deploy.enable` | Optional boolean; absence means materialise | Optional `deploy.enable` | Filters materialisation when `false` | No unit when disabled | Both | Current |
 | `deploy.target` | `system` or `user`; defaults to `system` | Effective `deploy.target` | Selects NixOS or Home Manager output | Selects system or user manager | Both | Current |
 | `deploy.activation` | Optional `startup`; no aliases or arbitrary targets | `install.wantedBy` | Renders a fixed install relationship | `WantedBy=multi-user.target` or `default.target` | Target-specific | Current |
@@ -119,7 +125,9 @@ in [#127](https://github.com/Patrick-Kappen/graft/issues/127).
 | `privileged`, capability additions, host devices, unconfined seccomp/labels, and user namespaces | Field-specific error | Dangerous; typed policy required before implementation |
 | Writable host mounts | Literal `config.filesystem.volumes` currently permits a mode without `ro`; paths and policy are not attested | Current narrow passthrough with security policy pending [#142]/[#163]; review explicitly |
 | `PodmanArgs`, `GlobalArgs`, and raw Quadlet maps | Field-specific error | Forbidden as unrestricted passthrough; future needs require typed intent |
-| Raw `[Unit]`, `[Service]`, `[Install]`, host `ExecStart*`/`ExecStop*`, and host shell | Unknown field or raw-map error | Forbidden; TOML cannot execute host commands or override Graft-owned keys |
+| `Conflicts=`, `Upholds=`, failure handlers, and stop propagation to external units | Unknown field or raw-map error | Dangerous; activation and reverse lifecycle effects require typed policy under [#128] |
+| `Requisite=` and reload propagation | Unknown field or raw-map error | Deferred until a concrete typed use case exists |
+| Raw `[Unit]`, `[Service]`, `[Install]`, host `ExecStart*`/`ExecStop*`, and host shell | Unknown field or raw-map error | Forbidden; only reviewed typed dependencies, lifecycle, timing, and startup intent may produce their fixed directives |
 | Arbitrary Nix expressions or package repositories in TOML | Unknown field or package lookup error | Forbidden; the trusted host package set owns evaluation |
 
 ## Artifact and Quadlet resource scope

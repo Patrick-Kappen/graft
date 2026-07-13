@@ -19,8 +19,8 @@ The current implementation proves the core rootfs-store path:
 - Containers start and stop through systemd.
 - `graft-pause` provides a tiny default keep-alive command.
 - Common Quadlet fields are rendered for container identity, working directory,
-  quoted environment, environment files, published ports, volumes, and service
-  timing.
+  quoted environment, environment files, published ports, volumes, service
+  timing, and typed systemd dependency relationships.
 
 The generated TOML schema intentionally exposes only the implemented MVP
 contract. Additional parser-recognised roadmap fields fail closed; their status

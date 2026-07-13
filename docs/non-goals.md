@@ -24,6 +24,8 @@ Deferred for v0.2:
 - no systemd timespan parser for service timing values
 - no arbitrary `[Install]` passthrough; only typed startup activation from
   [Workload startup activation](activation.md) may render a fixed target
+- no raw `[Unit]` passthrough; only fixed relationships from
+  [Typed workload dependencies](dependencies.md) may render dependency keys
 - no `restartIfChanged` rendering
 - no raw systemd service type or `RemainAfterExit=` passthrough; lifecycle stays
   typed Graft intent

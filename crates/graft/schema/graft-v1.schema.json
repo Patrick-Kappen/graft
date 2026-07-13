@@ -16,6 +16,16 @@
         }
       ]
     },
+    "dependencies": {
+      "description": "Typed relationships to Graft workloads or explicit external units.",
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "#/$defs/Dependency"
+      }
+    },
     "deploy": {
       "description": "Module deployment settings.",
       "anyOf": [
@@ -168,6 +178,111 @@
       },
       "additionalProperties": false
     },
+    "Dependency": {
+      "description": "One typed workload or external-unit relationship (`[[dependencies]]`).",
+      "type": "object",
+      "properties": {
+        "lifecycle": {
+          "description": "Optional stop/restart lifecycle coupling.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DependencyLifecycle"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ordering": {
+          "description": "Optional startup ordering relationship.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DependencyOrdering"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "requirement": {
+          "description": "Optional activation and failure requirement.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DependencyRequirement"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "target": {
+          "description": "Exactly one typed relationship target.",
+          "$ref": "#/$defs/DependencyTarget"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "target"
+      ]
+    },
+    "DependencyLifecycle": {
+      "description": "Stop and restart lifecycle coupling for a dependency.",
+      "oneOf": [
+        {
+          "description": "Propagate target stop and restart operations through `PartOf=`.",
+          "type": "string",
+          "const": "part-of"
+        },
+        {
+          "description": "Bind active state to the target through `BindsTo=`.",
+          "type": "string",
+          "const": "bound"
+        }
+      ]
+    },
+    "DependencyOrdering": {
+      "description": "Ordering relative to a dependency target.",
+      "oneOf": [
+        {
+          "description": "Start after the target's start job completes.",
+          "type": "string",
+          "const": "after"
+        },
+        {
+          "description": "Start before the target.",
+          "type": "string",
+          "const": "before"
+        }
+      ]
+    },
+    "DependencyRequirement": {
+      "description": "Activation and failure coupling for a dependency.",
+      "oneOf": [
+        {
+          "description": "Start the target and couple activation failure through `Requires=`.",
+          "type": "string",
+          "const": "required"
+        },
+        {
+          "description": "Start the target without coupling activation failure through `Wants=`.",
+          "type": "string",
+          "const": "optional"
+        }
+      ]
+    },
+    "DependencyTarget": {
+      "description": "Typed target for a dependency relationship.",
+      "anyOf": [
+        {
+          "description": "Another workload in the explicit Graft source set.",
+          "$ref": "#/$defs/WorkloadDependencyTarget"
+        },
+        {
+          "description": "An exact unit in the selected system or user manager.",
+          "$ref": "#/$defs/ExternalUnitDependencyTarget"
+        }
+      ]
+    },
     "Deploy": {
       "description": "Module deployment settings (`[deploy]`).",
       "type": "object",
@@ -227,6 +342,22 @@
           "type": "string",
           "const": "user"
         }
+      ]
+    },
+    "ExternalUnitDependencyTarget": {
+      "description": "External systemd unit dependency target.",
+      "type": "object",
+      "properties": {
+        "externalUnit": {
+          "description": "Concrete systemd unit name in the selected manager.",
+          "type": "string",
+          "maxLength": 255,
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "externalUnit"
       ]
     },
     "Filesystem": {
@@ -435,6 +566,21 @@
           "type": "string",
           "const": "setup"
         }
+      ]
+    },
+    "WorkloadDependencyTarget": {
+      "description": "Graft workload dependency target.",
+      "type": "object",
+      "properties": {
+        "workload": {
+          "description": "Safe top-level Graft workload name.",
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "workload"
       ]
     }
   }
