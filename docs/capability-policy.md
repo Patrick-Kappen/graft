@@ -123,7 +123,8 @@ but it does not make the original escape hatch acceptable.
 | Exact external systemd unit relationships | Dangerous | Current | Exact validated names only; implementation and authorization of the selected-manager unit remain host responsibility. |
 | Privileged containers | Dangerous | Deferred; [#163] keeps unsupported privileged intent rejected | No generic runtime argument path or implied opt-in is permitted. |
 | Capability additions | Dangerous | Policy planned in [#139], approved controls implemented by [#163] | Capability drops and secure defaults are separate first-class controls. |
-| Host network, PID, IPC, UTS, user, or cgroup namespace sharing | Dangerous | Deferred to typed policy such as [#193] | Namespace-specific intent and target rules are required. |
+| Host network namespace sharing | Dangerous | Planned in [#193] | Explicit typed host mode and target-specific exposure rules are required. |
+| PID, IPC, UTS, user, or cgroup namespace sharing | Dangerous | Deferred | Namespace-specific intent and target rules are required before an implementation issue is approved. |
 | Unconfined seccomp, disabled labels, unmasked host paths, and equivalent sandbox relaxations | Dangerous | Policy planned in [#139], approved controls implemented by [#163] | Relaxations must be explicit and visible beside effective secure controls. Additional confinement remains first-class. |
 | Automatic per-container user namespaces | First-class | Planned in [#139] and [#141] | Effective host/container identities and rootless/rootful behavior must be resolved together. |
 | Custom UID/GID maps and subordinate-ID selection | Dangerous | Deferred within [#140] and [#141] | Ownership authority, range conflicts, and mount translation require explicit policy. |
