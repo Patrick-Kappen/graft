@@ -215,6 +215,46 @@ mod tests {
     }
 
     #[test]
+    fn resolves_workload_dependency_from_explicit_set() {
+        let directory = tempdir().unwrap();
+        let worker = directory.path().join("worker.toml");
+        let database = directory.path().join("database-source.toml");
+        fs::write(
+            &worker,
+            r#"
+                version = 1
+                name = "worker"
+
+                [[dependencies]]
+                target = { workload = "database" }
+                requirement = "required"
+                ordering = "after"
+            "#,
+        )
+        .unwrap();
+        fs::write(&database, "version = 1\nname = \"database\"\n").unwrap();
+        let cli = Cli {
+            toml_file: None,
+            context_files: Vec::new(),
+            set_files: vec![worker, database],
+        };
+
+        let CliOutput::Set(resolved) = resolve_cli(&cli).unwrap() else {
+            panic!("set CLI should return containers by TOML filename");
+        };
+        let dependencies = resolved["worker.toml"].dependencies.as_ref().unwrap();
+
+        assert_eq!(
+            dependencies.requires,
+            ["database-source.container".to_string()]
+        );
+        assert_eq!(
+            dependencies.after,
+            ["database-source.container".to_string()]
+        );
+    }
+
+    #[test]
     fn reports_context_parse_path() {
         let directory = tempdir().unwrap();
         let worker = directory.path().join("worker.toml");

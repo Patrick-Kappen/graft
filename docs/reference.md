@@ -35,6 +35,7 @@ for the complete status boundary.
 | --- | --- | --- | --- |
 | `version` | integer | required | Must be exactly `1`. |
 | `name` | string | required | Must match `^[A-Za-z0-9][A-Za-z0-9._-]*$`. |
+| `dependencies` | list of tables | optional | Typed activation, ordering, and lifecycle relationships. |
 | `deploy` | table | optional | Materialisation target, enable state, and startup intent. |
 | `config` | table | optional | Runtime, container, filesystem, network, and service intent. |
 
@@ -64,6 +65,40 @@ to `WantedBy=default.target`. Absence renders no `[Install]` relationship.
 Disabled workloads may retain dormant startup intent but are not materialised.
 See [Workload startup activation](activation.md) for manager, linger, lifecycle,
 and rebuild boundaries.
+
+## Dependencies
+
+```toml
+[[dependencies]]
+target = { workload = "database" }
+requirement = "required"
+ordering = "after"
+
+[[dependencies]]
+target = { externalUnit = "postgresql.service" }
+lifecycle = "part-of"
+```
+
+Each dependency has exactly one typed target and at least one relationship axis:
+
+| Field | Accepted values | Effect |
+| --- | --- | --- |
+| `dependencies[].target.workload` | safe Graft workload name | Resolves through explicit same-target context to a Quadlet `.container` source unit. |
+| `dependencies[].target.externalUnit` | concrete validated systemd unit name | Refers explicitly to an existing unit in the selected system or user manager. |
+| `dependencies[].requirement` | `required`, `optional` | Renders `Requires=` or `Wants=`. |
+| `dependencies[].ordering` | `after`, `before` | Renders `After=` or `Before=`. |
+| `dependencies[].lifecycle` | `part-of`, `bound` | Renders `PartOf=` or `BindsTo=`. |
+
+Workload targets must exist, be enabled, use the same deploy target, and not
+create self-references, duplicates, ambiguous identities, or cycles. External
+unit names are line-safe concrete names with a supported systemd suffix; pure
+resolution cannot verify their presence in the selected manager. `bound` cannot
+be combined with `requirement` and cannot target a Graft `job`. Relationship
+lists are sorted in resolved JSON. An empty dependency list is omitted.
+
+See [Typed workload dependencies](dependencies.md) for exact systemd semantics,
+external-unit trust boundaries, lifecycle combinations, automatic Quadlet
+resource dependencies, and generator translation.
 
 ## Runtime
 

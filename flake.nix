@@ -149,6 +149,34 @@
             ];
           };
 
+          dependencyNixosEval = lib.evalModules {
+            specialArgs = { inherit pkgs; };
+            modules = [
+              moduleTestOptions
+              self.nixosModules.graft
+              {
+                services.graft = {
+                  enable = true;
+                  configRoot = ./tests/nix/dependencies;
+                };
+              }
+            ];
+          };
+
+          dependencyHomeManagerEval = lib.evalModules {
+            specialArgs = { inherit pkgs; };
+            modules = [
+              moduleTestOptions
+              self.homeManagerModules.graft
+              {
+                programs.graft = {
+                  enable = true;
+                  configRoot = ./tests/nix/dependencies;
+                };
+              }
+            ];
+          };
+
           quickstartNixosEval = lib.evalModules {
             specialArgs = { inherit pkgs; };
             modules = [
@@ -206,6 +234,14 @@
             networkHomeManagerEval.config.xdg.configFile."containers/systemd/network-client-user.container".text;
           homeManagerNetworkNoneRendered =
             networkHomeManagerEval.config.xdg.configFile."containers/systemd/network-none-user.container".text;
+          nixosDependencyOwnerRendered =
+            dependencyNixosEval.config.environment.etc."containers/systemd/dependency-owner-system.container".text;
+          nixosDependencyClientRendered =
+            dependencyNixosEval.config.environment.etc."containers/systemd/dependency-client-system.container".text;
+          homeManagerDependencyOwnerRendered =
+            dependencyHomeManagerEval.config.xdg.configFile."containers/systemd/dependency-owner-user.container".text;
+          homeManagerDependencyClientRendered =
+            dependencyHomeManagerEval.config.xdg.configFile."containers/systemd/dependency-client-user.container".text;
           quickstartNixosRendered =
             quickstartNixosEval.config.environment.etc."containers/systemd/graft-example.container".text;
           quickstartHomeManagerRendered =
@@ -276,6 +312,13 @@
             "TimeoutStartSec="
             "TimeoutStopSec="
             "WantedBy="
+            "[Unit]"
+            "Requires="
+            "Wants="
+            "After="
+            "Before="
+            "PartOf="
+            "BindsTo="
           ];
           renderAssertions =
             {
@@ -397,6 +440,19 @@
               "ContainerName=nix-check-network-none-system"
               "Network=none"
             ];
+            assert assertHasInfixes nixosDependencyClientRendered [
+              "[Unit]\nRequires=dependency-owner-system.container\nWants=graft-foreign-system.service\nAfter=dependency-owner-system.container\nBefore=graft-foreign-system.service\nPartOf=dependency-owner-system.container\nBindsTo=graft-bound-system.service"
+              "ContainerName=dependency-client-system"
+              "\n[Install]\nWantedBy=multi-user.target"
+            ];
+            assert assertNoInfixes nixosDependencyOwnerRendered [
+              "[Unit]"
+              "WantedBy="
+            ];
+            assert
+              !(
+                dependencyNixosEval.config.environment.etc ? "containers/systemd/dependency-client-user.container"
+              );
             assert !(nixosEval.config.environment.etc ? "containers/systemd/user.container");
             assert !(nixosEval.config.environment.etc ? "containers/systemd/escape-user.container");
             assert !(nixosEval.config.environment.etc ? "containers/systemd/host-user.container");
@@ -470,6 +526,20 @@
               "ContainerName=nix-check-network-none-user"
               "Network=none"
             ];
+            assert assertHasInfixes homeManagerDependencyClientRendered [
+              "[Unit]\nRequires=dependency-owner-user.container\nWants=graft-foreign-user.service\nAfter=dependency-owner-user.container\nBefore=graft-foreign-user.service\nPartOf=dependency-owner-user.container\nBindsTo=graft-bound-user.service"
+              "ContainerName=dependency-client-user"
+              "\n[Install]\nWantedBy=default.target"
+            ];
+            assert assertNoInfixes homeManagerDependencyOwnerRendered [
+              "[Unit]"
+              "WantedBy="
+            ];
+            assert
+              !(
+                dependencyHomeManagerEval.config.xdg.configFile
+                ? "containers/systemd/dependency-client-system.container"
+              );
             assert !(homeManagerEval.config.xdg.configFile ? "containers/systemd/system.container");
             assert !(homeManagerEval.config.xdg.configFile ? "containers/systemd/escape-system.container");
             assert !(homeManagerEval.config.xdg.configFile ? "containers/systemd/host-system.container");
@@ -501,30 +571,44 @@
                 schema = json.loads(schema_path.read_text())
                 definitions = schema["$defs"]
 
-                def resolve_reference(node):
+                def resolve_variants(node):
                     if "$ref" in node:
-                        return definitions[node["$ref"].rsplit("/", 1)[1]]
-                    for variant in node.get("anyOf", []):
-                        if "$ref" in variant:
-                            return resolve_reference(variant)
-                    return node
+                        return resolve_variants(definitions[node["$ref"].rsplit("/", 1)[1]])
+                    variants = [
+                        variant
+                        for variant in node.get("anyOf", [])
+                        if variant.get("type") != "null"
+                    ]
+                    if variants:
+                        return [
+                            resolved
+                            for variant in variants
+                            for resolved in resolve_variants(variant)
+                        ]
+                    return [node]
 
                 def collect_fields(node, prefix, fields):
                     for name, raw_property in node["properties"].items():
                         path = f"{prefix}.{name}" if prefix else name
-                        resolved_property = resolve_reference(raw_property)
-                        nested_properties = resolved_property.get("properties")
-                        if nested_properties is not None:
-                            collect_fields(resolved_property, path, fields)
+                        resolved_properties = resolve_variants(raw_property)
+                        nested_properties = [
+                            resolved
+                            for resolved in resolved_properties
+                            if resolved.get("properties") is not None
+                        ]
+                        if nested_properties:
+                            for resolved in nested_properties:
+                                collect_fields(resolved, path, fields)
                             continue
 
                         fields.add(path)
-                        items = resolved_property.get("items")
-                        if items is None:
-                            continue
-                        resolved_items = resolve_reference(items)
-                        if resolved_items.get("properties") is not None:
-                            collect_fields(resolved_items, f"{path}[]", fields)
+                        for resolved_property in resolved_properties:
+                            items = resolved_property.get("items")
+                            if items is None:
+                                continue
+                            for resolved_items in resolve_variants(items):
+                                if resolved_items.get("properties") is not None:
+                                    collect_fields(resolved_items, f"{path}[]", fields)
 
                 schema_fields = set()
                 collect_fields(schema, "", schema_fields)
@@ -769,6 +853,73 @@
                 grep -E "^ExecStart=.* --network container:nix-check-network-owner-$scope( |$)" "$client"
                 grep -E "^ExecStart=.* --network none( |$)" "$generated/network-none-$scope.service"
               done
+
+              mkdir -p runtime/systemd
+              XDG_RUNTIME_DIR="$PWD/runtime" \
+                SYSTEMD_UNIT_PATH="$PWD/generated-system:$PWD/generated-user:${pkgs.podman}/share/systemd/user:${pkgs.systemd}/example/systemd/user:${pkgs.systemd}/example/systemd/system" \
+                ${lib.getExe' pkgs.systemd "systemd-analyze"} --user verify \
+                generated-system/*.service generated-user/*.service
+              cp generated-system/*.service generated-user/*.service $out/
+            '';
+
+          quadlet-dependencies =
+            let
+              sources = {
+                owner-system = pkgs.writeText "dependency-owner-system.container" nixosDependencyOwnerRendered;
+                client-system = pkgs.writeText "dependency-client-system.container" nixosDependencyClientRendered;
+                owner-user = pkgs.writeText "dependency-owner-user.container" homeManagerDependencyOwnerRendered;
+                client-user = pkgs.writeText "dependency-client-user.container" homeManagerDependencyClientRendered;
+              };
+            in
+            pkgs.runCommand "graft-quadlet-dependencies" { } ''
+              mkdir source-system source-user generated-system generated-user $out
+              cp ${sources.owner-system} source-system/dependency-owner-system.container
+              cp ${sources.client-system} source-system/dependency-client-system.container
+              cp ${sources.owner-user} source-user/dependency-owner-user.container
+              cp ${sources.client-user} source-user/dependency-client-user.container
+
+              QUADLET_UNIT_DIRS="$PWD/source-system" \
+                ${pkgs.podman}/libexec/podman/quadlet \
+                generated-system generated-system generated-system
+              QUADLET_UNIT_DIRS="$PWD/source-user" \
+                ${pkgs.podman}/libexec/podman/quadlet -user \
+                generated-user generated-user generated-user
+
+              cat > generated-system/graft-foreign-system.service <<'EOF'
+              [Service]
+              Type=oneshot
+              ExecStart=${lib.getExe' pkgs.coreutils "true"}
+              RemainAfterExit=yes
+              EOF
+              cat > generated-user/graft-foreign-user.service <<'EOF'
+              [Service]
+              Type=oneshot
+              ExecStart=${lib.getExe' pkgs.coreutils "true"}
+              RemainAfterExit=yes
+              EOF
+              cp generated-system/graft-foreign-system.service \
+                generated-system/graft-bound-system.service
+              cp generated-user/graft-foreign-user.service \
+                generated-user/graft-bound-user.service
+
+              for scope in system user; do
+                generated="generated-$scope"
+                owner="dependency-owner-$scope.service"
+                foreign="graft-foreign-$scope.service"
+                bound="graft-bound-$scope.service"
+                client="$generated/dependency-client-$scope.service"
+
+                test "$(grep -Fxc "Requires=$owner" "$client")" = 1
+                test "$(grep -Fxc "After=$owner" "$client")" = 1
+                grep -Fx "PartOf=$owner" "$client"
+                grep -Fx "Wants=$foreign" "$client"
+                grep -Fx "Before=$foreign" "$client"
+                grep -Fx "BindsTo=$bound" "$client"
+                ! grep -F "dependency-client-$scope.service" "$generated/$owner"
+              done
+
+              test -L generated-system/multi-user.target.wants/dependency-client-system.service
+              test -L generated-user/default.target.wants/dependency-client-user.service
 
               mkdir -p runtime/systemd
               XDG_RUNTIME_DIR="$PWD/runtime" \

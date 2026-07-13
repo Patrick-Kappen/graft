@@ -1,0 +1,21 @@
+version = 1
+name = "dependency-client-user"
+
+[[dependencies]]
+target = { workload = "dependency-owner-user" }
+requirement = "required"
+ordering = "after"
+lifecycle = "part-of"
+
+[[dependencies]]
+target = { externalUnit = "graft-foreign-user.service" }
+requirement = "optional"
+ordering = "before"
+
+[[dependencies]]
+target = { externalUnit = "graft-bound-user.service" }
+lifecycle = "bound"
+
+[deploy]
+target = "user"
+activation = "startup"

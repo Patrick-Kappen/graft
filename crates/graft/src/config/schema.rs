@@ -35,6 +35,8 @@ pub struct ContainerConfig {
     /// Child graph nodes that inherit from this node.
     #[schemars(skip)]
     pub children: Option<GraphRefs>,
+    /// Typed relationships to Graft workloads or explicit external units.
+    pub dependencies: Option<Vec<Dependency>>,
     /// Module deployment settings.
     pub deploy: Option<Deploy>,
     /// Validation behaviour.
@@ -51,6 +53,78 @@ pub struct GraphRefs {
     pub add: Option<Vec<String>>,
     pub remove: Option<Vec<String>>,
     pub set: Option<Vec<String>>,
+}
+
+/// One typed workload or external-unit relationship (`[[dependencies]]`).
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct Dependency {
+    /// Exactly one typed relationship target.
+    pub target: DependencyTarget,
+    /// Optional activation and failure requirement.
+    pub requirement: Option<DependencyRequirement>,
+    /// Optional startup ordering relationship.
+    pub ordering: Option<DependencyOrdering>,
+    /// Optional stop/restart lifecycle coupling.
+    pub lifecycle: Option<DependencyLifecycle>,
+}
+
+/// Typed target for a dependency relationship.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum DependencyTarget {
+    /// Another workload in the explicit Graft source set.
+    Workload(WorkloadDependencyTarget),
+    /// An exact unit in the selected system or user manager.
+    ExternalUnit(ExternalUnitDependencyTarget),
+}
+
+/// Graft workload dependency target.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct WorkloadDependencyTarget {
+    /// Safe top-level Graft workload name.
+    #[schemars(regex(pattern = r"^[A-Za-z0-9][A-Za-z0-9._-]*$"))]
+    pub workload: String,
+}
+
+/// External systemd unit dependency target.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct ExternalUnitDependencyTarget {
+    /// Concrete systemd unit name in the selected manager.
+    #[schemars(length(min = 1, max = 255))]
+    pub external_unit: String,
+}
+
+/// Activation and failure coupling for a dependency.
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum DependencyRequirement {
+    /// Start the target and couple activation failure through `Requires=`.
+    Required,
+    /// Start the target without coupling activation failure through `Wants=`.
+    Optional,
+}
+
+/// Ordering relative to a dependency target.
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum DependencyOrdering {
+    /// Start after the target's start job completes.
+    After,
+    /// Start before the target.
+    Before,
+}
+
+/// Stop and restart lifecycle coupling for a dependency.
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum DependencyLifecycle {
+    /// Propagate target stop and restart operations through `PartOf=`.
+    PartOf,
+    /// Bind active state to the target through `BindsTo=`.
+    Bound,
 }
 
 /// Module deployment settings (`[deploy]`).
@@ -572,6 +646,76 @@ mod tests {
         let activation = cfg.deploy.unwrap().activation;
 
         assert_eq!(activation, Some(DeployActivation::Startup));
+    }
+
+    #[test]
+    fn parses_typed_workload_and_external_unit_dependencies() {
+        let cfg = parse_toml(
+            r#"
+                [[dependencies]]
+                target = { workload = "database" }
+                requirement = "required"
+                ordering = "after"
+                lifecycle = "part-of"
+
+                [[dependencies]]
+                target = { externalUnit = "postgresql.service" }
+                requirement = "optional"
+                ordering = "before"
+                lifecycle = "bound"
+            "#,
+        )
+        .unwrap();
+        let dependencies = cfg.dependencies.unwrap();
+
+        assert_eq!(dependencies.len(), 2);
+        assert!(matches!(
+            &dependencies[0].target,
+            DependencyTarget::Workload(target) if target.workload == "database"
+        ));
+        assert_eq!(
+            dependencies[0].requirement,
+            Some(DependencyRequirement::Required)
+        );
+        assert_eq!(dependencies[0].ordering, Some(DependencyOrdering::After));
+        assert_eq!(dependencies[0].lifecycle, Some(DependencyLifecycle::PartOf));
+        assert!(matches!(
+            &dependencies[1].target,
+            DependencyTarget::ExternalUnit(target)
+                if target.external_unit == "postgresql.service"
+        ));
+        assert_eq!(
+            dependencies[1].requirement,
+            Some(DependencyRequirement::Optional)
+        );
+        assert_eq!(dependencies[1].ordering, Some(DependencyOrdering::Before));
+        assert_eq!(dependencies[1].lifecycle, Some(DependencyLifecycle::Bound));
+    }
+
+    #[test]
+    fn dependency_target_rejects_multiple_target_kinds() {
+        let result = parse_toml(
+            r#"
+                [[dependencies]]
+                target = { workload = "database", externalUnit = "database.service" }
+                requirement = "required"
+            "#,
+        );
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn unsupported_dependency_relation_returns_error() {
+        let result = parse_toml(
+            r#"
+                [[dependencies]]
+                target = { workload = "database" }
+                requirement = "hard"
+            "#,
+        );
+
+        assert!(result.is_err());
     }
 
     #[test]

@@ -5,6 +5,43 @@ use serde_json::Value;
 
 const TRACKED_SCHEMA: &str = include_str!("../schema/graft-v1.schema.json");
 
+fn assert_enum_values(schema: &Value, definition: &str, expected: &[&str]) {
+    let actual = schema["$defs"][definition]["oneOf"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{definition} should define variants"))
+        .iter()
+        .map(|variant| {
+            variant["const"]
+                .as_str()
+                .unwrap_or_else(|| panic!("{definition} variants should define constants"))
+        })
+        .collect::<BTreeSet<_>>();
+    let expected = expected.iter().copied().collect::<BTreeSet<_>>();
+
+    assert_eq!(actual, expected, "unexpected variants in {definition}");
+}
+
+fn assert_dependency_target_variants(schema: &Value) {
+    let actual = schema["$defs"]["DependencyTarget"]["anyOf"]
+        .as_array()
+        .expect("DependencyTarget should define variants")
+        .iter()
+        .map(|variant| {
+            variant["$ref"]
+                .as_str()
+                .expect("DependencyTarget variants should define references")
+        })
+        .collect::<BTreeSet<_>>();
+    let expected = [
+        "#/$defs/ExternalUnitDependencyTarget",
+        "#/$defs/WorkloadDependencyTarget",
+    ]
+    .into_iter()
+    .collect::<BTreeSet<_>>();
+
+    assert_eq!(actual, expected);
+}
+
 #[test]
 fn generated_schema_matches_tracked_file() {
     let schema = schemars::schema_for!(ContainerConfig);
@@ -24,7 +61,10 @@ fn schema_exposes_only_supported_fields() {
         serde_json::from_str(TRACKED_SCHEMA).expect("tracked Graft schema should be valid JSON");
 
     let expected_properties = [
-        ("root", &["config", "deploy", "name", "version"][..]),
+        (
+            "root",
+            &["config", "dependencies", "deploy", "name", "version"][..],
+        ),
         (
             "Config",
             &["container", "filesystem", "network", "runtime", "service"][..],
@@ -40,7 +80,12 @@ fn schema_exposes_only_supported_fields() {
                 "workingDir",
             ][..],
         ),
+        (
+            "Dependency",
+            &["lifecycle", "ordering", "requirement", "target"][..],
+        ),
         ("Deploy", &["activation", "enable", "target"][..]),
+        ("ExternalUnitDependencyTarget", &["externalUnit"][..]),
         ("Filesystem", &["volumes"][..]),
         ("FilesystemVolume", &["mode", "source", "target"][..]),
         ("Network", &["container", "mode", "publish"][..]),
@@ -55,6 +100,7 @@ fn schema_exposes_only_supported_fields() {
                 "timeoutStopSec",
             ][..],
         ),
+        ("WorkloadDependencyTarget", &["workload"][..]),
     ];
 
     for (definition, expected) in expected_properties {
@@ -76,47 +122,15 @@ fn schema_exposes_only_supported_fields() {
         assert_eq!(value["additionalProperties"], false);
     }
 
-    let activation_values = schema["$defs"]["DeployActivation"]["oneOf"]
-        .as_array()
-        .expect("DeployActivation should define variants")
-        .iter()
-        .map(|variant| {
-            variant["const"]
-                .as_str()
-                .expect("DeployActivation variants should define string constants")
-        })
-        .collect::<BTreeSet<_>>();
-    let expected_activation_values = ["startup"].into_iter().collect::<BTreeSet<_>>();
-
-    assert_eq!(activation_values, expected_activation_values);
-
-    let lifecycle_values = schema["$defs"]["ServiceLifecycle"]["oneOf"]
-        .as_array()
-        .expect("ServiceLifecycle should define variants")
-        .iter()
-        .map(|variant| {
-            variant["const"]
-                .as_str()
-                .expect("ServiceLifecycle variants should define string constants")
-        })
-        .collect::<BTreeSet<_>>();
-    let expected_lifecycle_values = ["long-running", "job", "setup"]
-        .into_iter()
-        .collect::<BTreeSet<_>>();
-
-    assert_eq!(lifecycle_values, expected_lifecycle_values);
-
-    let network_mode_values = schema["$defs"]["NetworkMode"]["oneOf"]
-        .as_array()
-        .expect("NetworkMode should define variants")
-        .iter()
-        .map(|variant| {
-            variant["const"]
-                .as_str()
-                .expect("NetworkMode variants should define string constants")
-        })
-        .collect::<BTreeSet<_>>();
-    let expected_network_mode_values = ["none", "container"].into_iter().collect::<BTreeSet<_>>();
-
-    assert_eq!(network_mode_values, expected_network_mode_values);
+    assert_dependency_target_variants(&schema);
+    assert_enum_values(&schema, "DependencyRequirement", &["optional", "required"]);
+    assert_enum_values(&schema, "DependencyOrdering", &["after", "before"]);
+    assert_enum_values(&schema, "DependencyLifecycle", &["bound", "part-of"]);
+    assert_enum_values(&schema, "DeployActivation", &["startup"]);
+    assert_enum_values(
+        &schema,
+        "ServiceLifecycle",
+        &["job", "long-running", "setup"],
+    );
+    assert_enum_values(&schema, "NetworkMode", &["container", "none"]);
 }
