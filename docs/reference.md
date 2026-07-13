@@ -13,7 +13,8 @@ fields before Graft runs.
 The broader annotated roadmap reference lives in
 [`examples/reference.toml`](https://github.com/Patrick-Kappen/graft/blob/main/examples/reference.toml).
 It is intentionally not schema-validated as a runnable workload: many fields are
-parse-only today and do not yet affect Quadlet output.
+parse-only today and normal resolution rejects them instead of silently omitting
+configured intent.
 
 This page summarises the currently implemented module options and resolver
 behaviour. Passing the machine-readable schema means a field is current
@@ -97,6 +98,13 @@ the Graft package; importing `modules/home-manager.nix` directly requires an
 explicit package when roots are configured.
 
 ## Current TOML behaviour
+
+Graft fails closed for parser-recognised fields that are not implemented. An
+explicit unsupported leaf produces an error containing its exact TOML path,
+even when its value is `false`, `0`, an empty list, or an empty map. Empty parent
+sections remain valid when none of their fields are set. `validation.level` is
+itself reserved and cannot downgrade this behaviour to a warning or disable it.
+Passing the generated schema avoids these reserved fields entirely.
 
 Implemented today:
 
@@ -190,7 +198,7 @@ Current group validation:
 - must not be empty or whitespace-only
 - must not contain control characters
 - no GID syntax validation is performed yet
-- `GroupAdd=`, supplemental groups, UID/GID maps, user namespaces, and security hardening defaults are not rendered
+- UID/GID maps, user namespaces, and security fields are reserved and rejected when configured; `GroupAdd=` and supplemental groups are not parser fields
 
 `config.container.workingDir` is treated as a literal value for Quadlet
 `WorkingDir=`.
@@ -255,7 +263,7 @@ Current filesystem volume validation:
 - no path existence validation is performed
 - no mode allowlist is applied yet
 - no Quadlet `.volume` units are generated
-- no tmpfs, device, raw mount, workspace, home, or promote semantics are rendered
+- tmpfs, device, raw mount, workspace, home, and promote fields are reserved and rejected when configured
 
 `config.network.publish` is treated as literal Quadlet `PublishPort=` entries.
 User order is preserved.
@@ -266,7 +274,7 @@ Current published port validation:
 - entries must not contain control characters
 - no port syntax validation is performed yet
 - no Quadlet `.network` units are generated
-- no DNS settings or network aliases are rendered
+- DNS settings and network aliases are reserved and rejected when configured
 - no automatic firewall rules are managed
 
 Current network namespace validation:
@@ -280,7 +288,7 @@ Current network namespace validation:
   before materialisation
 - `publish` is incompatible with both supported explicit modes
 - old `container:<runtime-name>` values receive a migration diagnostic
-- DNS settings and host entries remain reserved and ineffective
+- DNS settings and host entries remain reserved and are rejected when configured
 - dangerous host networking and advanced settings remain tracked by
   [#193](https://github.com/Patrick-Kappen/graft/issues/193)
 
@@ -312,8 +320,9 @@ Current service timing validation:
 - `restartSec` requires `restart` other than `no`
 - no systemd timespan parsing is performed yet
 - only typed startup activation may render `[Install]`; arbitrary install maps
-  and `restartIfChanged` are not rendered
+  and `restartIfChanged` are rejected when configured
 
 Not all fields from the annotated TOML reference are rendered yet. Fields that
-are parsed but not listed above should be treated as reserved/roadmap fields. See
-[Roadmap](roadmap.md) for planned coverage.
+are parsed but not listed above are reserved/roadmap fields and fail normal
+resolution when explicitly configured. See [Roadmap](roadmap.md) for planned
+coverage.

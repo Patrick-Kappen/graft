@@ -299,4 +299,26 @@ mod tests {
 
         assert!(error.to_string().contains(&invalid.display().to_string()));
     }
+
+    #[test]
+    fn unsupported_set_field_error_contains_field_and_source_path() {
+        let directory = tempdir().unwrap();
+        let unsupported = directory.path().join("unsupported.toml");
+        fs::write(
+            &unsupported,
+            "version = 1\nname = \"unsupported\"\n[config.resources]\nmemory = \"512m\"\n",
+        )
+        .unwrap();
+        let cli = Cli {
+            toml_file: None,
+            context_files: Vec::new(),
+            set_files: vec![unsupported.clone()],
+        };
+
+        let error = resolve_cli(&cli).unwrap_err();
+        let diagnostic = format!("{error:#}");
+
+        assert!(diagnostic.contains(&unsupported.display().to_string()));
+        assert!(diagnostic.contains("config.resources.memory is configured but not implemented"));
+    }
 }
