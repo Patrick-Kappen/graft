@@ -297,9 +297,11 @@ git diff --check
 
 ### GitHub Actions execution
 
-GitHub CI is deliberately manual. Pull-request pushes and merges do not start a
-workflow automatically. Run applicable local checks first, then dispatch CI
-once for the final commit that should satisfy branch protection:
+GitHub CI is deliberately manual for product and documentation changes.
+Pull-request pushes and merges do not start it automatically; a PR that changes
+`.github/workflows/ci.yml` itself is the narrow exception so branch protection
+can validate future CI changes. Run applicable local checks first, then dispatch
+CI once for the final commit that should satisfy branch protection:
 
 ```bash
 gh workflow run ci.yml --ref <branch>
