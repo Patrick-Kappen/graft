@@ -184,6 +184,9 @@ one coherent compatibility change. It must cover:
 
 - minimal explicit user and system targets in resolver tests;
 - missing-target migration failure;
+- replacement and test coverage of the current `false`-value diagnostics so
+  they identify [#163] as the implementation boundary rather than saying the
+  now-approved policy is undefined;
 - all three concrete defaults in resolved JSON;
 - explicit `readOnly = false` and `noNewPrivileges = false` rendering;
 - ordered canonical capability additions after `DropCapability=all`;
