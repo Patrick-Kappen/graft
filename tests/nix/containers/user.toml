@@ -21,6 +21,9 @@ PATHLIKE = "C:\\Temp"
 PERCENT = "100%"
 QUOTED = "say \"hi\""
 
+[config.filesystem]
+tmpfs = ["/run/graft-user", "/tmp/graft-user"]
+
 [[config.filesystem.volumes]]
 target = "/user-cache"
 

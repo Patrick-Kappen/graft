@@ -181,9 +181,37 @@ Graft does not yet apply implicit secure defaults. With the tested upstream
 `ReadOnlyTmpfs=true` default, a read-only root filesystem still receives
 read-write tmpfs mounts at `/dev`, `/dev/shm`, `/run`, `/tmp`, and `/var/tmp`;
 mountpoint modes and dropped capabilities can still deny process writes.
-Explicit volumes and host CDI specs can also introduce writable paths. See
-[Explicit container hardening](hardening.md) for the process, mount, target, and
-future-relaxation boundaries.
+Explicit tmpfs mounts, volumes, and host CDI specs can also introduce writable
+paths. See [Explicit container hardening](hardening.md) for the process, mount,
+target, and future-relaxation boundaries.
+
+## Filesystem tmpfs
+
+```toml
+[config.filesystem]
+tmpfs = ["/run", "/var", "/tmp", "/etc"]
+```
+
+`config.filesystem.tmpfs` is an optional ordered list of unique absolute
+container paths. An empty list is omitted. Each path must be non-empty, start
+with `/`, contain no control characters, and contain no `:`. The colon
+restriction keeps Quadlet's `CONTAINER-DIR:OPTIONS` syntax unavailable; size,
+mode, ownership, copy-up, and other tmpfs options remain deferred.
+
+Each resolved path renders as one ordered writable mount:
+
+```ini
+Tmpfs=/run
+Tmpfs=/var
+Tmpfs=/tmp
+Tmpfs=/etc
+```
+
+The mount is in-memory and does not expose a host source, but it masks content
+at its target and remains writable when `config.filesystem.readOnly = true`.
+Actual writes still depend on container path ownership, modes, and process
+credentials. Target-overlap policy across tmpfs, volumes, the rootfs, and the
+fixed store bind remains tracked by #142 and #164.
 
 ## Filesystem volumes
 

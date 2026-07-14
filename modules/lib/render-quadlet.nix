@@ -47,6 +47,8 @@ let
       ) environmentFile;
       filesystem = ctr.filesystem or { };
       readOnly = filesystem.readOnly or null;
+      tmpfs = filesystem.tmpfs or [ ];
+      tmpfsLines = lib.concatMapStrings (path: "Tmpfs=${escapeSystemdExecArg path}\n") tmpfs;
       volumes = filesystem.volumes or [ ];
       volumeLines = lib.concatMapStrings (
         volume:
@@ -136,6 +138,7 @@ let
     ''
     + environmentLines
     + environmentFileLines
+    + tmpfsLines
     + volumeLines
     + deviceLines
     + readOnlyLine

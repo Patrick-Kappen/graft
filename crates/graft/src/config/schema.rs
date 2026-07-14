@@ -181,7 +181,7 @@ pub struct Config {
     pub runtime: Option<Runtime>,
     /// Supported Quadlet container settings.
     pub container: Option<Container>,
-    /// Supported filesystem volume and CDI device settings.
+    /// Supported tmpfs, filesystem volume, and CDI device settings.
     pub filesystem: Option<Filesystem>,
     /// Supported network namespace and published-port settings.
     pub network: Option<Network>,
@@ -345,7 +345,11 @@ pub struct Filesystem {
     pub read_only: Option<bool>,
     #[schemars(skip)]
     pub read_only_tmpfs: Option<bool>,
-    #[schemars(skip)]
+    /// Ordered absolute container paths backed by writable tmpfs mounts.
+    #[schemars(
+        inner(regex(pattern = r"^/[^:\u0000-\u001F\u007F]*$")),
+        extend("uniqueItems" = true)
+    )]
     pub tmpfs: Option<Vec<String>>,
     /// Raw mount strings passed to `--mount`.
     #[schemars(skip)]

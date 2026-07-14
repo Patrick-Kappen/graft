@@ -55,6 +55,7 @@ JSON:
 - `Rootfs=` comes from the generated rootfs store path.
 - `Exec=` comes from resolved `runtime.command`.
 - `Volume=/nix/store:/nix/store:ro` is always rendered for store symlinks.
+- Resolved path-only tmpfs intent renders as ordered `Tmpfs=` lines.
 - Qualified resolved CDI references render as ordered `AddDevice=` lines.
 - Explicit root-filesystem and process hardening renders as fixed `ReadOnly=`, `DropCapability=`, and `NoNewPrivileges=` keys.
 - Optional `[Unit]` dependency keys are rendered only from concrete resolved identities.
@@ -75,6 +76,7 @@ promised.
 | `Rootfs=<path>:O` | rootfs built from resolved `runtime.packages` |
 | `Exec=` | resolved `runtime.command` |
 | `Volume=/nix/store:/nix/store:ro` | required for Nix store symlinks |
+| `Tmpfs=` | each ordered resolved `filesystem.tmpfs[]` path |
 | `AddDevice=` | each ordered resolved `filesystem.devices[].source` value |
 | `ReadOnly=` | explicit resolved `filesystem.readOnly` value |
 | `DropCapability=` | each ordered resolved `security.dropCapabilities` value |
@@ -129,6 +131,17 @@ field reference.
 Typed `Network=` output supports `none` and resolved `.container` source-unit
 references. The source-unit form lets Quadlet add automatic `Requires=` and
 `After=` relationships; see [Container network intent](networking.md).
+
+Path-only tmpfs intent renders mechanically without an options suffix:
+
+```ini
+Tmpfs=/run
+Tmpfs=/tmp
+```
+
+Quadlet translates each line to one Podman `--tmpfs` argument. Graft rejects
+relative paths, duplicates, control characters, and `:`, so raw tmpfs options
+cannot pass through this field.
 
 Qualified CDI references render mechanically without direct-device target or
 permission suffixes:
