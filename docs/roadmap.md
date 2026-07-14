@@ -174,7 +174,7 @@ Current hardening applies a concrete shared baseline:
 `deploy.target` is required. Typed boolean opt-outs and canonical capability
 additions are explicit dangerous intent implemented through
 [#163](https://github.com/Patrick-Kappen/graft/issues/163). See
-[Explicit container hardening](hardening.md) for the exact current boundary.
+[Container hardening](hardening.md) for the exact current boundary.
 
 Planned hardening:
 
