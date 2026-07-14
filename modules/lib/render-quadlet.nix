@@ -48,21 +48,36 @@ let
       filesystem = ctr.filesystem or { };
       readOnly = filesystem.readOnly or null;
       tmpfs = filesystem.tmpfs or [ ];
-      tmpfsLines = lib.concatMapStrings (path: "Tmpfs=${escapeSystemdExecArg path}\n") tmpfs;
+      tmpfsLines = lib.concatMapStrings (
+        mount:
+        let
+          options =
+            [
+              "rw"
+              "noexec"
+              "nosuid"
+              "nodev"
+            ]
+            ++ lib.optional ((mount.mode or null) != null) "mode=${mount.mode}"
+            ++ lib.optional ((mount.size or null) != null) "size=${mount.size}";
+        in
+        "Tmpfs=${escapeSystemdExecArg "${mount.target}:${lib.concatStringsSep "," options}"}\n"
+      ) tmpfs;
+      binds = filesystem.binds or [ ];
+      bindLines = lib.concatMapStrings (
+        bind:
+        let
+          access = if bind.readOnly then "ro" else "rw";
+        in
+        "Volume=${escapeSystemdExecArg "${bind.source}:${bind.target}:${access},bind"}\n"
+      ) binds;
       volumes = filesystem.volumes or [ ];
       volumeLines = lib.concatMapStrings (
         volume:
         let
-          source = volume.source or null;
-          inherit (volume) target;
-          mode = volume.mode or null;
-          mount =
-            if source == null then
-              target
-            else if mode == null then
-              "${source}:${target}"
-            else
-              "${source}:${target}:${mode}";
+          name = volume.name or null;
+          access = if volume.readOnly then "ro" else "rw";
+          mount = if name == null then volume.target else "${name}:${volume.target}:${access}";
         in
         "Volume=${escapeSystemdExecArg mount}\n"
       ) volumes;
@@ -143,6 +158,7 @@ let
     + environmentLines
     + environmentFileLines
     + tmpfsLines
+    + bindLines
     + volumeLines
     + deviceLines
     + readOnlyLine

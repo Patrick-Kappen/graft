@@ -184,64 +184,56 @@ Explicit tmpfs mounts, volumes, and host CDI specs can also introduce writable
 paths. See [Container hardening](hardening.md) for the process, mount,
 target, and future-relaxation boundaries.
 
-## Filesystem tmpfs
+## Filesystem mounts
+
+Host binds are typed and read-only by default:
 
 ```toml
-[config.filesystem]
-tmpfs = ["/run", "/var", "/tmp", "/etc"]
-```
+[[config.filesystem.binds]]
+source = "/srv/config"
+target = "/config"
 
-`config.filesystem.tmpfs` is an optional ordered list of unique absolute
-container paths. An empty list is omitted. Each path must be non-empty, start
-with `/`, contain no control characters, contain no `:`, and not end in
-whitespace or `\`. These terminal restrictions prevent Quadlet trimming or line
-continuation. The colon restriction keeps Quadlet's `CONTAINER-DIR:OPTIONS`
-syntax unavailable; size,
-mode, ownership, copy-up, and other tmpfs options remain deferred.
-
-Each resolved path renders as one ordered writable mount:
-
-```ini
-Tmpfs=/run
-Tmpfs=/var
-Tmpfs=/tmp
-Tmpfs=/etc
-```
-
-The mount is in-memory and does not expose a host source, but it masks content
-at its target and remains writable when `config.filesystem.readOnly = true`.
-Actual writes still depend on container path ownership, modes, and process
-credentials. Target-overlap policy across tmpfs, volumes, the rootfs, and the
-fixed store bind remains tracked by #142 and #164.
-
-## Filesystem volumes
-
-```toml
-[[config.filesystem.volumes]]
-target = "/cache"
-
-[[config.filesystem.volumes]]
+[[config.filesystem.binds]]
 source = "/srv/data"
 target = "/data"
-mode = "ro"
+readOnly = false
 ```
 
-`config.filesystem.volumes` preserves user order and renders each entry
-mechanically as `target`, `source:target`, or `source:target:mode`.
+Managed volumes request writable runtime-managed storage:
 
-| Field | Required | Validation |
-| --- | --- | --- |
-| `target` | yes | Non-empty; no control characters or `:`. |
-| `source` | no | Non-empty when present; no control characters or `:`. No path existence check. |
-| `mode` | no | Requires `source`; non-empty; no control characters or `:`. No option allowlist. |
+```toml
+[[config.filesystem.volumes]]
+name = "database"
+target = "/var/lib/database"
 
-A mode without `ro` may create a writable host mount. Targets can overlap fixed
-paths, including the generated `/nix/store` bind, and sources can expose store
-paths elsewhere. The current contract does not attest path safety or
-confinement; review such mounts explicitly. The approved
-[filesystem policy](filesystem-policy.md) replaces this legacy shape with typed
-binds and managed volumes. Implementation and migration remain tracked by
-[#164](https://github.com/Patrick-Kappen/graft/issues/164).
+[[config.filesystem.volumes]]
+target = "/scratch"
+```
+
+Named volumes accept `readOnly = true`; anonymous volumes are always writable.
+A literal name may reuse existing state in the effective Podman storage scope.
+Legacy volume `source` and `mode` fields fail with migration guidance.
+
+Tmpfs entries use bounded typed options:
+
+```toml
+[[config.filesystem.tmpfs]]
+target = "/tmp"
+mode = "1777"
+size = "64M"
+```
+
+`mode` is an optional four-digit octal mode and `size` is an optional positive
+integer followed by `K`, `M`, `G`, or `T`. Every tmpfs renders with fixed
+`rw,noexec,nosuid,nodev` flags. Legacy path strings fail with migration
+guidance.
+
+All sources and targets are absolute, colon-free, and lexically normalised.
+Protected virtual paths, `/nix/store`, duplicate targets, and ancestor or
+descendant overlaps are rejected across all mount kinds. Only typed tmpfs may
+target `/run`, `/tmp`, or `/var/tmp`. Graft validates paths lexically and does
+not attest source existence, type, ownership, permissions, or symlink
+resolution. See the complete [filesystem policy](filesystem-policy.md).
 
 ## CDI devices
 

@@ -100,8 +100,8 @@ and impossible combinations.
 
 Examples:
 
-- volume rendering: `target`, `source:target`, `source:target:mode`
-- invalid volume rendering: `mode` without `source`
+- filesystem rendering: typed tmpfs, read-only and writable binds, and named and anonymous volumes
+- invalid filesystem resolution: legacy fields, protected paths, unsafe options, and cross-kind target collisions
 - dependency rendering: requirement, ordering, lifecycle, and composed axes
 - invalid dependency graphs: empty relation, duplicate, missing, self, target
   mismatch, disabled target, and cycles

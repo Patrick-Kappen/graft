@@ -139,8 +139,8 @@ makes the following ownership decisions:
 | Seccomp | Preserve Podman's default profile; `unconfined` remains unavailable as dangerous intent. |
 | SELinux/AppArmor | Preserve host/runtime defaults; label disable and equivalent relaxations remain unavailable. |
 | Mask/unmask | Preserve OCI/Podman defaults; raw paths and `ALL` remain unavailable. |
-| Tmpfs | Preserve `ReadOnlyTmpfs=true` behavior and current explicit path-only tmpfs; options and collisions remain [#142]/[#164]. |
-| Volumes | Preserve the current legacy exception in which omitted `mode = "ro"` can select a writable upstream default; `ReadOnly=true` does not constrain volumes. [#142]/[#164] must make writable host authority explicit or reject it with migration diagnostics. |
+| Tmpfs | Typed tmpfs uses fixed safe flags, bounded mode and size, and shared target-collision validation through [#164]. |
+| Volumes | Typed host binds default read-only; writable binds require explicit authority, while managed-volume declarations explicitly request runtime-managed writable storage through [#164]. |
 | Devices | Keep the current qualified CDI contract; no implicit direct devices. |
 | Network | Preserve Podman's private connected default; `none` remains explicit and host mode remains dangerous. |
 | Resources | Define no universal CPU, memory, PID, or ulimit values before [#145]. |
@@ -200,10 +200,10 @@ coherent compatibility change. Its test contract covers:
 - schema, reference, capability, threat-model, quickstart, and migration
   updates in the same implementation PR.
 
-The implementation does not combine this contract with user-namespace,
-resource-limit, secret, mount-policy, or temporary-agent work. In particular,
-the current writable-volume exception remains for [#142]/[#164]; it is not
-silently repaired by read-only rootfs or by [#163].
+The implementation did not combine this contract with user-namespace,
+resource-limit, secret, mount-policy, or temporary-agent work. The later
+[#142]/[#164] filesystem contract makes writable bind and managed-volume intent
+explicit; read-only rootfs still does not constrain those mounts.
 
 [#140]: https://github.com/Patrick-Kappen/graft/issues/140
 [#141]: https://github.com/Patrick-Kappen/graft/issues/141

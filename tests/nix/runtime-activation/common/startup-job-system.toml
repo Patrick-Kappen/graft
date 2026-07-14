@@ -9,9 +9,10 @@ activation = "startup"
 packages = ["bash"]
 command = ["/bin/bash", "-c", "printf 'job\\n' >> /state/job-runs"]
 
-[[config.filesystem.volumes]]
+[[config.filesystem.binds]]
 source = "/var/lib/graft-activation"
 target = "/state"
+readOnly = false
 
 [config.service]
 lifecycle = "job"

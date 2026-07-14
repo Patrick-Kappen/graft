@@ -1,0 +1,41 @@
+version = 1
+name = "filesystem-system"
+
+[deploy]
+target = "system"
+
+[config.runtime]
+packages = ["bash", "coreutils"]
+command = [
+  "/bin/bash",
+  "-c",
+  "set -eu; test -f /readonly/base; test ! -e /readonly/submount/host-marker; if touch /readonly/blocked; then exit 1; fi; touch /writable/container-marker; test \"$(stat -c %a /scratch)\" = 1777; touch /scratch/tmpfs-marker; if test -e /control/second; then test \"$(cat /named/state)\" = first; test ! -e /anonymous/state; printf 'second\\n' > /named/state; else test ! -e /named/state; printf 'first\\n' > /named/state; printf 'anonymous\\n' > /anonymous/state; fi",
+]
+
+[[config.filesystem.binds]]
+source = "/srv/graft-filesystem/readonly"
+target = "/readonly"
+
+[[config.filesystem.binds]]
+source = "/srv/graft-filesystem/writable"
+target = "/writable"
+readOnly = false
+
+[[config.filesystem.binds]]
+source = "/srv/graft-filesystem/control"
+target = "/control"
+
+[[config.filesystem.volumes]]
+name = "graft-filesystem-runtime"
+target = "/named"
+
+[[config.filesystem.volumes]]
+target = "/anonymous"
+
+[[config.filesystem.tmpfs]]
+target = "/scratch"
+mode = "1777"
+size = "16M"
+
+[config.service]
+lifecycle = "job"

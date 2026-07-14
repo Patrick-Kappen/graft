@@ -31,10 +31,10 @@ BRACED = "pre${HOME}post"
 DOLLAR = "cost $5"
 PERCENT = "100%"
 
-[[config.filesystem.volumes]]
+[[config.filesystem.binds]]
 source = "/tmp/graft-$USER-%n"
 target = "/data$HOME-%h"
-mode = "ro%z"
+readOnly = true
 
 [config.network]
 publish = ["127.0.0.1:28%080:80"]

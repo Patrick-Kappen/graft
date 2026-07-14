@@ -346,36 +346,80 @@ pub struct Filesystem {
     pub read_only: Option<bool>,
     #[schemars(skip)]
     pub read_only_tmpfs: Option<bool>,
-    /// Ordered absolute container paths backed by writable tmpfs mounts.
-    #[schemars(
-        inner(regex(
-            pattern = r"^/(?:[^:\u0000-\u001F\u007F-\u009F]*[^:\u0000-\u001F\u007F-\u009F\s\\])?(?![\s\S])"
-        )),
-        extend("uniqueItems" = true)
-    )]
-    pub tmpfs: Option<Vec<String>>,
+    /// Ordered typed writable tmpfs mounts.
+    #[schemars(with = "Option<Vec<FilesystemTmpfs>>")]
+    pub tmpfs: Option<Vec<FilesystemTmpfsInput>>,
     /// Raw mount strings passed to `--mount`.
     #[schemars(skip)]
     pub mounts: Option<Vec<String>>,
-    /// Ordered literal Quadlet `Volume=` entries.
+    /// Ordered non-recursive host bind mounts.
+    pub binds: Option<Vec<FilesystemBind>>,
+    /// Ordered Podman-managed volume mounts.
     pub volumes: Option<Vec<FilesystemVolume>>,
     /// Ordered qualified CDI device references.
     pub devices: Option<Vec<Device>>,
 }
 
-/// A single volume mount (`[[config.filesystem.volumes]]`).
+/// Parser input for typed tmpfs plus the legacy path-only migration shape.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum FilesystemTmpfsInput {
+    /// Legacy path-only tmpfs entry retained for a migration diagnostic.
+    Legacy(String),
+    /// Current typed tmpfs entry.
+    Typed(FilesystemTmpfs),
+}
+
+/// A writable tmpfs mount (`[[config.filesystem.tmpfs]]`).
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct FilesystemTmpfs {
+    /// Absolute container target path.
+    #[schemars(length(min = 1))]
+    pub target: String,
+    /// Optional three- or four-digit octal mode no greater than `1777`.
+    #[schemars(regex(pattern = r"^[01]?[0-7]{3}$"))]
+    pub mode: Option<String>,
+    /// Optional positive size with an uppercase K, M, G, or T suffix.
+    #[schemars(regex(pattern = r"^[1-9][0-9]*[KMGT]?$"))]
+    pub size: Option<String>,
+}
+
+/// A non-recursive host bind (`[[config.filesystem.binds]]`).
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct FilesystemBind {
+    /// Absolute host source path.
+    #[schemars(length(min = 1))]
+    pub source: String,
+    /// Absolute container target path.
+    #[schemars(length(min = 1))]
+    pub target: String,
+    /// Read-only by default; `false` explicitly grants host-write authority.
+    pub read_only: Option<bool>,
+}
+
+/// A Podman-managed volume (`[[config.filesystem.volumes]]`).
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct FilesystemVolume {
-    /// Optional volume source. Colons are not supported.
-    #[schemars(length(min = 1))]
-    pub source: Option<String>,
-    /// Required container target. Colons are not supported.
+    /// Optional literal named-volume resource; absence requests an anonymous volume.
+    #[schemars(
+        length(min = 1, max = 128),
+        regex(pattern = r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+    )]
+    pub name: Option<String>,
+    /// Required absolute container target path.
     #[schemars(length(min = 1))]
     pub target: String,
-    /// Optional volume mode or options. Requires `source`; colons are not
-    /// supported.
-    #[schemars(length(min = 1))]
+    /// Named volumes are writable by default and may be narrowed with `true`;
+    /// anonymous volumes are always writable and reject `true`.
+    pub read_only: Option<bool>,
+    /// Legacy overloaded source retained only for a migration diagnostic.
+    #[schemars(skip)]
+    pub source: Option<String>,
+    /// Legacy raw mode retained only for a migration diagnostic.
+    #[schemars(skip)]
     pub mode: Option<String>,
 }
 

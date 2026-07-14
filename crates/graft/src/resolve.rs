@@ -8,9 +8,10 @@ use serde::Serialize;
 use crate::config::schema::{
     Attach, Config, Container, ContainerConfig, Dependency, DependencyLifecycle,
     DependencyOrdering, DependencyRequirement, DependencyTarget, Deploy, DeployActivation,
-    DeployTarget, Device, ExternalUnitDependencyTarget, Filesystem, FilesystemVolume, GraphRefs,
-    Health, Home, Network, NetworkMode, PackageOps, Quadlet, Resources, Runtime, Security, Service,
-    ServiceLifecycle, Validation, WorkloadDependencyTarget, Workspace,
+    DeployTarget, Device, ExternalUnitDependencyTarget, Filesystem, FilesystemBind,
+    FilesystemTmpfs, FilesystemTmpfsInput, FilesystemVolume, GraphRefs, Health, Home, Network,
+    NetworkMode, PackageOps, Quadlet, Resources, Runtime, Security, Service, ServiceLifecycle,
+    Validation, WorkloadDependencyTarget, Workspace,
 };
 
 const SUPPORTED_VERSION: u32 = 1;
@@ -171,10 +172,13 @@ pub struct ResolvedFilesystem {
     /// Concrete read-only root filesystem policy.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub read_only: Option<bool>,
-    /// Optional ordered absolute paths rendered as Quadlet `Tmpfs=`.
+    /// Optional ordered typed writable tmpfs mounts.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tmpfs: Option<Vec<String>>,
-    /// Optional volume mounts rendered as Quadlet `Volume=`.
+    pub tmpfs: Option<Vec<ResolvedFilesystemTmpfs>>,
+    /// Optional ordered non-recursive host bind mounts.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub binds: Option<Vec<ResolvedFilesystemBind>>,
+    /// Optional ordered Podman-managed volume mounts.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub volumes: Option<Vec<ResolvedFilesystemVolume>>,
     /// Optional qualified CDI references rendered as Quadlet `AddDevice=`.
@@ -205,18 +209,43 @@ pub struct ResolvedSecurity {
     pub no_new_privileges: Option<bool>,
 }
 
-/// Resolved filesystem volume mount.
+/// Resolved writable tmpfs mount.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolvedFilesystemTmpfs {
+    /// Required container target path.
+    pub target: String,
+    /// Optional validated octal mode.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
+    /// Optional validated size.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size: Option<String>,
+}
+
+/// Resolved non-recursive host bind mount.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolvedFilesystemBind {
+    /// Required host source path.
+    pub source: String,
+    /// Required container target path.
+    pub target: String,
+    /// Concrete read-only host-access policy.
+    pub read_only: bool,
+}
+
+/// Resolved Podman-managed volume mount.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResolvedFilesystemVolume {
-    /// Optional source path or volume name.
+    /// Optional named-volume resource; absence requests an anonymous volume.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub source: Option<String>,
+    pub name: Option<String>,
     /// Required container target path.
     pub target: String,
-    /// Optional volume mode/options.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub mode: Option<String>,
+    /// Concrete read-only policy.
+    pub read_only: bool,
 }
 
 /// Resolved network settings.
@@ -649,6 +678,7 @@ fn validate_unsupported_filesystem_intent(filesystem: Option<&Filesystem>) -> Re
         read_only_tmpfs,
         tmpfs: _,
         mounts,
+        binds: _,
         volumes: _,
         devices: _,
     }) = filesystem
@@ -1035,18 +1065,21 @@ fn resolve_filesystem(config: &ContainerConfig) -> Result<Option<ResolvedFilesys
             .unwrap_or(true),
     );
     let tmpfs = resolve_tmpfs(filesystem)?;
+    let binds = resolve_binds(filesystem)?;
     let volumes = resolve_volumes(filesystem)?;
+    validate_mount_target_collisions(tmpfs.as_deref(), binds.as_deref(), volumes.as_deref())?;
     let devices = resolve_devices(filesystem)?;
 
     Ok(Some(ResolvedFilesystem {
         read_only,
         tmpfs,
+        binds,
         volumes,
         devices,
     }))
 }
 
-fn resolve_tmpfs(filesystem: Option<&Filesystem>) -> Result<Option<Vec<String>>> {
+fn resolve_tmpfs(filesystem: Option<&Filesystem>) -> Result<Option<Vec<ResolvedFilesystemTmpfs>>> {
     let Some(tmpfs) = filesystem.and_then(|filesystem| filesystem.tmpfs.as_ref()) else {
         return Ok(None);
     };
@@ -1055,28 +1088,88 @@ fn resolve_tmpfs(filesystem: Option<&Filesystem>) -> Result<Option<Vec<String>>>
         return Ok(None);
     }
 
-    let mut paths = BTreeSet::new();
-    for (index, path) in tmpfs.iter().enumerate() {
-        let field_name = format!("config.filesystem.tmpfs[{index}]");
-        validate_non_empty_no_control(&field_name, path)?;
-        if !path.starts_with('/') {
-            bail!("{field_name} must be an absolute container path");
-        }
-        if path.contains(':') {
-            bail!("{field_name} cannot contain ':'; tmpfs options are not supported");
-        }
-        if path.chars().last().is_some_and(char::is_whitespace) {
-            bail!("{field_name} cannot end with whitespace");
-        }
-        if path.ends_with('\\') {
-            bail!("{field_name} cannot end with '\\'");
-        }
-        if !paths.insert(path) {
-            bail!("{field_name} duplicates an earlier tmpfs path");
+    let mut resolved = Vec::with_capacity(tmpfs.len());
+    for (index, input) in tmpfs.iter().enumerate() {
+        let FilesystemTmpfsInput::Typed(tmpfs) = input else {
+            bail!(
+                "config.filesystem.tmpfs[{index}] uses the legacy path-only form; use [[config.filesystem.tmpfs]] with target"
+            );
+        };
+        resolved.push(resolve_tmpfs_mount(tmpfs, index)?);
+    }
+
+    Ok(Some(resolved))
+}
+
+fn resolve_tmpfs_mount(tmpfs: &FilesystemTmpfs, index: usize) -> Result<ResolvedFilesystemTmpfs> {
+    let target_field = format!("config.filesystem.tmpfs[{index}].target");
+    validate_mount_target(&target_field, &tmpfs.target, true)?;
+
+    if let Some(mode) = tmpfs.mode.as_deref() {
+        let mode_field = format!("config.filesystem.tmpfs[{index}].mode");
+        let valid_digits =
+            matches!(mode.len(), 3 | 4) && mode.bytes().all(|byte| matches!(byte, b'0'..=b'7'));
+        let parsed = u16::from_str_radix(mode, 8).ok();
+        if !valid_digits || !matches!(parsed, Some(value) if value <= 0o1777) {
+            bail!("{mode_field} must be a three- or four-digit octal mode no greater than 1777");
         }
     }
 
-    Ok(Some(tmpfs.clone()))
+    if let Some(size) = tmpfs.size.as_deref() {
+        let size_field = format!("config.filesystem.tmpfs[{index}].size");
+        let digits = size.strip_suffix(['K', 'M', 'G', 'T']).unwrap_or(size);
+        if digits.is_empty()
+            || digits.starts_with('0')
+            || !digits.bytes().all(|byte| byte.is_ascii_digit())
+        {
+            bail!("{size_field} must be a positive integer with an optional K, M, G, or T suffix");
+        }
+    }
+
+    Ok(ResolvedFilesystemTmpfs {
+        target: tmpfs.target.clone(),
+        mode: tmpfs.mode.clone(),
+        size: tmpfs.size.clone(),
+    })
+}
+
+fn resolve_binds(filesystem: Option<&Filesystem>) -> Result<Option<Vec<ResolvedFilesystemBind>>> {
+    let Some(binds) = filesystem.and_then(|filesystem| filesystem.binds.as_ref()) else {
+        return Ok(None);
+    };
+
+    if binds.is_empty() {
+        return Ok(None);
+    }
+
+    let mut resolved = Vec::with_capacity(binds.len());
+    for (index, bind) in binds.iter().enumerate() {
+        resolved.push(resolve_bind(bind, index)?);
+    }
+
+    Ok(Some(resolved))
+}
+
+fn resolve_bind(bind: &FilesystemBind, index: usize) -> Result<ResolvedFilesystemBind> {
+    let source_field = format!("config.filesystem.binds[{index}].source");
+    validate_mount_path(&source_field, &bind.source)?;
+    if bind.source == "/" {
+        bail!("{source_field} cannot expose the host root");
+    }
+    for protected in ["/proc", "/sys", "/dev", "/run"] {
+        if path_is_equal_or_descendant(&bind.source, protected) {
+            bail!("{source_field} cannot expose protected host path {protected}");
+        }
+    }
+
+    let target_field = format!("config.filesystem.binds[{index}].target");
+    validate_mount_target(&target_field, &bind.target, false)?;
+
+    Ok(ResolvedFilesystemBind {
+        source: bind.source.clone(),
+        target: bind.target.clone(),
+        read_only: bind.read_only.unwrap_or(true),
+    })
 }
 
 fn resolve_security(config: &ContainerConfig) -> Result<Option<ResolvedSecurity>> {
@@ -1144,45 +1237,168 @@ fn resolve_volumes(
     }
 
     let mut resolved = Vec::with_capacity(volumes.len());
-
-    for volume in volumes {
-        resolved.push(resolve_volume(volume)?);
+    for (index, volume) in volumes.iter().enumerate() {
+        resolved.push(resolve_volume(volume, index)?);
     }
 
     Ok(Some(resolved))
 }
 
-fn resolve_volume(volume: &FilesystemVolume) -> Result<ResolvedFilesystemVolume> {
-    validate_volume_part("target", &volume.target)?;
-
+fn resolve_volume(volume: &FilesystemVolume, index: usize) -> Result<ResolvedFilesystemVolume> {
     if let Some(source) = volume.source.as_deref() {
-        validate_volume_part("source", source)?;
+        let migration = if source.starts_with('/') {
+            "use [[config.filesystem.binds]] with this absolute source"
+        } else if source.starts_with('.') {
+            "convert the source to a reviewed absolute host path and use [[config.filesystem.binds]]"
+        } else {
+            "move the source value to config.filesystem.volumes[].name"
+        };
+        bail!(
+            "config.filesystem.volumes[{index}].source uses the legacy overloaded form; {migration}"
+        );
+    }
+    if volume.mode.is_some() {
+        bail!(
+            "config.filesystem.volumes[{index}].mode uses legacy raw options; use config.filesystem.volumes[{index}].readOnly"
+        );
     }
 
-    if let Some(mode) = volume.mode.as_deref() {
-        validate_volume_part("mode", mode)?;
+    if let Some(name) = volume.name.as_deref() {
+        validate_volume_name(name, index)?;
+    } else if volume.read_only == Some(true) {
+        bail!(
+            "config.filesystem.volumes[{index}].readOnly cannot be true for an anonymous volume; add a reviewed name or omit readOnly to request writable anonymous storage"
+        );
     }
 
-    if volume.source.is_none() && volume.mode.is_some() {
-        bail!("filesystem volume mode requires source");
-    }
+    let target_field = format!("config.filesystem.volumes[{index}].target");
+    validate_mount_target(&target_field, &volume.target, false)?;
 
     Ok(ResolvedFilesystemVolume {
-        source: volume.source.clone(),
+        name: volume.name.clone(),
         target: volume.target.clone(),
-        mode: volume.mode.clone(),
+        read_only: volume.read_only.unwrap_or(false),
     })
 }
 
-fn validate_volume_part(name: &str, value: &str) -> Result<()> {
-    let field_name = format!("filesystem volume {name}");
-    validate_non_empty_no_control(&field_name, value)?;
+fn validate_volume_name(name: &str, index: usize) -> Result<()> {
+    let field_name = format!("config.filesystem.volumes[{index}].name");
+    let valid = !name.is_empty()
+        && name.len() <= 128
+        && name.bytes().enumerate().all(|(position, byte)| {
+            byte.is_ascii_alphanumeric() || (position > 0 && matches!(byte, b'_' | b'.' | b'-'))
+        });
+    if !valid {
+        bail!("{field_name} must match ^[A-Za-z0-9][A-Za-z0-9_.-]*$ and be at most 128 characters");
+    }
+    if name.ends_with(".volume") {
+        bail!("{field_name} cannot end with '.volume'");
+    }
+    Ok(())
+}
 
-    if value.contains(':') {
-        bail!("filesystem volume {name} cannot contain ':'");
+fn validate_mount_target(field_name: &str, target: &str, is_tmpfs: bool) -> Result<()> {
+    validate_mount_path(field_name, target)?;
+    if target == "/" {
+        bail!("{field_name} cannot replace the container rootfs");
+    }
+    if paths_overlap(target, "/nix/store") {
+        bail!("{field_name} cannot overlap Graft-owned path /nix/store");
+    }
+    for protected in ["/dev", "/proc", "/sys"] {
+        if path_is_equal_or_descendant(target, protected) {
+            bail!("{field_name} cannot overlap protected container path {protected}");
+        }
+    }
+    if !is_tmpfs {
+        for tmpfs_path in ["/run", "/tmp", "/var/tmp"] {
+            if path_is_equal_or_descendant(target, tmpfs_path) {
+                bail!("{field_name} cannot overlap runtime tmpfs path {tmpfs_path}");
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_mount_path(field_name: &str, path: &str) -> Result<()> {
+    validate_non_empty_no_control(field_name, path)?;
+    if !path.starts_with('/') {
+        bail!("{field_name} must be an absolute path");
+    }
+    if path.contains(':') {
+        bail!("{field_name} cannot contain ':'");
+    }
+    if path != "/" && path.ends_with('/') {
+        bail!("{field_name} cannot end with '/'");
+    }
+    if path.contains("//") {
+        bail!("{field_name} cannot contain repeated '/'");
+    }
+    if path
+        .split('/')
+        .any(|component| matches!(component, "." | ".."))
+    {
+        bail!("{field_name} must be lexically normalized");
+    }
+    if path.chars().last().is_some_and(char::is_whitespace) {
+        bail!("{field_name} cannot end with whitespace");
+    }
+    if path.ends_with('\\') {
+        bail!("{field_name} cannot end with '\\'");
+    }
+    Ok(())
+}
+
+fn validate_mount_target_collisions(
+    tmpfs: Option<&[ResolvedFilesystemTmpfs]>,
+    binds: Option<&[ResolvedFilesystemBind]>,
+    volumes: Option<&[ResolvedFilesystemVolume]>,
+) -> Result<()> {
+    let mut targets = Vec::new();
+    if let Some(tmpfs) = tmpfs {
+        targets.extend(tmpfs.iter().enumerate().map(|(index, mount)| {
+            (
+                format!("config.filesystem.tmpfs[{index}].target"),
+                mount.target.as_str(),
+            )
+        }));
+    }
+    if let Some(binds) = binds {
+        targets.extend(binds.iter().enumerate().map(|(index, mount)| {
+            (
+                format!("config.filesystem.binds[{index}].target"),
+                mount.target.as_str(),
+            )
+        }));
+    }
+    if let Some(volumes) = volumes {
+        targets.extend(volumes.iter().enumerate().map(|(index, mount)| {
+            (
+                format!("config.filesystem.volumes[{index}].target"),
+                mount.target.as_str(),
+            )
+        }));
     }
 
+    for (position, (field_name, target)) in targets.iter().enumerate() {
+        for (other_field, other_target) in targets.iter().skip(position + 1) {
+            if paths_overlap(target, other_target) {
+                bail!("{other_field} overlaps {field_name}");
+            }
+        }
+    }
     Ok(())
+}
+
+fn paths_overlap(left: &str, right: &str) -> bool {
+    path_is_equal_or_descendant(left, right) || path_is_equal_or_descendant(right, left)
+}
+
+fn path_is_equal_or_descendant(path: &str, parent: &str) -> bool {
+    path == parent
+        || path
+            .strip_prefix(parent)
+            .is_some_and(|suffix| suffix.starts_with('/'))
 }
 
 fn resolve_devices(filesystem: Option<&Filesystem>) -> Result<Option<Vec<ResolvedDevice>>> {
@@ -3505,26 +3721,44 @@ mod tests {
     }
 
     #[test]
-    fn tmpfs_paths_preserve_declaration_order() {
+    fn typed_tmpfs_entries_preserve_order_and_options() {
         let config = filesystem_config(Filesystem {
-            tmpfs: Some(vec!["/run".to_string(), "/tmp".to_string()]),
+            tmpfs: Some(vec![
+                FilesystemTmpfsInput::Typed(FilesystemTmpfs {
+                    target: "/run/graft".to_string(),
+                    mode: Some("0750".to_string()),
+                    size: Some("64M".to_string()),
+                }),
+                FilesystemTmpfsInput::Typed(FilesystemTmpfs {
+                    target: "/tmp/graft".to_string(),
+                    mode: None,
+                    size: None,
+                }),
+            ]),
             ..Filesystem::default()
         });
 
         let resolved = resolve(&config).unwrap();
+        let tmpfs = resolved.filesystem.unwrap().tmpfs.unwrap();
+
+        assert_eq!(tmpfs[0].target, "/run/graft");
+        assert_eq!(tmpfs[0].mode.as_deref(), Some("0750"));
+        assert_eq!(tmpfs[0].size.as_deref(), Some("64M"));
+        assert_eq!(tmpfs[1].target, "/tmp/graft");
+    }
+
+    #[test]
+    fn legacy_path_only_tmpfs_returns_migration_error() {
+        let config = filesystem_config(Filesystem {
+            tmpfs: Some(vec![FilesystemTmpfsInput::Legacy("/tmp".to_string())]),
+            ..Filesystem::default()
+        });
+
+        let error = resolve(&config).unwrap_err();
 
         assert_eq!(
-            resolved.filesystem,
-            Some(ResolvedFilesystem {
-                read_only: Some(true),
-                tmpfs: Some(vec!["/run".to_string(), "/tmp".to_string()]),
-                volumes: None,
-                devices: None,
-            })
-        );
-        assert_eq!(
-            serde_json::to_value(&resolved).unwrap()["filesystem"]["tmpfs"],
-            serde_json::json!(["/run", "/tmp"])
+            error.to_string(),
+            "config.filesystem.tmpfs[0] uses the legacy path-only form; use [[config.filesystem.tmpfs]] with target"
         );
     }
 
@@ -3541,315 +3775,144 @@ mod tests {
     }
 
     #[test]
-    fn invalid_tmpfs_paths_return_indexed_errors() {
+    fn invalid_mount_paths_return_field_specific_errors() {
         let cases = [
-            ("", "config.filesystem.tmpfs[0] cannot be empty"),
-            ("  ", "config.filesystem.tmpfs[0] cannot be empty"),
-            (
-                "tmp",
-                "config.filesystem.tmpfs[0] must be an absolute container path",
-            ),
-            (
-                "/tmp\ncache",
-                "config.filesystem.tmpfs[0] cannot contain control characters",
-            ),
-            (
-                "/tmp:size=1G",
-                "config.filesystem.tmpfs[0] cannot contain ':'; tmpfs options are not supported",
-            ),
-            (
-                "/tmp ",
-                "config.filesystem.tmpfs[0] cannot end with whitespace",
-            ),
-            ("/tmp\\", "config.filesystem.tmpfs[0] cannot end with '\\'"),
-            (
-                "/tmp\u{0085}",
-                "config.filesystem.tmpfs[0] cannot contain control characters",
-            ),
+            ("", "cannot be empty"),
+            ("relative", "must be an absolute path"),
+            ("/data:rw", "cannot contain ':'"),
+            ("/data/", "cannot end with '/'"),
+            ("/data//logs", "cannot contain repeated '/'"),
+            ("/data/../logs", "must be lexically normalized"),
+            ("/data ", "cannot end with whitespace"),
+            ("/data\\", "cannot end with '\\'"),
+            ("/da\nta", "cannot contain control characters"),
         ];
 
         for (path, expected) in cases {
             let config = filesystem_config(Filesystem {
-                tmpfs: Some(vec![path.to_string()]),
+                tmpfs: Some(vec![FilesystemTmpfsInput::Typed(FilesystemTmpfs {
+                    target: path.to_string(),
+                    mode: None,
+                    size: None,
+                })]),
                 ..Filesystem::default()
             });
 
             let error = resolve(&config).unwrap_err();
 
-            assert_eq!(error.to_string(), expected);
+            assert!(error.to_string().contains(expected), "{path}: {error}");
         }
     }
 
     #[test]
-    fn duplicate_tmpfs_path_returns_indexed_error() {
-        let config = filesystem_config(Filesystem {
-            tmpfs: Some(vec!["/tmp".to_string(), "/tmp".to_string()]),
-            ..Filesystem::default()
-        });
+    fn invalid_tmpfs_modes_and_sizes_return_indexed_errors() {
+        let cases = [
+            (Some("22"), None, "mode"),
+            (Some("2777"), None, "mode"),
+            (Some("08x0"), None, "mode"),
+            (None, Some("0"), "size"),
+            (None, Some("01M"), "size"),
+            (None, Some("1MiB"), "size"),
+        ];
 
-        let error = resolve(&config).unwrap_err();
+        for (mode, size, expected_field) in cases {
+            let config = filesystem_config(Filesystem {
+                tmpfs: Some(vec![FilesystemTmpfsInput::Typed(FilesystemTmpfs {
+                    target: "/cache".to_string(),
+                    mode: mode.map(str::to_string),
+                    size: size.map(str::to_string),
+                })]),
+                ..Filesystem::default()
+            });
 
-        assert_eq!(
-            error.to_string(),
-            "config.filesystem.tmpfs[1] duplicates an earlier tmpfs path"
-        );
+            let error = resolve(&config).unwrap_err();
+
+            assert!(error
+                .to_string()
+                .contains(&format!("config.filesystem.tmpfs[0].{expected_field}")));
+        }
     }
 
     #[test]
-    fn target_only_volume_is_preserved() {
+    fn bind_defaults_read_only_and_explicit_false_is_preserved() {
         let config = filesystem_config(Filesystem {
-            volumes: Some(vec![FilesystemVolume {
-                source: None,
-                target: "/data".to_string(),
-                mode: None,
-            }]),
-            ..Filesystem::default()
-        });
-
-        let resolved = resolve(&config).unwrap();
-
-        assert_eq!(
-            resolved.filesystem,
-            Some(ResolvedFilesystem {
-                read_only: Some(true),
-                tmpfs: None,
-                volumes: Some(vec![ResolvedFilesystemVolume {
-                    source: None,
-                    target: "/data".to_string(),
-                    mode: None,
-                }]),
-                devices: None,
-            })
-        );
-
-        let json = serde_json::to_value(&resolved).unwrap();
-        assert_eq!(json["filesystem"]["volumes"][0]["target"], "/data");
-        assert_eq!(json["filesystem"]["volumes"][0].get("source"), None);
-        assert_eq!(json["filesystem"]["volumes"][0].get("mode"), None);
-    }
-
-    #[test]
-    fn source_and_target_volume_is_preserved() {
-        let config = filesystem_config(Filesystem {
-            volumes: Some(vec![FilesystemVolume {
-                source: Some("/host/data".to_string()),
-                target: "/data".to_string(),
-                mode: None,
-            }]),
-            ..Filesystem::default()
-        });
-
-        let resolved = resolve(&config).unwrap();
-
-        assert_eq!(
-            resolved.filesystem,
-            Some(ResolvedFilesystem {
-                read_only: Some(true),
-                tmpfs: None,
-                volumes: Some(vec![ResolvedFilesystemVolume {
-                    source: Some("/host/data".to_string()),
-                    target: "/data".to_string(),
-                    mode: None,
-                }]),
-                devices: None,
-            })
-        );
-    }
-
-    #[test]
-    fn source_target_and_mode_volume_is_preserved() {
-        let config = filesystem_config(Filesystem {
-            volumes: Some(vec![FilesystemVolume {
-                source: Some("/host/config".to_string()),
-                target: "/config".to_string(),
-                mode: Some("ro".to_string()),
-            }]),
-            ..Filesystem::default()
-        });
-
-        let resolved = resolve(&config).unwrap();
-
-        assert_eq!(
-            resolved.filesystem,
-            Some(ResolvedFilesystem {
-                read_only: Some(true),
-                tmpfs: None,
-                volumes: Some(vec![ResolvedFilesystemVolume {
-                    source: Some("/host/config".to_string()),
+            binds: Some(vec![
+                FilesystemBind {
+                    source: "/srv/config".to_string(),
                     target: "/config".to_string(),
-                    mode: Some("ro".to_string()),
+                    read_only: None,
+                },
+                FilesystemBind {
+                    source: "/srv/work".to_string(),
+                    target: "/workspace".to_string(),
+                    read_only: Some(false),
+                },
+            ]),
+            ..Filesystem::default()
+        });
+
+        let resolved = resolve(&config).unwrap();
+        let binds = resolved.filesystem.unwrap().binds.unwrap();
+
+        assert!(binds[0].read_only);
+        assert!(!binds[1].read_only);
+    }
+
+    #[test]
+    fn protected_bind_sources_return_indexed_errors() {
+        for source in [
+            "/",
+            "/proc",
+            "/proc/sys",
+            "/sys",
+            "/dev/kvm",
+            "/run/podman.sock",
+        ] {
+            let config = filesystem_config(Filesystem {
+                binds: Some(vec![FilesystemBind {
+                    source: source.to_string(),
+                    target: "/data".to_string(),
+                    read_only: None,
                 }]),
-                devices: None,
-            })
-        );
+                ..Filesystem::default()
+            });
+
+            let error = resolve(&config).unwrap_err();
+
+            assert!(error
+                .to_string()
+                .contains("config.filesystem.binds[0].source"));
+        }
     }
 
     #[test]
-    fn volume_mode_without_source_returns_error() {
+    fn managed_volume_defaults_writable_and_preserves_name() {
         let config = filesystem_config(Filesystem {
             volumes: Some(vec![FilesystemVolume {
+                name: Some("database-1".to_string()),
+                target: "/data".to_string(),
+                read_only: None,
                 source: None,
-                target: "/data".to_string(),
-                mode: Some("ro".to_string()),
+                mode: None,
             }]),
             ..Filesystem::default()
         });
 
-        let result = resolve(&config);
+        let resolved = resolve(&config).unwrap();
+        let volume = &resolved.filesystem.unwrap().volumes.unwrap()[0];
 
-        assert!(result.is_err());
+        assert_eq!(volume.name.as_deref(), Some("database-1"));
+        assert!(!volume.read_only);
     }
 
     #[test]
-    fn empty_volume_target_returns_error() {
+    fn anonymous_volume_rejects_read_only_access() {
         let config = filesystem_config(Filesystem {
             volumes: Some(vec![FilesystemVolume {
+                name: None,
+                target: "/data".to_string(),
+                read_only: Some(true),
                 source: None,
-                target: String::new(),
-                mode: None,
-            }]),
-            ..Filesystem::default()
-        });
-
-        let result = resolve(&config);
-
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn whitespace_volume_target_returns_error() {
-        let config = filesystem_config(Filesystem {
-            volumes: Some(vec![FilesystemVolume {
-                source: None,
-                target: "  ".to_string(),
-                mode: None,
-            }]),
-            ..Filesystem::default()
-        });
-
-        let result = resolve(&config);
-
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn empty_volume_source_returns_error() {
-        let config = filesystem_config(Filesystem {
-            volumes: Some(vec![FilesystemVolume {
-                source: Some(String::new()),
-                target: "/data".to_string(),
-                mode: None,
-            }]),
-            ..Filesystem::default()
-        });
-
-        let result = resolve(&config);
-
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn whitespace_volume_source_returns_error() {
-        let config = filesystem_config(Filesystem {
-            volumes: Some(vec![FilesystemVolume {
-                source: Some("  ".to_string()),
-                target: "/data".to_string(),
-                mode: None,
-            }]),
-            ..Filesystem::default()
-        });
-
-        let result = resolve(&config);
-
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn empty_volume_mode_returns_error() {
-        let config = filesystem_config(Filesystem {
-            volumes: Some(vec![FilesystemVolume {
-                source: Some("/host/data".to_string()),
-                target: "/data".to_string(),
-                mode: Some(String::new()),
-            }]),
-            ..Filesystem::default()
-        });
-
-        let result = resolve(&config);
-
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn whitespace_volume_mode_returns_error() {
-        let config = filesystem_config(Filesystem {
-            volumes: Some(vec![FilesystemVolume {
-                source: Some("/host/data".to_string()),
-                target: "/data".to_string(),
-                mode: Some("  ".to_string()),
-            }]),
-            ..Filesystem::default()
-        });
-
-        let result = resolve(&config);
-
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn control_character_in_volume_target_returns_error() {
-        let config = filesystem_config(Filesystem {
-            volumes: Some(vec![FilesystemVolume {
-                source: None,
-                target: "/da\nta".to_string(),
-                mode: None,
-            }]),
-            ..Filesystem::default()
-        });
-
-        let result = resolve(&config);
-
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn control_character_in_volume_source_returns_error() {
-        let config = filesystem_config(Filesystem {
-            volumes: Some(vec![FilesystemVolume {
-                source: Some("/host/da\nta".to_string()),
-                target: "/data".to_string(),
-                mode: None,
-            }]),
-            ..Filesystem::default()
-        });
-
-        let result = resolve(&config);
-
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn control_character_in_volume_mode_returns_error() {
-        let config = filesystem_config(Filesystem {
-            volumes: Some(vec![FilesystemVolume {
-                source: Some("/host/data".to_string()),
-                target: "/data".to_string(),
-                mode: Some("r\no".to_string()),
-            }]),
-            ..Filesystem::default()
-        });
-
-        let result = resolve(&config);
-
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn colon_in_volume_target_returns_error() {
-        let config = filesystem_config(Filesystem {
-            volumes: Some(vec![FilesystemVolume {
-                source: None,
-                target: "/data:logs".to_string(),
                 mode: None,
             }]),
             ..Filesystem::default()
@@ -3857,48 +3920,230 @@ mod tests {
 
         let error = resolve(&config).unwrap_err();
 
-        assert_eq!(
-            error.to_string(),
-            "filesystem volume target cannot contain ':'"
-        );
+        assert!(error.to_string().contains(
+            "config.filesystem.volumes[0].readOnly cannot be true for an anonymous volume"
+        ));
     }
 
     #[test]
-    fn colon_in_volume_source_returns_error() {
-        let config = filesystem_config(Filesystem {
+    fn invalid_managed_volume_names_return_indexed_errors() {
+        for name in ["", ".hidden", "path/name", "name:tag", "unit.volume"] {
+            let config = filesystem_config(Filesystem {
+                volumes: Some(vec![FilesystemVolume {
+                    name: Some(name.to_string()),
+                    target: "/data".to_string(),
+                    read_only: None,
+                    source: None,
+                    mode: None,
+                }]),
+                ..Filesystem::default()
+            });
+
+            let error = resolve(&config).unwrap_err();
+
+            assert!(error
+                .to_string()
+                .contains("config.filesystem.volumes[0].name"));
+        }
+    }
+
+    #[test]
+    fn legacy_volume_fields_return_migration_errors() {
+        let cases = [
+            (Some("/srv/data"), None, "[[config.filesystem.binds]]"),
+            (Some("./data"), None, "reviewed absolute host path"),
+            (Some("database"), None, "volumes[].name"),
+            (None, Some("ro"), "readOnly"),
+        ];
+
+        for (source, mode, expected) in cases {
+            let config = filesystem_config(Filesystem {
+                volumes: Some(vec![FilesystemVolume {
+                    name: None,
+                    target: "/data".to_string(),
+                    read_only: None,
+                    source: source.map(str::to_string),
+                    mode: mode.map(str::to_string),
+                }]),
+                ..Filesystem::default()
+            });
+
+            let error = resolve(&config).unwrap_err();
+
+            assert!(error.to_string().contains(expected));
+        }
+    }
+
+    #[test]
+    fn protected_mount_targets_return_field_specific_errors() {
+        for target in [
+            "/",
+            "/nix",
+            "/nix/store",
+            "/nix/store/pkg",
+            "/dev",
+            "/proc/sys",
+        ] {
+            let config = filesystem_config(Filesystem {
+                volumes: Some(vec![FilesystemVolume {
+                    name: None,
+                    target: target.to_string(),
+                    read_only: None,
+                    source: None,
+                    mode: None,
+                }]),
+                ..Filesystem::default()
+            });
+
+            let error = resolve(&config).unwrap_err();
+
+            assert!(error
+                .to_string()
+                .contains("config.filesystem.volumes[0].target"));
+        }
+    }
+
+    #[test]
+    fn only_tmpfs_can_target_runtime_temporary_trees() {
+        let volume_config = filesystem_config(Filesystem {
             volumes: Some(vec![FilesystemVolume {
-                source: Some("/host:data".to_string()),
-                target: "/data".to_string(),
+                name: None,
+                target: "/tmp/cache".to_string(),
+                read_only: None,
+                source: None,
+                mode: None,
+            }]),
+            ..Filesystem::default()
+        });
+        let tmpfs_config = filesystem_config(Filesystem {
+            tmpfs: Some(vec![FilesystemTmpfsInput::Typed(FilesystemTmpfs {
+                target: "/tmp/cache".to_string(),
+                mode: None,
+                size: None,
+            })]),
+            ..Filesystem::default()
+        });
+
+        assert!(resolve(&volume_config).is_err());
+        assert!(resolve(&tmpfs_config).is_ok());
+    }
+
+    #[test]
+    fn duplicate_and_nested_same_kind_targets_return_errors() {
+        let cases = [
+            (Some(("/cache", "/cache")), None, None),
+            (None, Some(("/cache", "/cache/nested")), None),
+            (None, None, Some(("/cache", "/cache/nested"))),
+        ];
+
+        for (tmpfs_targets, bind_targets, volume_targets) in cases {
+            let tmpfs = tmpfs_targets.map(|(left, right)| {
+                [left, right]
+                    .into_iter()
+                    .map(|target| {
+                        FilesystemTmpfsInput::Typed(FilesystemTmpfs {
+                            target: target.to_string(),
+                            mode: None,
+                            size: None,
+                        })
+                    })
+                    .collect()
+            });
+            let binds = bind_targets.map(|(left, right)| {
+                [left, right]
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, target)| FilesystemBind {
+                        source: format!("/srv/source-{index}"),
+                        target: target.to_string(),
+                        read_only: None,
+                    })
+                    .collect()
+            });
+            let volumes = volume_targets.map(|(left, right)| {
+                [left, right]
+                    .into_iter()
+                    .map(|target| FilesystemVolume {
+                        name: None,
+                        target: target.to_string(),
+                        read_only: None,
+                        source: None,
+                        mode: None,
+                    })
+                    .collect()
+            });
+            let config = filesystem_config(Filesystem {
+                tmpfs,
+                binds,
+                volumes,
+                ..Filesystem::default()
+            });
+
+            let error = resolve(&config).unwrap_err();
+
+            assert!(error.to_string().contains("overlaps"));
+        }
+    }
+
+    #[test]
+    fn nested_cross_kind_targets_return_errors() {
+        let cross_kind_cases = [(true, false), (false, true)];
+        for (include_bind, include_volume) in cross_kind_cases {
+            let config = filesystem_config(Filesystem {
+                tmpfs: Some(vec![FilesystemTmpfsInput::Typed(FilesystemTmpfs {
+                    target: "/cache".to_string(),
+                    mode: None,
+                    size: None,
+                })]),
+                binds: include_bind.then(|| {
+                    vec![FilesystemBind {
+                        source: "/srv/cache".to_string(),
+                        target: "/cache/nested".to_string(),
+                        read_only: None,
+                    }]
+                }),
+                volumes: include_volume.then(|| {
+                    vec![FilesystemVolume {
+                        name: None,
+                        target: if include_bind {
+                            "/state"
+                        } else {
+                            "/cache/nested"
+                        }
+                        .to_string(),
+                        read_only: None,
+                        source: None,
+                        mode: None,
+                    }]
+                }),
+                ..Filesystem::default()
+            });
+
+            let error = resolve(&config).unwrap_err();
+
+            assert!(error.to_string().contains("overlaps"));
+        }
+
+        let bind_volume_config = filesystem_config(Filesystem {
+            binds: Some(vec![FilesystemBind {
+                source: "/srv/cache".to_string(),
+                target: "/cache".to_string(),
+                read_only: None,
+            }]),
+            volumes: Some(vec![FilesystemVolume {
+                name: None,
+                target: "/cache/nested".to_string(),
+                read_only: None,
+                source: None,
                 mode: None,
             }]),
             ..Filesystem::default()
         });
 
-        let error = resolve(&config).unwrap_err();
-
-        assert_eq!(
-            error.to_string(),
-            "filesystem volume source cannot contain ':'"
-        );
-    }
-
-    #[test]
-    fn colon_in_volume_mode_returns_error() {
-        let config = filesystem_config(Filesystem {
-            volumes: Some(vec![FilesystemVolume {
-                source: Some("/host/data".to_string()),
-                target: "/data".to_string(),
-                mode: Some("ro:z".to_string()),
-            }]),
-            ..Filesystem::default()
-        });
-
-        let error = resolve(&config).unwrap_err();
-
-        assert_eq!(
-            error.to_string(),
-            "filesystem volume mode cannot contain ':'"
-        );
+        assert!(resolve(&bind_volume_config)
+            .unwrap_err()
+            .to_string()
+            .contains("overlaps"));
     }
 
     #[test]
@@ -3938,6 +4183,7 @@ mod tests {
             Some(ResolvedFilesystem {
                 read_only: Some(true),
                 tmpfs: None,
+                binds: None,
                 volumes: None,
                 devices: Some(vec![
                     ResolvedDevice {
@@ -3966,10 +4212,16 @@ mod tests {
     fn read_only_tmpfs_volumes_and_cdi_devices_resolve_together() {
         let config = filesystem_config(Filesystem {
             read_only: Some(true),
-            tmpfs: Some(vec!["/run/graft".to_string()]),
+            tmpfs: Some(vec![FilesystemTmpfsInput::Typed(FilesystemTmpfs {
+                target: "/run/graft".to_string(),
+                mode: None,
+                size: None,
+            })]),
             volumes: Some(vec![FilesystemVolume {
-                source: None,
+                name: None,
                 target: "/data".to_string(),
+                read_only: None,
+                source: None,
                 mode: None,
             }]),
             devices: Some(vec![Device {
@@ -3986,11 +4238,16 @@ mod tests {
             resolved.filesystem,
             Some(ResolvedFilesystem {
                 read_only: Some(true),
-                tmpfs: Some(vec!["/run/graft".to_string()]),
-                volumes: Some(vec![ResolvedFilesystemVolume {
-                    source: None,
-                    target: "/data".to_string(),
+                tmpfs: Some(vec![ResolvedFilesystemTmpfs {
+                    target: "/run/graft".to_string(),
                     mode: None,
+                    size: None,
+                }]),
+                binds: None,
+                volumes: Some(vec![ResolvedFilesystemVolume {
+                    name: None,
+                    target: "/data".to_string(),
+                    read_only: false,
                 }]),
                 devices: Some(vec![ResolvedDevice {
                     source: "nvidia.com/gpu=all".to_string(),
@@ -4171,6 +4428,7 @@ mod tests {
             Some(ResolvedFilesystem {
                 read_only: Some(true),
                 tmpfs: None,
+                binds: None,
                 volumes: None,
                 devices: None,
             })

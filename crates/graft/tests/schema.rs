@@ -96,9 +96,11 @@ fn schema_exposes_only_supported_fields() {
         ("ExternalUnitDependencyTarget", &["externalUnit"][..]),
         (
             "Filesystem",
-            &["devices", "readOnly", "tmpfs", "volumes"][..],
+            &["binds", "devices", "readOnly", "tmpfs", "volumes"][..],
         ),
-        ("FilesystemVolume", &["mode", "source", "target"][..]),
+        ("FilesystemBind", &["readOnly", "source", "target"][..]),
+        ("FilesystemTmpfs", &["mode", "size", "target"][..]),
+        ("FilesystemVolume", &["name", "readOnly", "target"][..]),
         ("Network", &["container", "mode", "publish"][..]),
         ("Runtime", &["command", "mode", "packages"][..]),
         (
@@ -148,6 +150,12 @@ fn schema_exposes_only_supported_fields() {
         &["job", "long-running", "setup"],
     );
     assert_enum_values(&schema, "NetworkMode", &["container", "none"]);
+}
+
+#[test]
+fn schema_constrains_typed_filesystem_and_device_fields() {
+    let schema: Value =
+        serde_json::from_str(TRACKED_SCHEMA).expect("tracked Graft schema should be valid JSON");
 
     assert_eq!(
         schema["$defs"]["Device"]["properties"]["source"]["pattern"],
@@ -155,12 +163,20 @@ fn schema_exposes_only_supported_fields() {
     );
     assert_eq!(schema["$defs"]["Device"]["required"][0], "source");
     assert_eq!(
-        schema["$defs"]["Filesystem"]["properties"]["tmpfs"]["uniqueItems"],
-        true
+        schema["$defs"]["Filesystem"]["properties"]["tmpfs"]["items"]["$ref"],
+        "#/$defs/FilesystemTmpfs"
     );
     assert_eq!(
-        schema["$defs"]["Filesystem"]["properties"]["tmpfs"]["items"]["pattern"],
-        r"^/(?:[^:\u0000-\u001F\u007F-\u009F]*[^:\u0000-\u001F\u007F-\u009F\s\\])?(?![\s\S])"
+        schema["$defs"]["FilesystemTmpfs"]["properties"]["mode"]["pattern"],
+        r"^[01]?[0-7]{3}$"
+    );
+    assert_eq!(
+        schema["$defs"]["FilesystemTmpfs"]["properties"]["size"]["pattern"],
+        r"^[1-9][0-9]*[KMGT]?$"
+    );
+    assert_eq!(
+        schema["$defs"]["FilesystemVolume"]["properties"]["name"]["maxLength"],
+        128
     );
 }
 
