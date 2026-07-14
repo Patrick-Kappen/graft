@@ -51,15 +51,14 @@ let
       tmpfsLines = lib.concatMapStrings (
         mount:
         let
-          options =
-            [
-              "rw"
-              "noexec"
-              "nosuid"
-              "nodev"
-            ]
-            ++ lib.optional ((mount.mode or null) != null) "mode=${mount.mode}"
-            ++ lib.optional ((mount.size or null) != null) "size=${mount.size}";
+          options = [
+            "rw"
+            "noexec"
+            "nosuid"
+            "nodev"
+          ]
+          ++ lib.optional ((mount.mode or null) != null) "mode=${mount.mode}"
+          ++ lib.optional ((mount.size or null) != null) "size=${mount.size}";
         in
         "Tmpfs=${escapeSystemdExecArg "${mount.target}:${lib.concatStringsSep "," options}"}\n"
       ) tmpfs;
