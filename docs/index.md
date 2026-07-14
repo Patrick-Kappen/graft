@@ -79,7 +79,7 @@ or config source.
 
 | Horizon | Status |
 | --- | --- |
-| **Available now** | Rootfs-store materialisation for NixOS and Home Manager, selected typed container fields, explicit non-relaxing hardening, typed dependencies, and manual or explicit startup lifecycle. |
+| **Available now** | Rootfs-store materialisation for NixOS and Home Manager, selected typed container fields, secure defaults and typed relaxations, typed dependencies, and manual or explicit startup lifecycle. |
 | **Active roadmap** | Contract hardening, typed timers, lifecycle CLI, secure rootless policy, temporary instances, deterministic merging, and explicit multi-host deployment. |
 | **Long-term vision** | Portable repository environments with deliberate local, remote, or temporary placement and possible additional artifact/control integrations. |
 

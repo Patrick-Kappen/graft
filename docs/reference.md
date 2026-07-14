@@ -10,7 +10,7 @@ Related authoritative sources:
 - [Graft v1 JSON Schema](https://github.com/Patrick-Kappen/graft/blob/main/crates/graft/schema/graft-v1.schema.json) — accepted current TOML shape;
 - [Capability status](capabilities.md) — each field's parser, resolver, Nix, and Quadlet stages plus deferred and forbidden boundaries;
 - [Container Device Interface references](cdi.md) — qualified device-name syntax and host registry trust boundary;
-- [Explicit container hardening](hardening.md) — current non-relaxing security controls and their limits;
+- [Container hardening](hardening.md) — current security defaults and typed relaxations and their limits;
 - [Roadmap](roadmap.md) — planned implementation direction;
 - [Non-goals and deferred scope](non-goals.md) — deliberate current exclusions.
 
@@ -59,7 +59,7 @@ activation = "startup"
 | Field | Accepted values | Default | Effect |
 | --- | --- | --- | --- |
 | `deploy.enable` | `true`, `false` | materialise | `false` prevents both NixOS and Home Manager from rendering the workload. |
-| `deploy.target` | `system`, `user` | `system` | Selects the NixOS system manager or current Home Manager account's user manager. The user target is rootless only for a non-root account. |
+| `deploy.target` | `system`, `user` | required | Selects the NixOS system manager or current Home Manager account's user manager. The user target is rootless only for a non-root account. |
 | `deploy.activation` | `startup` | absent | Requests the workload from a fixed target during manager startup. |
 
 Startup maps system workloads to `WantedBy=multi-user.target` and user workloads
@@ -167,20 +167,15 @@ noNewPrivileges = true
 
 | Field | Accepted values | Default | Quadlet output |
 | --- | --- | --- | --- |
-| `config.filesystem.readOnly` | `true` only | absent | `ReadOnly=true` |
-| `config.security.dropCapabilities` | Non-empty ordered list containing `all` alone or canonical names matching `CAP_[A-Z][A-Z0-9_]*` | absent | One ordered `DropCapability=` line per entry |
-| `config.security.noNewPrivileges` | `true` only | absent | `NoNewPrivileges=true` |
+| `config.filesystem.readOnly` | Boolean | `true` | Explicit `ReadOnly=true` or `false` |
+| `config.security.dropCapabilities` | Omitted or exactly `["all"]` | `["all"]` | `DropCapability=all` |
+| `config.security.addCapabilities` | Non-empty ordered unique canonical names matching `CAP_[A-Z][A-Z0-9_]*` | absent | One ordered `AddCapability=` line per entry |
+| `config.security.noNewPrivileges` | Boolean | `true` | Explicit `NoNewPrivileges=true` or `false` |
 
-`false` is not a supported relaxation value; omit a boolean field when its
-hardening is not requested. Duplicate capability names and combining `all` with
-another capability fail resolution. Graft validates capability-name syntax but
-does not inspect whether the host runtime recognizes a particular canonical
-name.
-
-Graft does not yet apply implicit secure defaults. The approved
-[secure target defaults design](secure-defaults.md) is a future breaking
-migration and does not change the current field table until #163 is
-implemented. With the tested upstream `ReadOnlyTmpfs=true` default, a read-only
+Boolean `false` values are explicit dangerous relaxations. Partial legacy drop
+lists fail with migration guidance to express required authority through
+`addCapabilities`. Graft validates capability-name syntax but does not inspect
+whether the selected host runtime can grant a canonical name. With the tested upstream `ReadOnlyTmpfs=true` default, a read-only
 root filesystem still receives
 read-write tmpfs mounts at `/dev`, `/dev/shm`, `/run`, `/tmp`, and `/var/tmp`;
 mountpoint modes and dropped capabilities can still deny process writes.

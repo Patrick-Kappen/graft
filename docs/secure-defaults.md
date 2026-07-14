@@ -1,17 +1,16 @@
 # Secure target defaults design
 
-> **Status:** approved design for [#139]. These defaults and relaxations are not
-> current behavior until the remaining [#163] implementation lands. The
-> [capability status](capabilities.md) remains authoritative for accepted TOML.
+> **Status:** implemented through [#163]. The
+> [capability status](capabilities.md) is authoritative for accepted TOML.
 
-Graft will apply one explicit process-hardening baseline to both user and system
+Graft applies one explicit process-hardening baseline to both user and system
 targets. The targets differ in host authority, not in whether the workload gets
 a weaker baseline. Every default and relaxation must appear in resolved JSON
 before the Nix modules render it mechanically.
 
 ## Target selection
 
-`deploy.target` becomes required:
+`deploy.target` is required:
 
 ```toml
 [deploy]
@@ -25,7 +24,7 @@ or:
 target = "system"
 ```
 
-The current implicit `system` default will be removed. Rootful system execution
+The former implicit `system` default has been removed. Rootful system execution
 must not result from omission. `user` selects the user manager; it means
 rootless Podman only when that manager runs under a non-root host account. A
 root-owned user manager remains rootful. Account provisioning and per-container
@@ -33,8 +32,7 @@ UID/GID isolation stay outside this phase under [#140] and [#141].
 
 ## Baseline
 
-After [#163] implements this design, a minimal workload resolves these concrete
-defaults:
+A minimal workload resolves these concrete defaults:
 
 ```json
 {
@@ -69,7 +67,7 @@ read-only; it does not make the complete workload view immutable.
 
 ## Explicit relaxations
 
-The implementation will expose only separate typed relaxations:
+Graft exposes only separate typed relaxations:
 
 ```toml
 [config.filesystem]
@@ -109,7 +107,7 @@ a future validation level. Empty capability additions, duplicates, `all`,
 delimiter/control injection, and non-canonical names fail resolution. Direct
 raw Podman or Quadlet arguments remain forbidden.
 
-The implementation must render explicit false values into the Quadlet source
+Graft renders explicit false values into the Quadlet source
 rather than silently omit them. Quadlet 5.8.2 represents
 `NoNewPrivileges=false` by omitting Podman's
 `--security-opt=no-new-privileges` argument, so generated argv demonstrates the
@@ -119,7 +117,7 @@ does not claim that this pins behavior against a future host/runtime default.
 ## Capability migration
 
 The secure baseline makes `dropCapabilities = ["all"]` the effective default.
-The existing field therefore has these future semantics:
+The existing field has these semantics:
 
 - omission resolves to `["all"]`;
 - explicit `["all"]` remains valid and equivalent;
@@ -127,16 +125,15 @@ The existing field therefore has these future semantics:
   restore the rest of Podman's runtime-default capability set;
 - workloads request only required capabilities through `addCapabilities`.
 
-Current partial drop lists remain supported until [#163] implements this
-migration. The implementation must provide a field-specific diagnostic that
-points to `config.security.addCapabilities` without silently changing behavior.
+Partial drop lists fail with a field-specific migration diagnostic that points
+to `config.security.addCapabilities` without silently changing behavior.
 
 ## Preserved upstream and host policy
 
 Not every security-relevant setting has a portable universal value. This design
 makes the following ownership decisions:
 
-| Area | Decision after this phase |
+| Area | Current decision |
 | --- | --- |
 | User namespaces | Preserve runtime behavior until [#140]/[#141] define account, ownership, store-bind, and rootless/rootful semantics. |
 | Seccomp | Preserve Podman's default profile; `unconfined` remains unavailable as dangerous intent. |
@@ -173,20 +170,16 @@ Implementation of this design adds these invariants:
 7. Unimplemented seccomp, label, mask, namespace, resource, logging, secret,
    and init relaxations continue to fail closed.
 
-These extend GRAFT-TM-05 and replace the omission behavior described by
-GRAFT-TM-13 only when implementation lands. Until then the current threat-model
-wording remains accurate.
+These extend GRAFT-TM-05 and replace the former omission behavior described by
+GRAFT-TM-13.
 
-## Implementation and test contract
+## Implementation evidence
 
-The remaining [#163] implementation must land the baseline and its relaxations as
-one coherent compatibility change. It must cover:
+The [#163] implementation landed the baseline and its relaxations as one
+coherent compatibility change. Its test contract covers:
 
 - minimal explicit user and system targets in resolver tests;
 - missing-target migration failure;
-- replacement and test coverage of the current `false`-value diagnostics so
-  they identify [#163] as the implementation boundary rather than saying the
-  now-approved policy is undefined;
 - all three concrete defaults in resolved JSON;
 - explicit `readOnly = false` and `noNewPrivileges = false` rendering;
 - ordered canonical capability additions after `DropCapability=all`;
@@ -207,12 +200,11 @@ one coherent compatibility change. It must cover:
 - schema, reference, capability, threat-model, quickstart, and migration
   updates in the same implementation PR.
 
-The implementation must not combine this contract with user-namespace,
+The implementation does not combine this contract with user-namespace,
 resource-limit, secret, mount-policy, or temporary-agent work. In particular,
 the current writable-volume exception remains for [#142]/[#164]; it is not
 silently repaired by read-only rootfs or by [#163].
 
-[#139]: https://github.com/Patrick-Kappen/graft/issues/139
 [#140]: https://github.com/Patrick-Kappen/graft/issues/140
 [#141]: https://github.com/Patrick-Kappen/graft/issues/141
 [#142]: https://github.com/Patrick-Kappen/graft/issues/142
