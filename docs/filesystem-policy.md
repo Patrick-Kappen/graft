@@ -53,20 +53,24 @@ target = "/data"
 readOnly = true
 ```
 
-Each bind requires an absolute, lexically normalised host `source` and absolute,
-lexically normalised container `target`. `readOnly` defaults to `true`.
-`readOnly = false` is explicit dangerous authority and remains visible in
-resolved JSON and generated Quadlet source.
+Each bind requires an absolute, lexically normalised, colon-free host `source`
+and absolute, lexically normalised, colon-free container `target`. `readOnly`
+defaults to `true`. `readOnly = false` is explicit dangerous authority and
+remains visible in resolved JSON and generated Quadlet source.
 
-The initial contract does not expose relative paths, recursive bind,
-propagation, SELinux relabeling, recursive chown (`U`), idmapped mounts,
-subpaths, overlay mounts, or arbitrary options. It renders through Graft-owned
-mechanical keys rather than a user-provided `Mount=` value.
+Graft fixes every host bind to non-recursive `bind` semantics. A read-only bind
+renders the equivalent of `ro,bind`; a writable bind renders `rw,bind`. Host
+submounts are therefore excluded rather than accidentally retaining independent
+write flags beneath a read-only parent. Recursive bind, propagation, SELinux
+relabeling, recursive chown (`U`), idmapped mounts, subpaths, overlay mounts, and
+arbitrary options remain unavailable. The shared renderer emits only
+Graft-owned mechanical keys, never a user-provided `Mount=` value.
 
-Graft rejects bind sources that are `/`, `/proc`, `/sys`, `/dev`, or `/run`, or
-are descendants of those paths. This blocks common whole-host, virtual-kernel,
-direct-device, and runtime-socket bypasses. Other sensitive paths, including an
-entire home directory or `/root`, remain explicit dangerous intent rather than
+Graft rejects `/` as an exact bind source. It also rejects `/proc`, `/sys`,
+`/dev`, and `/run` and descendants of those protected subtrees. This blocks
+common whole-host, virtual-kernel, direct-device, and runtime-socket bypasses.
+Other sensitive paths, including an entire home directory or `/root`, remain
+explicit dangerous intent rather than
 being described as safe. Future lint may make them more prominent, but cannot
 weaken mandatory resolver errors.
 
@@ -92,17 +96,24 @@ target = "/var/lib/database"
 target = "/scratch"
 ```
 
-`name` is an optional safe Podman volume name. Its absence explicitly requests
-an anonymous volume. `target` is required and absolute. A named volume persists
-under Podman's volume lifecycle; an anonymous volume follows generated
+`name` is optional. When present, it is 1–128 ASCII characters matching
+`^[A-Za-z0-9][A-Za-z0-9_.-]*$` and must not end in `.volume`; this excludes
+paths, delimiters, whitespace, control characters, and Quadlet resource-unit
+interpretation. Its absence explicitly requests an anonymous volume. `target`
+is required, absolute, lexically normalised, and colon-free. A named volume
+persists under Podman's volume lifecycle; an anonymous volume follows generated
 container cleanup behavior and is not a persistence guarantee.
 
 A literal name is an explicit dangerous resource reference. Podman reuses an
 existing volume of that name, so Graft cannot claim ownership, provenance, or
 empty initial state. Reusing the same name in multiple workloads under one
 Podman storage scope intentionally shares state; the resolver must make that
-relationship visible in set diagnostics. System and user targets use separate
-runtime storage scopes and do not imply cross-target sharing.
+relationship visible in set diagnostics. Scope follows the effective Podman
+account and storage configuration, not the Graft manager target alone. A
+non-root user normally has separate rootless storage, while a root-owned user
+manager can share rootful Podman storage and named volumes with the system
+manager. Custom Podman storage configuration can further change that boundary;
+Graft does not attest it.
 
 Managed volumes are writable by default because their declaration explicitly
 requests writable runtime-managed storage. An optional `readOnly = true` may
@@ -126,9 +137,9 @@ mode = "1777"
 size = "512M"
 ```
 
-`target` is required and absolute. `mode` is an optional string containing a
-canonical three- or four-digit octal mode no greater than `1777`, preventing
-setuid and setgid bits. `size` is an optional positive integer followed by at
+`target` is required, absolute, lexically normalised, and colon-free. `mode` is
+an optional string containing a canonical three- or four-digit octal mode no
+greater than `1777`, preventing setuid and setgid bits. `size` is an optional positive integer followed by at
 most one approved uppercase size suffix (`K`, `M`, `G`, or `T`). The
 implementation must pin the exact translation and verify it against the tested
 Podman version.
@@ -166,15 +177,20 @@ namespaces to satisfy a device request.
 ## Path and collision rules
 
 All explicit bind, managed-volume, and tmpfs targets enter one collision check.
-Before comparison, each path must be absolute and lexically normalised. Empty
-components, `.` and `..`, repeated separators, trailing separators other than
-`/`, control characters, terminal whitespace, and terminal `\` are rejected.
+Before comparison, each path must be absolute, lexically normalised, and
+colon-free. Empty components, `.` and `..`, repeated separators, trailing
+separators other than `/`, control characters, terminal whitespace, terminal
+`\`, and `:` are rejected. Colon rejection prevents a typed path from becoming
+an upstream options or component delimiter during mechanical rendering.
 
 The resolver rejects:
 
 - target `/`, which would replace the workload rootfs;
-- target `/nix/store` or any descendant, preserving Graft's fixed read-only
-  store bind;
+- any target equal to, below, or above `/nix/store`, including `/nix`, preserving
+  Graft's fixed read-only store bind without nested mount ambiguity;
+- any target equal to or below `/dev`, `/proc`, or `/sys`;
+- bind or managed-volume targets equal to or below `/run`, `/tmp`, or
+  `/var/tmp`;
 - duplicate targets across or within mount kinds; and
 - ancestor/descendant overlap between any two explicit targets.
 
@@ -185,11 +201,11 @@ on declaration order or Podman's conflict resolution.
 
 Podman's automatic mounts for `/dev`, `/dev/shm`, `/run`, `/tmp`, and
 `/var/tmp` under the read-only-rootfs policy are runtime-owned baseline mounts.
-An explicit typed tmpfs may target `/run`, `/tmp`, or `/var/tmp` to set bounded
-mode or size intent. Bind mounts and managed volumes may not target `/dev`,
-`/proc`, or `/sys`, or descendants of those paths. The implementation must test
-the final generated argv so this exception does not create duplicate ambiguous
-mounts.
+Only an explicit typed tmpfs may target `/run`, `/tmp`, or `/var/tmp`, or paths
+below those trees, to set bounded mode or size intent. No explicit mount kind
+may target `/dev`, `/proc`, or `/sys`, or descendants of those paths. The
+implementation must test the final generated argv so the tmpfs exception does
+not create duplicate ambiguous mounts.
 
 ## Target authority
 
@@ -264,8 +280,9 @@ Implementation under [#164] requires:
 - negative tests for implicit writable host access, forbidden source classes,
   raw options, unsafe tmpfs modes/sizes, and unavailable direct-device forms;
 - NixOS and Home Manager parity plus real Quadlet-generator verification;
-- runtime evidence for read-only and writable binds, named and anonymous volume
-  lifecycle, tmpfs mode/size and non-root writes, and missing sources;
+- runtime evidence that fixed non-recursive read-only binds exclude writable
+  host submounts, plus writable binds, named and anonymous volume lifecycle,
+  tmpfs mode/size and non-root writes, and missing sources;
 - separate rootful and non-root rootless expectations, with root-owned user
   managers documented as rootful; and
 - threat-model, capability, reference, non-goal, and migration documentation
