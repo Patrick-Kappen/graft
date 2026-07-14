@@ -31,10 +31,17 @@
 
   if (rightButtons) {
     const portfolioLink = document.createElement("a");
-    portfolioLink.className = "graft-portfolio-link";
+    portfolioLink.className = "graft-header-link";
     portfolioLink.href = "https://patrick.kappen.io";
     portfolioLink.textContent = "Patrick Kappen";
-    portfolioLink.setAttribute("aria-label", "Back to Patrick Kappen's portfolio");
+    portfolioLink.setAttribute("aria-label", "Visit Patrick Kappen's portfolio");
+
+    const projectLink = document.createElement("a");
+    projectLink.className = "graft-header-link graft-project-link";
+    projectLink.href = "/";
+    projectLink.textContent = "Graft home";
+
     rightButtons.prepend(portfolioLink);
+    rightButtons.prepend(projectLink);
   }
 })();
