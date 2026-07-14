@@ -300,7 +300,8 @@ git diff --check
 GitHub CI is deliberately maintainer-dispatched for product and documentation
 changes. Pull-request pushes and merges do not start it automatically; a PR that
 changes `.github/workflows/ci.yml` itself is the narrow exception so branch
-protection can validate future CI changes. Run applicable local checks before
+protection can validate future CI changes. Those self-validation runs use a
+separate group and cannot race with manual-run cancellation. Run applicable local checks before
 requesting the protected GitHub checks on the final commit.
 
 The required `workflow-lint`, `rust`, `coverage`, `security`, `docs`, and `nix`
