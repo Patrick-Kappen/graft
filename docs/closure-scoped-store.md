@@ -86,10 +86,12 @@ That derivation first mounts the prepared scaffold read-only and then reads
 
 ```ini
 Volume=<rootfs>/nix/store:/nix/store:ro,bind,nodev,nosuid
-Volume=/nix/store/<path>:/nix/store/<path>:ro,bind,nodev,nosuid
+Volume=<closure-path>:<closure-path>:ro,bind,nodev,nosuid
 ```
 
-The parent mount is required even when the rootfs is writable: without it, a
+Each `<closure-path>` is the complete absolute path read from
+`closureInfo/store-paths`; the renderer does not add another `/nix/store`
+prefix. The parent mount is required even when the rootfs is writable: without it, a
 sufficiently privileged container process can add direct children to the empty
 scaffold through overlay state and violate the visibility invariant. Nested
 member targets already exist in the scaffold and remain mountable below its
