@@ -181,7 +181,8 @@ Planned hardening:
 - `userns=auto`
 - per-container limited UIDs
 - workdir-only write access
-- implement the approved typed bind, volume, tmpfs, and collision policy from [#142](https://github.com/Patrick-Kappen/graft/issues/142)
+- maintain the typed bind, volume, tmpfs, and collision policy from [#142](https://github.com/Patrick-Kappen/graft/issues/142)
+- replace complete-store visibility with the approved [closure-scoped store design](closure-scoped-store.md)
 - explicit network policies
 - secrets support
 - resource limits
