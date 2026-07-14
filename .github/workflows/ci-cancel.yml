@@ -1,0 +1,22 @@
+name: Cancel obsolete CI
+
+on:
+  pull_request:
+    types:
+      - synchronize
+
+concurrency:
+  group: ${{ github.event.pull_request.head.repo.full_name == github.repository && format('ci-refs/heads/{0}', github.event.pull_request.head.ref) || format('ci-fork-{0}-{1}', github.event.pull_request.head.repo.full_name, github.event.pull_request.head.ref) }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  supersede:
+    name: supersede-obsolete-ci
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+
+    steps:
+      - name: Mark current pull request revision
+        run: echo "Superseded CI for earlier revisions of this pull request."
