@@ -1,7 +1,7 @@
 # Secure target defaults design
 
-> **Status:** approved design for #139. These defaults and relaxations are not
-> current behavior until the remaining #163 implementation lands. The
+> **Status:** approved design for [#139]. These defaults and relaxations are not
+> current behavior until the remaining [#163] implementation lands. The
 > [capability status](capabilities.md) remains authoritative for accepted TOML.
 
 Graft will apply one explicit process-hardening baseline to both user and system
@@ -29,11 +29,11 @@ The current implicit `system` default will be removed. Rootful system execution
 must not result from omission. `user` selects the user manager; it means
 rootless Podman only when that manager runs under a non-root host account. A
 root-owned user manager remains rootful. Account provisioning and per-container
-UID/GID isolation stay outside this phase under #140 and #141.
+UID/GID isolation stay outside this phase under [#140] and [#141].
 
 ## Baseline
 
-After #163 implements this design, a minimal workload resolves these concrete
+After [#163] implements this design, a minimal workload resolves these concrete
 defaults:
 
 ```json
@@ -61,7 +61,7 @@ NoNewPrivileges=true
 The same baseline applies to long-running services, finite jobs, setup jobs,
 local development, and unattended server workloads. Graft does not select an
 opaque security profile from workload shape. Temporary agents require the
-additional mandatory contract tracked by #153 and #169.
+additional mandatory contract tracked by [#153] and [#169].
 
 `ReadOnly=true` still permits the tested upstream read-write tmpfs mounts and
 any explicit tmpfs, volume, or CDI-injected mount. It makes the root filesystem
@@ -86,6 +86,24 @@ addCapabilities = ["CAP_NET_BIND_SERVICE"]
 | `noNewPrivileges = false` | Dangerous relaxation | `security.noNewPrivileges = false`. |
 | `addCapabilities = [...]` | Dangerous capability grant | Ordered canonical capabilities added after dropping all defaults. |
 
+### Target-specific relaxation semantics
+
+All three relaxations use the same typed syntax and resolver policy in each
+authority context:
+
+- `system` uses rootful Podman under the system manager;
+- `user` under a non-root account uses rootless Podman; capability additions
+  apply only inside the container's user namespace and do not grant capability
+  in the host's initial user namespace; and
+- `user` under a root-owned user manager remains rootful and has the same host
+  authority boundary as the system context.
+
+Target selection never adds, removes, or infers a relaxation. These relaxations
+are not mutually incompatible, but the runtime may still reject a capability
+request that the selected host account or user-namespace mapping cannot grant.
+Graft must propagate that runtime failure rather than silently changing the
+requested capability set.
+
 Relaxations never activate by omission, inference, target choice, lifecycle, or
 a future validation level. Empty capability additions, duplicates, `all`,
 delimiter/control injection, and non-canonical names fail resolution. Direct
@@ -109,7 +127,7 @@ The existing field therefore has these future semantics:
   restore the rest of Podman's runtime-default capability set;
 - workloads request only required capabilities through `addCapabilities`.
 
-Current partial drop lists remain supported until #163 implements this
+Current partial drop lists remain supported until [#163] implements this
 migration. The implementation must provide a field-specific diagnostic that
 points to `config.security.addCapabilities` without silently changing behavior.
 
@@ -120,16 +138,17 @@ makes the following ownership decisions:
 
 | Area | Decision after this phase |
 | --- | --- |
-| User namespaces | Preserve runtime behavior until #140/#141 define account, ownership, store-bind, and rootless/rootful semantics. |
+| User namespaces | Preserve runtime behavior until [#140]/[#141] define account, ownership, store-bind, and rootless/rootful semantics. |
 | Seccomp | Preserve Podman's default profile; `unconfined` remains unavailable as dangerous intent. |
 | SELinux/AppArmor | Preserve host/runtime defaults; label disable and equivalent relaxations remain unavailable. |
 | Mask/unmask | Preserve OCI/Podman defaults; raw paths and `ALL` remain unavailable. |
-| Tmpfs | Preserve `ReadOnlyTmpfs=true` behavior and current explicit path-only tmpfs; options and collisions remain #142/#164. |
+| Tmpfs | Preserve `ReadOnlyTmpfs=true` behavior and current explicit path-only tmpfs; options and collisions remain [#142]/[#164]. |
+| Volumes | Preserve the current legacy exception in which omitted `mode = "ro"` can select a writable upstream default; `ReadOnly=true` does not constrain volumes. [#142]/[#164] must make writable host authority explicit or reject it with migration diagnostics. |
 | Devices | Keep the current qualified CDI contract; no implicit direct devices. |
 | Network | Preserve Podman's private connected default; `none` remains explicit and host mode remains dangerous. |
-| Resources | Define no universal CPU, memory, PID, or ulimit values before #145. |
+| Resources | Define no universal CPU, memory, PID, or ulimit values before [#145]. |
 | Logging | Preserve runtime/manager logging defaults; no raw log-driver passthrough. |
-| Secrets | Keep secrets out of TOML and resolved store text until #143/#166. |
+| Secrets | Keep secrets out of TOML and resolved store text until [#143]/[#166]. |
 | Init | Do not default `RunInit`; lifecycle and compatibility behavior require separate evidence. |
 
 A preserved upstream default is documented context, not a concrete effective
@@ -160,7 +179,7 @@ wording remains accurate.
 
 ## Implementation and test contract
 
-The remaining #163 implementation must land the baseline and its relaxations as
+The remaining [#163] implementation must land the baseline and its relaxations as
 one coherent compatibility change. It must cover:
 
 - minimal explicit user and system targets in resolver tests;
@@ -175,10 +194,29 @@ one coherent compatibility change. It must cover:
   `--security-opt=no-new-privileges` defaults;
 - real generation proving each explicit relaxation produces the expected
   Podman argument presence or absence;
-- controlled rootful and non-root rootless runtime evidence for capabilities,
-  no-new-privileges, rootfs writes, and writable-overlay opt-out; and
+- resolver and generator coverage for system/rootful, non-root user/rootless,
+  and root-owned user/rootful relaxations;
+- negative coverage proving omission and target changes cannot activate,
+  remove, or alter relaxations;
+- controlled runtime evidence in all three authority contexts for capabilities,
+  no-new-privileges, rootfs writes, and writable-overlay opt-out, including the
+  user-namespace boundary of rootless capability additions; and
 - schema, reference, capability, threat-model, quickstart, and migration
   updates in the same implementation PR.
 
 The implementation must not combine this contract with user-namespace,
-resource-limit, secret, mount-policy, or temporary-agent work.
+resource-limit, secret, mount-policy, or temporary-agent work. In particular,
+the current writable-volume exception remains for [#142]/[#164]; it is not
+silently repaired by read-only rootfs or by [#163].
+
+[#139]: https://github.com/Patrick-Kappen/graft/issues/139
+[#140]: https://github.com/Patrick-Kappen/graft/issues/140
+[#141]: https://github.com/Patrick-Kappen/graft/issues/141
+[#142]: https://github.com/Patrick-Kappen/graft/issues/142
+[#143]: https://github.com/Patrick-Kappen/graft/issues/143
+[#145]: https://github.com/Patrick-Kappen/graft/issues/145
+[#153]: https://github.com/Patrick-Kappen/graft/issues/153
+[#163]: https://github.com/Patrick-Kappen/graft/issues/163
+[#164]: https://github.com/Patrick-Kappen/graft/issues/164
+[#166]: https://github.com/Patrick-Kappen/graft/issues/166
+[#169]: https://github.com/Patrick-Kappen/graft/issues/169

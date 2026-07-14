@@ -97,7 +97,7 @@ effective value of dangerous intent rather than making it implicit.
 Current narrow passthroughs that predate this policy are not automatically safe.
 One explicit legacy exception violates dangerous requirement 2: a source-backed
 `Volume=` entry without `mode = "ro"` can become writable through the upstream
-default. This is not precedent for new features. [#142] and [#163] must make
+default. This is not precedent for new features. [#142] and [#164] must make
 writable authority explicit or reject it and provide migration diagnostics.
 Until then, host-path, sensitive-source, or writable-host volumes remain current
 dangerous residual risk. Host environment-file path references and exact
@@ -134,7 +134,7 @@ but it does not make the original escape hatch acceptable.
 | Path-only writable tmpfs mounts | First-class | Current through a scoped [#164] phase | Unique absolute container paths only; no host source or options syntax. Mounts may mask rootfs content and remain writable with read-only rootfs. Cross-mount target policy remains deferred to [#142]. |
 | Qualified CDI resource name without target remapping or permissions | First-class | Current through [#203] | Host registry/spec is trusted; Graft validates and renders only the colon-free qualified name. |
 | Direct host device paths or directories, optional-device prefixes, target remapping, and permission modes | Dangerous | Deferred to [#142] and [#164] | Requires explicit device policy, target-specific behavior, and runtime authorization tests. |
-| Host-path, sensitive-source, or writable-host mounts, recursive propagation, and host sockets | Dangerous | Partly current; policy planned in [#142] and [#163] | Omitting `mode = "ro"` on a source-backed current volume can select an upstream writable default. This legacy exception violates dangerous requirement 2 and must become explicit or fail closed; it is not precedent for broader passthrough. |
+| Host-path, sensitive-source, or writable-host mounts, recursive propagation, and host sockets | Dangerous | Partly current; policy planned in [#142] and [#164] | Omitting `mode = "ro"` on a source-backed current volume can select an upstream writable default. This legacy exception violates dangerous requirement 2 and must become explicit or fail closed; it is not precedent for broader passthrough. |
 | Host environment-file path references | Dangerous | Current; credential replacement planned in [#143] and [#166] | One ordered non-empty, control-free path value per entry; Quadlet resolves relative paths against the source-unit directory. Graft does not attest traversal, symlinks, existence, ownership, permissions, lifecycle, or disclosure. |
 | Exact external systemd unit relationships | Dangerous | Current | Exact validated names only; implementation and authorization of the selected-manager unit remain host responsibility. |
 | Privileged containers | Dangerous | Deferred; [#163] keeps unsupported privileged intent rejected | No generic runtime argument path or implied opt-in is permitted. |
