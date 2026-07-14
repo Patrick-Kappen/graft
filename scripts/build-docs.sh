@@ -6,38 +6,49 @@ readonly MDBOOK_SHA256="084e4342ba564db270108763e404a7d1f309d932651a22484e93c0dc
 readonly MDBOOK_ARCHIVE="mdbook-v${MDBOOK_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
 readonly MDBOOK_URL="https://github.com/rust-lang/mdBook/releases/download/v${MDBOOK_VERSION}/${MDBOOK_ARCHIVE}"
 
+work_dir=""
+cleanup() {
+  if [[ -n "${work_dir}" ]]; then
+    rm -rf "${work_dir}"
+  fi
+}
+trap cleanup EXIT
+
 if command -v mdbook >/dev/null 2>&1; then
-  mdbook build
-  exit 0
-fi
-
-if [[ "$(uname -s)" != "Linux" || "$(uname -m)" != "x86_64" ]]; then
-  echo "mdbook is not installed and no pinned binary is configured for $(uname -s)/$(uname -m)." >&2
-  echo "Use 'nix develop .#ci -c mdbook build' for local builds." >&2
-  exit 1
-fi
-
-for command_name in curl sha256sum tar; do
-  if ! command -v "${command_name}" >/dev/null 2>&1; then
-    echo "Required build tool is missing: ${command_name}" >&2
+  mdbook_binary="$(command -v mdbook)"
+else
+  if [[ "$(uname -s)" != "Linux" || "$(uname -m)" != "x86_64" ]]; then
+    echo "mdbook is not installed and no pinned binary is configured for $(uname -s)/$(uname -m)." >&2
+    echo "Use 'nix develop .#ci -c mdbook build' for local documentation-only builds." >&2
     exit 1
   fi
-done
 
-work_dir="$(mktemp -d)"
-trap 'rm -rf "${work_dir}"' EXIT
+  for command_name in curl sha256sum tar; do
+    if ! command -v "${command_name}" >/dev/null 2>&1; then
+      echo "Required build tool is missing: ${command_name}" >&2
+      exit 1
+    fi
+  done
 
-curl --fail --location --silent --show-error \
-  --output "${work_dir}/${MDBOOK_ARCHIVE}" \
-  "${MDBOOK_URL}"
+  work_dir="$(mktemp -d)"
+  curl --fail --location --silent --show-error \
+    --output "${work_dir}/${MDBOOK_ARCHIVE}" \
+    "${MDBOOK_URL}"
 
-if ! echo "${MDBOOK_SHA256}  ${work_dir}/${MDBOOK_ARCHIVE}" | sha256sum --check --quiet; then
-  echo "Downloaded mdBook archive checksum verification failed." >&2
-  exit 1
+  if ! echo "${MDBOOK_SHA256}  ${work_dir}/${MDBOOK_ARCHIVE}" | sha256sum --check --quiet; then
+    echo "Downloaded mdBook archive checksum verification failed." >&2
+    exit 1
+  fi
+
+  tar --extract --gzip \
+    --file "${work_dir}/${MDBOOK_ARCHIVE}" \
+    --directory "${work_dir}"
+  mdbook_binary="${work_dir}/mdbook"
 fi
 
-tar --extract --gzip \
-  --file "${work_dir}/${MDBOOK_ARCHIVE}" \
-  --directory "${work_dir}"
+rm -rf site
+"${mdbook_binary}" build
+cp -R website/. site/
 
-"${work_dir}/mdbook" build
+test -s site/index.html
+test -s site/docs/index.html

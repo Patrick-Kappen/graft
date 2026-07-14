@@ -306,25 +306,34 @@ body::before {
   margin-right: 0;
 }
 
-.graft-portfolio-link {
+.graft-header-link {
   display: inline-flex;
   min-height: 34px;
   align-items: center;
-  margin-right: 8px;
+  padding-inline: 10px;
+  color: #8d9aa6 !important;
+  font-size: 0.66rem;
+  font-weight: 700;
+  transition: color 160ms ease;
+}
+
+.graft-project-link {
+  margin-right: 2px;
   padding-inline: 12px;
   border: 1px solid #33414d;
   border-radius: 6px;
   color: #b5c0cb !important;
-  font-size: 0.68rem;
-  font-weight: 700;
   transition:
     border-color 160ms ease,
     color 160ms ease;
 }
 
-.graft-portfolio-link:hover {
-  border-color: #5ee184;
+.graft-header-link:hover {
   color: #5ee184 !important;
+}
+
+.graft-project-link:hover {
+  border-color: #5ee184;
 }
 
 .theme-popup {
@@ -591,7 +600,7 @@ pre > .buttons {
   }
 
   .graft-menu-brand small,
-  .graft-portfolio-link,
+  .graft-header-link,
   .right-buttons a[title="Print this book"] {
     display: none;
   }

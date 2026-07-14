@@ -6,12 +6,12 @@ language = "en"
 src = "docs"
 
 [build]
-build-dir = "site"
+build-dir = "site/docs"
 create-missing = false
 
 [output.html]
 git-repository-url = "https://github.com/Patrick-Kappen/graft"
-site-url = "/"
+site-url = "/docs/"
 default-theme = "navy"
 preferred-dark-theme = "navy"
 additional-css = ["theme/graft.css"]
