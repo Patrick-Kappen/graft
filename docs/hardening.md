@@ -62,9 +62,11 @@ provides `/tmp` and `/var/tmp` mountpoints so Podman's tested read-only-rootfs
 tmpfs setup can initialise under rootless overlay. Nix normalises store
 directory modes to read-only metadata, so Graft does not promise that those
 tmpfs paths are process-writable for a non-root container user. Explicit tmpfs,
-volumes, and CDI-injected mounts remain separate writable boundaries. A current source-backed volume
-without `mode = "ro"` may still select the writable upstream default; migration
-of that legacy exception remains [#142]/[#164].
+volumes, and CDI-injected mounts remain separate writable boundaries. A current
+source-backed volume without `mode = "ro"` may still select the writable
+upstream default. The
+approved [filesystem policy](filesystem-policy.md) replaces that legacy
+exception; implementation and migration remain in [#164].
 
 Rootless capability additions apply inside the container user namespace and do
 not grant capability in the host's initial user namespace. The runtime may
@@ -81,5 +83,4 @@ raw security options, and user-namespace policy remain unavailable and fail
 closed. See the [Secure target defaults](secure-defaults.md),
 [Capability policy](capability-policy.md), and [Threat model](threat-model.md).
 
-[#142]: https://github.com/Patrick-Kappen/graft/issues/142
 [#164]: https://github.com/Patrick-Kappen/graft/issues/164

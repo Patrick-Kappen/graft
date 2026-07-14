@@ -181,7 +181,7 @@ Planned hardening:
 - `userns=auto`
 - per-container limited UIDs
 - workdir-only write access
-- explicit mount and direct-device policies
+- implement the approved typed bind, volume, tmpfs, and collision policy from [#142](https://github.com/Patrick-Kappen/graft/issues/142)
 - explicit network policies
 - secrets support
 - resource limits
@@ -200,11 +200,12 @@ full contract is implemented.
 Qualified CDI resource references backed by host-owned specs are current through
 [#203](https://github.com/Patrick-Kappen/graft/issues/203). The narrow contract
 does not include direct device paths, remapping, or permissions; see
-[Container Device Interface references](cdi.md).
+[Container Device Interface references](cdi.md). Direct paths remain deferred
+until a host-aware attestation contract can enforce their type safely.
 
 Remaining areas include:
 
-- additional mount types beyond basic `Volume=` entries
+- typed binds, managed volumes, tmpfs options, and collision checks approved in the [filesystem policy](filesystem-policy.md)
 - Quadlet `.network` and `.volume` units
 - secrets and credentials
 - resources and health checks
