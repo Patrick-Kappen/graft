@@ -1,0 +1,16 @@
+{
+  "name": "graft-documentation",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Build and deploy the Graft mdBook documentation",
+  "scripts": {
+    "build": "./scripts/build-docs.sh",
+    "deploy": "wrangler deploy"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "wrangler": "^4.110.0"
+  }
+}

@@ -1,3 +1,5 @@
 /CHANGELOG.md
 /docs/learnings.md
 /site/
+/node_modules/
+/.wrangler/
