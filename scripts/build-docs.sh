@@ -31,7 +31,10 @@ curl --fail --location --silent --show-error \
   --output "${work_dir}/${MDBOOK_ARCHIVE}" \
   "${MDBOOK_URL}"
 
-echo "${MDBOOK_SHA256}  ${work_dir}/${MDBOOK_ARCHIVE}" | sha256sum --check --status
+if ! echo "${MDBOOK_SHA256}  ${work_dir}/${MDBOOK_ARCHIVE}" | sha256sum --check --quiet; then
+  echo "Downloaded mdBook archive checksum verification failed." >&2
+  exit 1
+fi
 
 tar --extract --gzip \
   --file "${work_dir}/${MDBOOK_ARCHIVE}" \
