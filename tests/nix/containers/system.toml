@@ -21,20 +21,26 @@ PATHLIKE = "C:\\Temp"
 PERCENT = "100%"
 QUOTED = "say \"hi\""
 
-[config.filesystem]
-tmpfs = ["/run/graft-system", "/tmp/graft-system"]
+[[config.filesystem.tmpfs]]
+target = "/run/graft-system"
+mode = "0750"
+size = "64M"
+
+[[config.filesystem.tmpfs]]
+target = "/tmp/graft-system"
 
 [[config.filesystem.volumes]]
 target = "/system-cache"
 
-[[config.filesystem.volumes]]
+[[config.filesystem.binds]]
 source = "/tmp/graft-system-data"
 target = "/data"
+readOnly = false
 
-[[config.filesystem.volumes]]
+[[config.filesystem.binds]]
 source = "/tmp/graft-system-config"
 target = "/config"
-mode = "ro"
+readOnly = true
 
 [config.network]
 publish = ["127.0.0.1:18080:80", "18443:443/tcp"]

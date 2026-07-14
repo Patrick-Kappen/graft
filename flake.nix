@@ -60,6 +60,11 @@
               inherit graftPackage;
             }
           );
+          filesystem-runtime-test = pkgs.testers.runNixOSTest (
+            import ./tests/nixos/filesystem.nix {
+              inherit pkgs graftPackage;
+            }
+          );
         }
       );
 
@@ -335,7 +340,7 @@
             "Exec=\"/bin/echo\" \"pre$\${HOME}post\" \"100%%\" \"cost $$5\" \"foo\\\\.bar\" \"C:\\\\Temp\" \"say \\\"hi\\\"\""
             expectedEscapedEnvironmentLines
             "EnvironmentFile=\"/etc/graft/$$USER-%%n.env\"\nEnvironmentFile=\"/etc/graft/my config.env\"\nEnvironmentFile=\"/etc/graft/env\\\\prod.env\""
-            "Volume=/tmp/graft-$$USER-%%n:/data$$HOME-%%h:ro%%z"
+            "Volume=/tmp/graft-$$USER-%%n:/data$$HOME-%%h:ro,bind"
             "\n[Service]\nRestart=on-failure\nRestartSec=15s"
           ];
           secureBaselineInfixes = [
@@ -439,8 +444,8 @@
                 "ContainerName=nix-check-system"
                 "HostName=nix-check-system.local"
                 "EnvironmentFile=\"/etc/graft/system.env\"\nEnvironmentFile=\"/run/graft/shared.env\""
-                "Tmpfs=/run/graft-system\nTmpfs=/tmp/graft-system"
-                "Volume=/system-cache\nVolume=/tmp/graft-system-data:/data\nVolume=/tmp/graft-system-config:/config:ro"
+                "Tmpfs=/run/graft-system:rw,noexec,nosuid,nodev,mode=0750,size=64M\nTmpfs=/tmp/graft-system:rw,noexec,nosuid,nodev"
+                "Volume=/tmp/graft-system-data:/data:rw,bind\nVolume=/tmp/graft-system-config:/config:ro,bind\nVolume=/system-cache"
                 "PublishPort=127.0.0.1:18080:80\nPublishPort=18443:443/tcp"
                 "\n[Install]\nWantedBy=multi-user.target"
               ];
@@ -451,8 +456,8 @@
               ];
               plainMissingInfixes = [
                 "Volume=/system-cache"
-                "Volume=/tmp/graft-system-data:/data"
-                "Volume=/tmp/graft-system-config:/config:ro"
+                "Volume=/tmp/graft-system-data:/data:rw,bind"
+                "Volume=/tmp/graft-system-config:/config:ro,bind"
               ];
             };
             assert assertHasInfixes nixosHostRendered [
@@ -526,8 +531,8 @@
                 "ContainerName=nix-check-user"
                 "HostName=nix-check-user.local"
                 "EnvironmentFile=\"/etc/graft/user.env\"\nEnvironmentFile=\"/run/graft/shared.env\""
-                "Tmpfs=/run/graft-user\nTmpfs=/tmp/graft-user"
-                "Volume=/user-cache\nVolume=/tmp/graft-user-data:/data\nVolume=/tmp/graft-user-config:/config:ro"
+                "Tmpfs=/run/graft-user:rw,noexec,nosuid,nodev,mode=0750,size=64M\nTmpfs=/tmp/graft-user:rw,noexec,nosuid,nodev"
+                "Volume=/tmp/graft-user-data:/data:rw,bind\nVolume=/tmp/graft-user-config:/config:ro,bind\nVolume=/user-cache"
                 "PublishPort=127.0.0.1:28080:80\nPublishPort=28443:443/tcp"
                 "\n[Install]\nWantedBy=default.target"
               ];
@@ -538,8 +543,8 @@
               ];
               plainMissingInfixes = [
                 "Volume=/user-cache"
-                "Volume=/tmp/graft-user-data:/data"
-                "Volume=/tmp/graft-user-config:/config:ro"
+                "Volume=/tmp/graft-user-data:/data:rw,bind"
+                "Volume=/tmp/graft-user-config:/config:ro,bind"
               ];
             };
             assert assertHasInfixes homeManagerHostRendered [
@@ -809,9 +814,13 @@
                 ${pkgs.podman}/libexec/podman/quadlet -user \
                 generated-user generated-user generated-user
 
-              grep -E '^ExecStart=.* --tmpfs /run/graft-system --tmpfs /tmp/graft-system( |$)' \
+              grep -F -- '--tmpfs /run/graft-system:rw,noexec,nosuid,nodev,mode=0750,size=64M --tmpfs /tmp/graft-system:rw,noexec,nosuid,nodev' \
                 generated-system/long-running-system.service
-              grep -E '^ExecStart=.* --tmpfs /run/graft-user --tmpfs /tmp/graft-user( |$)' \
+              grep -F -- '--tmpfs /run/graft-user:rw,noexec,nosuid,nodev,mode=0750,size=64M --tmpfs /tmp/graft-user:rw,noexec,nosuid,nodev' \
+                generated-user/long-running-user.service
+              grep -F -- '-v /tmp/graft-system-data:/data:rw,bind -v /tmp/graft-system-config:/config:ro,bind -v /system-cache' \
+                generated-system/long-running-system.service
+              grep -F -- '-v /tmp/graft-user-data:/data:rw,bind -v /tmp/graft-user-config:/config:ro,bind -v /user-cache' \
                 generated-user/long-running-user.service
               for scope in system user; do
                 service="generated-$scope/plain-$scope.service"

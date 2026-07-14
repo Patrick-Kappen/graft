@@ -1,9 +1,8 @@
 # Filesystem and mount policy
 
-> **Status:** approved design for [#142]. Current behavior remains documented in
-> the [Reference](reference.md) until implementation lands through [#164].
+> **Status:** implemented contract from [#142] through [#164].
 
-This design replaces Graft's ambiguous volume passthrough with typed filesystem
+This policy replaces Graft's ambiguous volume passthrough with typed filesystem
 intent. It keeps ordinary writable storage concise, makes host write authority
 explicit, and rejects mount layouts whose effective target depends on ordering.
 It does not expose raw Quadlet `Mount=`, Podman mount strings, direct host-device
@@ -116,9 +115,12 @@ manager. Custom Podman storage configuration can further change that boundary;
 Graft does not attest it.
 
 Managed volumes are writable by default because their declaration explicitly
-requests writable runtime-managed storage. An optional `readOnly = true` may
-narrow access. Graft does not accept a host path in `name` and does not interpret
-`.volume` as a Quadlet resource reference in this phase.
+requests writable runtime-managed storage. A named volume may use optional
+`readOnly = true` to narrow access. Anonymous volumes are always writable and
+reject `readOnly = true`, because Quadlet's source-less `Volume=` form cannot
+encode an access suffix without reinterpreting the target as a source. Graft
+does not accept a host path in `name` and does not interpret `.volume` as a
+Quadlet resource reference in this phase.
 
 Copy-up, ownership mutation, subpaths, volume drivers, external volumes,
 idmapped mounts, and automatic `.volume` unit generation remain outside this
@@ -247,7 +249,7 @@ same collision and target-authority rules.
 ## Legacy migration
 
 Existing `config.filesystem.volumes` entries are not silently reinterpreted.
-Implementation under [#164] must return field-specific migration diagnostics:
+The resolver returns field-specific migration diagnostics:
 
 | Legacy shape | Migration |
 | --- | --- |
@@ -278,7 +280,7 @@ cannot authorize rejected input.
 
 ## Required implementation evidence
 
-Implementation under [#164] requires:
+The implementation includes:
 
 - parser, resolver, schema, and migration tests for every field and rejected
   legacy shape;

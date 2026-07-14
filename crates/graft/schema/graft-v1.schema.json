@@ -372,6 +372,16 @@
       "description": "Filesystem configuration (`[config.filesystem]`).",
       "type": "object",
       "properties": {
+        "binds": {
+          "description": "Ordered non-recursive host bind mounts.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/FilesystemBind"
+          }
+        },
         "devices": {
           "description": "Ordered qualified CDI device references.",
           "type": [
@@ -390,19 +400,17 @@
           ]
         },
         "tmpfs": {
-          "description": "Ordered absolute container paths backed by writable tmpfs mounts.",
+          "description": "Ordered typed writable tmpfs mounts.",
           "type": [
             "array",
             "null"
           ],
           "items": {
-            "type": "string",
-            "pattern": "^/(?:[^:\\u0000-\\u001F\\u007F-\\u009F]*[^:\\u0000-\\u001F\\u007F-\\u009F\\s\\\\])?(?![\\s\\S])"
-          },
-          "uniqueItems": true
+            "$ref": "#/$defs/FilesystemTmpfs"
+          }
         },
         "volumes": {
-          "description": "Ordered literal Quadlet `Volume=` entries.",
+          "description": "Ordered Podman-managed volume mounts.",
           "type": [
             "array",
             "null"
@@ -414,28 +422,88 @@
       },
       "additionalProperties": false
     },
-    "FilesystemVolume": {
-      "description": "A single volume mount (`[[config.filesystem.volumes]]`).",
+    "FilesystemBind": {
+      "description": "A non-recursive host bind (`[[config.filesystem.binds]]`).",
       "type": "object",
       "properties": {
-        "mode": {
-          "description": "Optional volume mode or options. Requires `source`; colons are not\nsupported.",
+        "readOnly": {
+          "description": "Read-only by default; `false` explicitly grants host-write authority.",
           "type": [
-            "string",
+            "boolean",
             "null"
-          ],
-          "minLength": 1
+          ]
         },
         "source": {
-          "description": "Optional volume source. Colons are not supported.",
-          "type": [
-            "string",
-            "null"
-          ],
+          "description": "Absolute host source path.",
+          "type": "string",
           "minLength": 1
         },
         "target": {
-          "description": "Required container target. Colons are not supported.",
+          "description": "Absolute container target path.",
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "target"
+      ]
+    },
+    "FilesystemTmpfs": {
+      "description": "A writable tmpfs mount (`[[config.filesystem.tmpfs]]`).",
+      "type": "object",
+      "properties": {
+        "mode": {
+          "description": "Optional three- or four-digit octal mode no greater than `1777`.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[01]?[0-7]{3}$"
+        },
+        "size": {
+          "description": "Optional positive size with an uppercase K, M, G, or T suffix.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[1-9][0-9]*[KMGT]?$"
+        },
+        "target": {
+          "description": "Absolute container target path.",
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "target"
+      ]
+    },
+    "FilesystemVolume": {
+      "description": "A Podman-managed volume (`[[config.filesystem.volumes]]`).",
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "Optional literal named-volume resource; absence requests an anonymous volume.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$"
+        },
+        "readOnly": {
+          "description": "Named volumes are writable by default and may be narrowed with `true`;\nanonymous volumes are always writable and reject `true`.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "target": {
+          "description": "Required absolute container target path.",
           "type": "string",
           "minLength": 1
         }

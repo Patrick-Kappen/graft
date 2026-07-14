@@ -7,6 +7,7 @@ target = "system"
 [config.container]
 workingDir = "/workspace"
 
-[[config.filesystem.volumes]]
+[[config.filesystem.binds]]
 source = "/var/lib/graft-workspace"
 target = "/workspace"
+readOnly = false

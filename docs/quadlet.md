@@ -55,7 +55,7 @@ JSON:
 - `Rootfs=` comes from the generated rootfs store path.
 - `Exec=` comes from resolved `runtime.command`.
 - `Volume=/nix/store:/nix/store:ro` is always rendered for store symlinks.
-- Resolved path-only tmpfs intent renders as ordered `Tmpfs=` lines.
+- Typed tmpfs, binds, and managed volumes render in fixed tmpfs → bind → volume order with explicit safe options.
 - Qualified resolved CDI references render as ordered `AddDevice=` lines.
 - Explicit root-filesystem and process hardening renders as fixed `ReadOnly=`, `DropCapability=`, and `NoNewPrivileges=` keys.
 - Optional `[Unit]` dependency keys are rendered only from concrete resolved identities.
