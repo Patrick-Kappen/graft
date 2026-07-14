@@ -1,0 +1,14 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "graft-docs",
+  "compatibility_date": "2026-07-14",
+  "routes": [
+    {
+      "pattern": "graft.kappen.io",
+      "custom_domain": true
+    }
+  ],
+  "assets": {
+    "directory": "./site"
+  }
+}
