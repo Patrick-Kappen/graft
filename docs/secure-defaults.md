@@ -91,9 +91,12 @@ a future validation level. Empty capability additions, duplicates, `all`,
 delimiter/control injection, and non-canonical names fail resolution. Direct
 raw Podman or Quadlet arguments remain forbidden.
 
-The implementation must render explicit false values rather than silently omit
-them. This keeps generated units aligned with resolved intent and avoids a host
-runtime default changing the meaning of a reviewed relaxation.
+The implementation must render explicit false values into the Quadlet source
+rather than silently omit them. Quadlet 5.8.2 represents
+`NoNewPrivileges=false` by omitting Podman's
+`--security-opt=no-new-privileges` argument, so generated argv demonstrates the
+relaxation through absence rather than an explicit negative argument. Graft
+does not claim that this pins behavior against a future host/runtime default.
 
 ## Capability migration
 
@@ -144,8 +147,9 @@ Implementation of this design adds these invariants:
    manager account.
 4. Omission cannot weaken read-only rootfs, capability, or privilege-gain
    policy.
-5. Every supported relaxation is explicit in TOML, resolved JSON, Quadlet, and
-   generated Podman arguments.
+5. Every supported relaxation is explicit in TOML, resolved JSON, and Quadlet;
+   generated Podman arguments must match its documented presence-or-absence
+   semantics.
 6. Partial legacy capability-drop lists fail with a migration diagnostic.
 7. Unimplemented seccomp, label, mask, namespace, resource, logging, secret,
    and init relaxations continue to fail closed.
