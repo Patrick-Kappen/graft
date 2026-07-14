@@ -17,13 +17,17 @@ authoritative boundary.
 Deferred in the current alpha:
 
 - no direct host-device paths, optional-device prefixes, device remapping, or
-  device permissions; current [qualified CDI references](cdi.md) accept only a
-  colon-free resource name
+  device permissions; [filesystem policy](filesystem-policy.md) defers direct
+  paths until a host-aware attestation contract exists, while current
+  [qualified CDI references](cdi.md) accept a colon-free resource name
 - no port syntax parser for `PublishPort=` values
-- no filesystem path existence checks for volumes
-- no tmpfs options or target-collision policy across tmpfs, volumes, rootfs, and
-  fixed store bindings; current tmpfs support accepts absolute container paths only
-- no volume mode allowlist beyond line-safety validation
+- no activation-time filesystem existence, type, ownership, or symlink checks
+  for host sources
+- no implemented tmpfs options or target-collision policy across tmpfs,
+  volumes, rootfs, and fixed store bindings; the approved
+  [filesystem policy](filesystem-policy.md) owns their typed replacement
+- no legacy volume mode allowlist beyond line-safety validation; raw mount
+  options remain forbidden by the approved replacement policy
 - no Quadlet `.volume` or `.network` unit generation
 - no automatic firewall, DNS, or network alias management
 - no systemd timespan parser for service timing values

@@ -282,8 +282,12 @@ existence, ownership, symlink traversal, source type, target overlap, read-only
 policy, or an approved host-path allowlist. A volume can overlap the generated
 `/nix/store` bind or expose a store source at another target. Writable mounts let
 a compromised workload alter host-owned data within its runtime authority.
-Broader mount and direct-device policy belongs to [#142] and [#164]. Qualified CDI
-references do not attest the effective resources in the host spec; a spec may
+The approved [filesystem policy](filesystem-policy.md) under [#142] replaces
+this legacy behavior with read-only-by-default binds, typed managed volumes and
+tmpfs, and shared collision checks. Implementation and migration remain in
+[#164]. Direct host-device paths stay deferred because pure resolution cannot
+attest their activation-time type. Qualified CDI references do not attest the
+effective resources in the host spec; a spec may
 add devices, mounts, environment values, or hooks with the selected target's
 runtime authority.
 
@@ -416,9 +420,11 @@ The scoped qualified-CDI implementation is current through [#203], and
 secure defaults and typed relaxations are current through [#163]. The
 [secure target defaults design](secure-defaults.md) approves explicit targets,
 a shared concrete baseline, and typed relaxations; current behavior changes
-through the current [#163] enforcement. Direct device paths remain
-governed by [#142] and
-[#164]. Identity and rootfs-integrity gaps are tracked by [#107] and [#108]. Related isolation,
+through the current [#163] enforcement. The approved
+[filesystem policy](filesystem-policy.md) defines the replacement for legacy
+volumes and defers direct devices pending host-aware attestation; mount
+implementation remains in [#164]. Identity and rootfs-integrity gaps are tracked
+by [#107] and [#108]. Related isolation,
 mount, secret, resource, shadowing, remote, and temporary-agent work is linked in
 the risk sections above.
 

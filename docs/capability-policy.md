@@ -94,11 +94,13 @@ effective value of dangerous intent rather than making it implicit.
 Current narrow passthroughs that predate this policy are not automatically safe.
 One explicit legacy exception violates dangerous requirement 2: a source-backed
 `Volume=` entry without `mode = "ro"` can become writable through the upstream
-default. This is not precedent for new features. [#142] and [#164] must make
-writable authority explicit or reject it and provide migration diagnostics.
-Until then, host-path, sensitive-source, or writable-host volumes remain current
-dangerous residual risk. Host environment-file path references and exact
-external-systemd-unit relationships are other explicit current host crossings;
+default. This is not precedent for new features. The approved
+[filesystem policy](filesystem-policy.md) under [#142] replaces it with
+read-only-by-default typed binds and field-specific migration diagnostics;
+implementation remains in [#164]. Until then, host-path, sensitive-source, or
+writable-host volumes remain current dangerous residual risk. Host
+environment-file path references and exact external-systemd-unit relationships
+are other explicit current host crossings;
 their policy and diagnostics are tracked by [#143], [#166], and [#171].
 
 ## Forbidden boundaries
@@ -128,10 +130,12 @@ but it does not make the original escape hatch acceptable.
 | Current typed identity, package, command, lifecycle, startup, workload-dependency, and safe namespace intent | First-class | Current | Keep schema-backed, resolved, and mechanically rendered. Individual host crossings retain their documented boundaries. |
 | System versus user manager target selection | First-class | Current; explicit requirement approved for [#163] | This selects authority context, not guaranteed privilege: system and root-owned user managers are rootful. The approved design removes the implicit system target only when [#163] implements the migration. |
 | Drop-all capabilities, no-new-privileges, and read-only rootfs | First-class | Current through [#163] | Concrete defaults apply to every explicit target; typed opt-outs remain dangerous intent. |
-| Path-only writable tmpfs mounts | First-class | Current through a scoped [#164] phase | Unique absolute container paths only; no host source or options syntax. Mounts may mask rootfs content and remain writable with read-only rootfs. Cross-mount target policy remains deferred to [#142]. |
+| Path-only writable tmpfs mounts | First-class | Current through a scoped [#164] phase | Unique absolute container paths only; no host source or options syntax. Mounts may mask rootfs content and remain writable with read-only rootfs. Typed options and collision policy are designed in [#142]. |
+| Anonymous managed volumes | First-class | Typed replacement designed in [#142]; implementation remains in [#164] | The declaration explicitly requests writable runtime-managed storage without selecting a host path or named resource. |
+| Named managed volumes | Dangerous | Typed replacement designed in [#142]; implementation remains in [#164] | A literal name may reuse existing persistent host-managed state or intentionally couple workloads in one Podman storage scope. |
 | Qualified CDI resource name without target remapping or permissions | First-class | Current through [#203] | Host registry/spec is trusted; Graft validates and renders only the colon-free qualified name. |
-| Direct host device paths or directories, optional-device prefixes, target remapping, and permission modes | Dangerous | Deferred to [#142] and [#164] | Requires explicit device policy, target-specific behavior, and runtime authorization tests. |
-| Host-path, sensitive-source, or writable-host mounts, recursive propagation, and host sockets | Dangerous | Partly current; policy planned in [#142] and [#164] | Omitting `mode = "ro"` on a source-backed current volume can select an upstream writable default. This legacy exception violates dangerous requirement 2 and must become explicit or fail closed; it is not precedent for broader passthrough. |
+| Direct host device paths or directories, optional-device prefixes, target remapping, and permission modes | Dangerous | Deferred by [#142] | Pure resolution cannot attest that an activation-time `/dev` path is a device node rather than a directory or symlink. A future form requires host-aware attestation without moving policy into the Nix materialiser. |
+| Host-path, sensitive-source, or writable-host mounts, recursive propagation, and host sockets | Dangerous | Legacy form current; replacement designed in [#142] and pending [#164] | The approved bind form defaults read-only and requires explicit writable authority. Raw options, sensitive virtual sources, and propagation remain unavailable. |
 | Host environment-file path references | Dangerous | Current; credential replacement planned in [#143] and [#166] | One ordered non-empty, control-free path value per entry; Quadlet resolves relative paths against the source-unit directory. Graft does not attest traversal, symlinks, existence, ownership, permissions, lifecycle, or disclosure. |
 | Exact external systemd unit relationships | Dangerous | Current | Exact validated names only; implementation and authorization of the selected-manager unit remain host responsibility. |
 | Privileged containers | Dangerous | Deferred; [#163] keeps unsupported privileged intent rejected | No generic runtime argument path or implied opt-in is permitted. |

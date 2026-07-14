@@ -11,6 +11,7 @@ Related authoritative sources:
 - [Capability status](capabilities.md) — each field's parser, resolver, Nix, and Quadlet stages plus deferred and forbidden boundaries;
 - [Container Device Interface references](cdi.md) — qualified device-name syntax and host registry trust boundary;
 - [Container hardening](hardening.md) — current security defaults and typed relaxations and their limits;
+- [Filesystem and mount policy](filesystem-policy.md) — approved replacement contract for current legacy volume behavior; not yet current input;
 - [Roadmap](roadmap.md) — planned implementation direction;
 - [Non-goals and deferred scope](non-goals.md) — deliberate current exclusions.
 
@@ -180,7 +181,7 @@ root filesystem still receives
 read-write tmpfs mounts at `/dev`, `/dev/shm`, `/run`, `/tmp`, and `/var/tmp`;
 mountpoint modes and dropped capabilities can still deny process writes.
 Explicit tmpfs mounts, volumes, and host CDI specs can also introduce writable
-paths. See [Explicit container hardening](hardening.md) for the process, mount,
+paths. See [Container hardening](hardening.md) for the process, mount,
 target, and future-relaxation boundaries.
 
 ## Filesystem tmpfs
@@ -237,9 +238,9 @@ mechanically as `target`, `source:target`, or `source:target:mode`.
 A mode without `ro` may create a writable host mount. Targets can overlap fixed
 paths, including the generated `/nix/store` bind, and sources can expose store
 paths elsewhere. The current contract does not attest path safety or
-confinement; review such mounts explicitly. Typed mount policy remains tracked
-by
-[#142](https://github.com/Patrick-Kappen/graft/issues/142) and
+confinement; review such mounts explicitly. The approved
+[filesystem policy](filesystem-policy.md) replaces this legacy shape with typed
+binds and managed volumes. Implementation and migration remain tracked by
 [#164](https://github.com/Patrick-Kappen/graft/issues/164).
 
 ## CDI devices
@@ -266,9 +267,10 @@ may inject device nodes, mounts, environment values, and OCI hooks; its
 existence, contents, permissions, lifecycle, and runtime authorization remain
 host responsibilities. See
 [Container Device Interface references](cdi.md) for the exact accepted subset,
-target-specific authority, and runtime boundary. Direct devices remain tracked
-by [#142](https://github.com/Patrick-Kappen/graft/issues/142) and
-[#164](https://github.com/Patrick-Kappen/graft/issues/164).
+target-specific authority, and runtime boundary. Direct host-device paths remain
+unavailable: the [filesystem policy](filesystem-policy.md) defers them until a
+host-aware attestation contract can distinguish device nodes from directories
+and symlinks without moving policy into the Nix materialiser.
 
 ## Network
 

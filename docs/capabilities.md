@@ -105,7 +105,7 @@ Detailed lifecycle, startup, and namespace combinations live in
 [Workload startup activation](activation.md),
 [Container network intent](networking.md),
 [Container Device Interface references](cdi.md), and
-[Explicit container hardening](hardening.md). Renderer quoting and generator-owned
+[Container hardening](hardening.md). Renderer quoting and generator-owned
 behavior live in [Quadlet output](quadlet.md).
 
 ## Reserved parser fields
@@ -148,7 +148,7 @@ fails closed.
 | --- | --- | --- | --- |
 | Drop-all, no-new-privileges, and read-only rootfs | Concrete defaults resolve and render for every workload; typed boolean opt-outs remain explicit | First-class | Current through [#163] and documented in [secure defaults](secure-defaults.md) |
 | Qualified CDI resource name without remapping or permissions | Colon-free qualified `source` is accepted, ordered, and rendered as `AddDevice=`; host registry/spec is not inspected | First-class | Current through [#203] |
-| Direct host devices, device directories, target remapping, and permissions | Direct paths fail source validation; parser-reserved `target` and `permissions` return indexed field errors | Dangerous | Deferred to [#142] and [#164] |
+| Direct host devices, device directories, target remapping, and permissions | Direct paths fail source validation; parser-reserved `target` and `permissions` return indexed field errors | Dangerous | Deferred by [#142] until a host-aware attestation contract can distinguish device nodes from directories and symlinks without moving policy into the Nix materialiser |
 | Host network namespace sharing | Unsupported `config.network.mode` value | Dangerous | Planned in [#193] |
 | PID, IPC, UTS, user, or cgroup namespace sharing | Unsupported enum, unknown field, or field-specific error | Dangerous | Deferred until namespace-specific intent and target rules have an approved implementation issue |
 | `privileged` | Field-specific error | Dangerous | Deferred; [#163] keeps unsupported privileged intent rejected |
@@ -156,7 +156,9 @@ fails closed.
 | Unconfined seccomp/labels | Field-specific error | Dangerous | Deferred and unavailable |
 | Automatic per-container user namespaces | Field-specific error | First-class | Deferred to [#140] and [#141]; the secure-defaults phase preserves runtime behavior |
 | Custom UID/GID maps and subordinate-ID selection | Field-specific error | Dangerous | Deferred within [#140] and [#141] |
-| Host-path, sensitive-source, or writable-host mounts | Literal `config.filesystem.volumes` parts are delimiter- and line-safe but have no semantic source/path/mode, existence, or target-overlap policy; omitting `mode = "ro"` on a source-backed volume can select an upstream writable default | Dangerous | Current legacy exception to explicit-dangerous-intent policy; [#142] and [#164] must make writable authority explicit or reject it with migration diagnostics; [#163] preserves this exception |
+| Host-path, sensitive-source, or writable-host mounts | Literal `config.filesystem.volumes` parts are delimiter- and line-safe but have no semantic source/path/mode, existence, or target-overlap policy; omitting `mode = "ro"` on a source-backed volume can select an upstream writable default | Dangerous | Current legacy exception; read-only-by-default typed binds and migration are designed in [#142] and pending [#164] |
+| Anonymous managed volumes | Currently represented by ambiguous source-less legacy `volumes` entries | First-class | Typed replacement designed in [#142] and pending [#164] |
+| Named managed volumes | Currently share the ambiguous legacy `source` field with host paths | Dangerous | Typed literal-name resource references designed in [#142] and pending [#164]; existing state and same-scope sharing remain explicit host/runtime boundaries |
 | Host environment-file path references | One ordered non-empty, control-free path value is accepted per entry; Quadlet resolves relative paths against the source-unit directory | Dangerous | Current explicit host crossing without traversal, symlink, existence, ownership, permission, lifecycle, or disclosure attestation; typed credentials planned in [#143] and [#166] |
 | Exact external-systemd-unit relationships | Exact typed name is accepted; selected-manager implementation is not inspected | Dangerous | Current explicit host crossing |
 | `PodmanArgs`, `GlobalArgs`, and raw Quadlet maps | Field-specific error | Forbidden | No unrestricted passthrough; concrete needs require typed intent |
