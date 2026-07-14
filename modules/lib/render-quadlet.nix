@@ -76,6 +76,10 @@ let
       dropCapabilityLines = lib.concatMapStrings (
         capability: "DropCapability=${escapeSystemdExecArg capability}\n"
       ) dropCapabilities;
+      addCapabilities = security.addCapabilities or [ ];
+      addCapabilityLines = lib.concatMapStrings (
+        capability: "AddCapability=${escapeSystemdExecArg capability}\n"
+      ) addCapabilities;
       noNewPrivileges = security.noNewPrivileges or null;
       noNewPrivilegesLine = lib.optionalString (
         noNewPrivileges != null
@@ -143,6 +147,7 @@ let
     + deviceLines
     + readOnlyLine
     + dropCapabilityLines
+    + addCapabilityLines
     + noNewPrivilegesLine
     + networkLine
     + publishLines

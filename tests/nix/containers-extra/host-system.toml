@@ -1,5 +1,8 @@
 version = 1
 name = "nix-check-host-system"
 
+[deploy]
+target = "system"
+
 [config.container]
 hostname = "host-system.local"

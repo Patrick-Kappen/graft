@@ -338,6 +338,11 @@
             "Volume=/tmp/graft-$$USER-%%n:/data$$HOME-%%h:ro%%z"
             "\n[Service]\nRestart=on-failure\nRestartSec=15s"
           ];
+          secureBaselineInfixes = [
+            "ReadOnly=true"
+            "DropCapability=all"
+            "NoNewPrivileges=true"
+          ];
           commonPlainMissingInfixes = [
             "HostName="
             "User="
@@ -347,9 +352,7 @@
             "EnvironmentFile="
             "PublishPort="
             "Network="
-            "ReadOnly="
-            "DropCapability="
-            "NoNewPrivileges="
+            "AddCapability="
             "Type="
             "RemainAfterExit="
             "Restart="
@@ -374,8 +377,9 @@
               escapeInfixes,
               plainMissingInfixes,
             }:
-            assertHasInfixes rendered (commonRenderedInfixes ++ renderedInfixes)
-            && assertHasInfixes escapeRendered (commonEscapedInfixes ++ escapeInfixes)
+            assertHasInfixes rendered (secureBaselineInfixes ++ commonRenderedInfixes ++ renderedInfixes)
+            && assertHasInfixes escapeRendered (secureBaselineInfixes ++ commonEscapedInfixes ++ escapeInfixes)
+            && assertHasInfixes plainRendered secureBaselineInfixes
             && assertNoInfixes plainRendered (commonPlainMissingInfixes ++ plainMissingInfixes);
           evalNixosWithRoots =
             extraRoots:
@@ -791,6 +795,13 @@
               cp ${sources.network-owner-user} source-user/network-owner-user.container
               cp ${sources.network-client-user} source-user/network-client-user.container
 
+              for source in source-system/plain-system.container source-user/plain-user.container; do
+                rootfs="$(sed -n 's|^Rootfs=\(.*\):O$|\1|p' "$source")"
+                test -n "$rootfs"
+                test -d "$rootfs/tmp"
+                test -d "$rootfs/var/tmp"
+              done
+
               QUADLET_UNIT_DIRS="$PWD/source-system" \
                 ${pkgs.podman}/libexec/podman/quadlet \
                 generated-system generated-system generated-system
@@ -802,6 +813,12 @@
                 generated-system/long-running-system.service
               grep -E '^ExecStart=.* --tmpfs /run/graft-user --tmpfs /tmp/graft-user( |$)' \
                 generated-user/long-running-user.service
+              for scope in system user; do
+                service="generated-$scope/plain-$scope.service"
+                grep -E -- "^ExecStart=.* --security-opt=no-new-privileges( |$)" "$service"
+                grep -E -- "^ExecStart=.* --cap-drop all( |$)" "$service"
+                grep -E -- "^ExecStart=.* --read-only( |$)" "$service"
+              done
 
               for unit in long-running startup-job setup network-client; do
                 test -L "generated-system/multi-user.target.wants/$unit-system.service"
@@ -930,12 +947,16 @@
                 test "$(grep -c '^AddDevice=' "$source")" = 2
                 test "$(grep -n '^AddDevice=' "$source" | cut -d: -f2-)" = \
                   $'AddDevice=nvidia.com/gpu=all\nAddDevice=vendor.example/device_class=device-1.2'
-                grep -Fx "ReadOnly=true" "$source"
-                test "$(grep -c '^DropCapability=' "$source")" = 2
-                test "$(grep -n '^DropCapability=' "$source" | cut -d: -f2-)" = \
-                  $'DropCapability=CAP_NET_BIND_SERVICE\nDropCapability=CAP_CHOWN'
-                grep -Fx "NoNewPrivileges=true" "$source"
+                test "$(grep -c '^DropCapability=' "$source")" = 1
+                grep -Fx "DropCapability=all" "$source"
+                test "$(grep -c '^AddCapability=' "$source")" = 2
+                test "$(grep -n '^AddCapability=' "$source" | cut -d: -f2-)" = \
+                  $'AddCapability=CAP_NET_BIND_SERVICE\nAddCapability=CAP_CHOWN'
               done
+              grep -Fx "ReadOnly=true" source-system/cdi-system.container
+              grep -Fx "NoNewPrivileges=true" source-system/cdi-system.container
+              grep -Fx "ReadOnly=false" source-user/cdi-user.container
+              grep -Fx "NoNewPrivileges=false" source-user/cdi-user.container
 
               QUADLET_UNIT_DIRS="$PWD/source-system" \
                 ${pkgs.podman}/libexec/podman/quadlet \
@@ -949,12 +970,16 @@
                 grep -F -- \
                   "--device nvidia.com/gpu=all --device vendor.example/device_class=device-1.2" \
                   "$service"
-                grep -E -- "^ExecStart=.* --security-opt=no-new-privileges( |$)" "$service"
+                grep -E -- "^ExecStart=.* --cap-drop all( |$)" "$service"
                 grep -F -- \
-                  "--cap-drop cap_net_bind_service --cap-drop cap_chown" \
+                  "--cap-add cap_net_bind_service --cap-add cap_chown" \
                   "$service"
-                grep -E -- "^ExecStart=.* --read-only( |$)" "$service"
               done
+              grep -E -- "^ExecStart=.* --security-opt=no-new-privileges( |$)" \
+                generated-system/cdi-system.service
+              grep -E -- "^ExecStart=.* --read-only( |$)" generated-system/cdi-system.service
+              ! grep -F -- "--security-opt=no-new-privileges" generated-user/cdi-user.service
+              ! grep -E -- "^ExecStart=.* --read-only( |$)" generated-user/cdi-user.service
 
               mkdir -p runtime/systemd
               XDG_RUNTIME_DIR="$PWD/runtime" \

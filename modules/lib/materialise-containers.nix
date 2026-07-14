@@ -92,7 +92,7 @@ let
     in
     pkgs.runCommand "graft-${ctr.name}-env" { } ''
       # Real system directories (so overlay can write to them)
-      mkdir -p $out/{etc,tmp,var,home,root,run,proc,sys,dev}
+      mkdir -p $out/{etc,tmp,var/tmp,home,root,run,proc,sys,dev}
       # Mount points required by crun/Podman at container start
       ln -s /proc/mounts $out/etc/mtab
       touch $out/etc/hostname $out/etc/hosts $out/etc/resolv.conf
