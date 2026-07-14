@@ -2,7 +2,9 @@
 
 > **Status:** this document defines the security assumptions and invariants of
 > the current `rootfs-store` MVP. It does not claim that the planned secure
-> defaults or production hardening are implemented.
+> defaults or production hardening are implemented. The approved
+> [secure target defaults design](secure-defaults.md) changes no current runtime
+> behavior until #163 lands.
 
 Graft turns selected TOML files into resolved JSON, Nix-store root filesystems,
 Quadlet source units, generated systemd services, and Podman containers. This
@@ -368,8 +370,8 @@ risk. Rootfs construction currently tolerates some package `/etc` copy errors;
 
 | Context | Required assumption | Current boundary |
 | --- | --- | --- |
-| Local development | The operator reviews selected TOML and package intent. Repository code and data processed inside the workload may be untrusted. | Prefer a user target under a non-root account. Current Graft has no automatic workspace mount or interactive shell contract; explicit volumes carry their own host-file risk. |
-| Unattended server | Host administrators own account, UID, linger, authentication, firewall, updates, logging, storage, and recovery policy. | Rootless under a non-root account is preferred, but secure defaults and per-container identities are not implemented. Early-alpha Graft is not a strong production isolation claim. |
+| Local development | The operator reviews selected TOML and package intent. Repository code and data processed inside the workload may be untrusted. | Prefer an explicit user target under a non-root account. Current Graft has no automatic workspace mount or interactive shell contract; explicit volumes carry their own host-file risk. The future baseline uses field-specific opt-outs rather than a development profile. |
+| Unattended server | Host administrators own account, UID, linger, authentication, firewall, updates, logging, storage, and recovery policy. | Rootless under a non-root account is preferred, but the approved secure defaults and per-container identities are not implemented. Early-alpha Graft is not a strong production isolation claim. |
 | Remote deployment | Any transport, credentials, host selection, approval, rollback, and remote Nix activation are trusted external tooling. | Graft has no remote deployment control plane yet; design and implementation remain in [#161] and [#174]. |
 | Temporary agents | Hostile code would require strict identity, mount, network, secret, TTL, cleanup, concurrency, and resource contracts. | Those contracts are not implemented. Do not treat current containers as disposable-agent isolation; use a VM when a shared kernel is insufficient. See [#151], [#153], and [#169]. |
 
@@ -413,9 +415,11 @@ A security-sensitive design or implementation must:
 7. update this model when assumptions or accepted residual risks change.
 
 The scoped qualified-CDI implementation is current through [#203], and
-non-relaxing explicit hardening is current through part of [#163]. The next
-security sequence is [#139] secure user/system defaults followed by the
-remaining [#163] enforcement. Direct device paths remain governed by [#142] and
+non-relaxing explicit hardening is current through part of [#163]. The
+[secure target defaults design](secure-defaults.md) approves explicit targets,
+a shared concrete baseline, and typed relaxations; current behavior changes
+only when the remaining [#163] enforcement lands. Direct device paths remain
+governed by [#142] and
 [#164]. Identity and rootfs-integrity gaps are tracked by [#107] and [#108]. Related isolation,
 mount, secret, resource, shadowing, remote, and temporary-agent work is linked in
 the risk sections above.
