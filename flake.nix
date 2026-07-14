@@ -28,7 +28,7 @@
           pkgs = nixpkgs.legacyPackages.${system};
           graftPackage = pkgs.rustPlatform.buildRustPackage {
             pname = "graft";
-            version = "0.2.0-alpha.1";
+            version = "0.3.0-alpha.1";
             src = ./crates/graft;
             cargoLock.lockFile = ./crates/graft/Cargo.lock;
 

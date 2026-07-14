@@ -243,6 +243,22 @@ The corresponding `activation-runtime` CI job is advisory and is deliberately
 excluded from the aggregate required checks while its cost and runner stability
 are evaluated.
 
+With the tested Podman 5.8.2 and systemd 260.2 combination, a linger-started
+rootless Quadlet workload has intermittently entered `Result=protocol` during
+user-manager bootstrap. The generated service follows Quadlet's `Type=notify`,
+`NotifyAccess=all`, and `--sdnotify=conmon` contract, and the test reports the
+terminal result immediately rather than retrying or masking it as a timeout.
+The focused reproducer has not recreated the failure, so the compatibility
+boundary remains advisory and is tracked by
+[#212](https://github.com/Patrick-Kappen/graft/issues/212) under the broader
+version matrix in [#129](https://github.com/Patrick-Kappen/graft/issues/129).
+
+Run the focused reproducer with:
+
+```bash
+nix build .#packages.x86_64-linux.notify-protocol-runtime-test --no-link --print-build-logs
+```
+
 ## Upstream evidence
 
 This design was checked against Podman/Quadlet 5.8.2 and systemd's unit model:
