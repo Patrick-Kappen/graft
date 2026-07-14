@@ -617,13 +617,22 @@
                 nativeBuildInputs = [ pkgs.python3 ];
               }
               ''
-                python3 - "${./crates/graft/schema/graft-v1.schema.json}" "${./docs/capabilities.md}" <<'PY'
+                python3 - \
+                  "${./crates/graft/schema/graft-v1.schema.json}" \
+                  "${./docs/capabilities.md}" \
+                  "${./README.md}" \
+                  "${./website/index.html}" \
+                  "${./examples/quickstart/nixos/containers/graft-example.toml}" <<'PY'
                 import json
+                import re
                 import sys
+                import tomllib
                 from collections import Counter
                 from pathlib import Path
 
-                schema_path, documentation_path = map(Path, sys.argv[1:])
+                schema_path, documentation_path, readme_path, website_path, fixture_path = map(
+                    Path, sys.argv[1:]
+                )
                 schema = json.loads(schema_path.read_text())
                 definitions = schema["$defs"]
 
@@ -699,6 +708,49 @@
                     if extra:
                         messages.append("absent from supported schema: " + ", ".join(extra))
                     raise SystemExit("\n".join(messages))
+
+                readme = readme_path.read_text()
+                readme_examples = re.findall(r"```toml\n(.*?)```", readme, re.DOTALL)
+                if len(readme_examples) != 1:
+                    raise SystemExit("README must contain exactly one TOML example")
+
+                readme_example = tomllib.loads(readme_examples[0])
+                fixture = tomllib.loads(fixture_path.read_text())
+                compared_paths = (
+                    ("version",),
+                    ("name",),
+                    ("deploy", "target"),
+                    ("config", "runtime", "packages"),
+                    ("config", "runtime", "command"),
+                )
+                for path in compared_paths:
+                    readme_value = readme_example
+                    fixture_value = fixture
+                    for component in path:
+                        readme_value = readme_value[component]
+                        fixture_value = fixture_value[component]
+                    if readme_value != fixture_value:
+                        raise SystemExit(
+                            "README example differs from the validated quickstart at "
+                            + ".".join(path)
+                        )
+
+                website = website_path.read_text()
+                website_contract = (
+                    '<p class="terminal-section">[deploy]</p>',
+                    '<p><b>target</b> = <span>"system"</span></p>',
+                    '<p><b>packages</b> = <span>["bash"]</span></p>',
+                    '<span class="code-section">[deploy]</span>',
+                    '<span class="code-key">target</span> = <span class="code-string">"system"</span>',
+                )
+                missing_website_contract = [
+                    fragment for fragment in website_contract if fragment not in website
+                ]
+                if missing_website_contract:
+                    raise SystemExit(
+                        "website examples lost required validated intent: "
+                        + ", ".join(missing_website_contract)
+                    )
                 PY
                 touch $out
               '';
