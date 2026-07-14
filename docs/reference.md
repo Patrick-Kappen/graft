@@ -223,8 +223,9 @@ mode = "1777"
 size = "64M"
 ```
 
-`mode` is an optional four-digit octal mode and `size` is an optional positive
-integer followed by `K`, `M`, `G`, or `T`. Every tmpfs renders with fixed
+`mode` is an optional 3- or 4-digit octal mode no greater than `1777`; `size`
+is an optional positive integer with an optional `K`, `M`, `G`, or `T` suffix.
+Every tmpfs renders with fixed
 `rw,noexec,nosuid,nodev` flags. Legacy path strings fail with migration
 guidance.
 

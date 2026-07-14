@@ -82,7 +82,7 @@ intentionally has no output there.
 | `config.filesystem.readOnly` | Optional boolean; defaults to `true`; `false` is an explicit relaxation | Concrete `filesystem.readOnly` | Passed to the shared renderer | Explicit `ReadOnly=true` or `false` | Both | Current through [#163] |
 | `config.filesystem.tmpfs` | Optional ordered typed entries; legacy strings fail with migration guidance | Concrete `filesystem.tmpfs` | Validated with all mount targets | Ordered `Tmpfs=` with fixed safe flags | Both | Current through [#164] |
 | `config.filesystem.tmpfs[].target` | Absolute normalised target; only mount kind allowed under `/run`, `/tmp`, and `/var/tmp` | Preserved | Collision-checked | Target component | Both | Current |
-| `config.filesystem.tmpfs[].mode` | Optional four-digit octal mode | Preserved | Added to fixed flags | `mode=` option | Both | Current |
+| `config.filesystem.tmpfs[].mode` | Optional 3- or 4-digit octal mode no greater than `1777` | Preserved | Added to fixed flags | `mode=` option | Both | Current |
 | `config.filesystem.tmpfs[].size` | Optional positive integer with optional `K`, `M`, `G`, or `T` suffix | Preserved | Added to fixed flags | `size=` option | Both | Current |
 | `config.filesystem.binds` | Optional ordered typed host binds; empty is omitted | Concrete `filesystem.binds` | Validated with all mount targets | Ordered `Volume=` bind lines | Both | Current through [#164] |
 | `config.filesystem.binds[].source` | Absolute normalised host path; `/`, `/proc`, `/sys`, `/dev`, and `/run` trees rejected | Preserved | Not existence- or symlink-attested | Source component | Both | Current |
