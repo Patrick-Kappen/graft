@@ -10,17 +10,20 @@ realised rootfs runtime closure.
 
 ## Security invariant
 
-For a workload without an explicit mount or trusted CDI edit that changes the
-store view, `/nix/store` is a read-only scaffold and every path visible
-immediately below it is a member of the realised Graft rootfs runtime closure. A
-host store path outside that closure is not visible through Graft-owned mounts,
-and a process cannot create an additional direct child through writable-rootfs
-state.
+In the initial Graft-owned mount graph, without a trusted CDI edit or a process
+with effective mount-administration capability, `/nix/store` is a read-only
+scaffold and every path visible immediately below it is a member of the realised
+Graft rootfs runtime closure. A host store path outside that closure is not
+visible through Graft-owned mounts, and a process cannot create an additional
+direct child through writable-rootfs state.
 
 Closure scoping is mandatory rootfs mechanics for both manager targets. It is
-not TOML intent, has no workload opt-out, and never falls back to mounting the
-complete store. Failure to enumerate, retain, materialise, or render the exact
-closure fails the Nix build or module activation input.
+not TOML intent, has no dedicated store-visibility opt-out, and never falls back
+to mounting the complete store. Failure to enumerate, retain, materialise, or
+render the exact closure fails the Nix build or module activation input.
+Explicitly adding `CAP_SYS_ADMIN` is broader dangerous authority rather than a
+store opt-out: an effective rootful capability can alter the container mount
+namespace and invalidates the continuing visibility invariant.
 
 This invariant reduces package and configuration disclosure and prevents
 accidental use of undeclared host-store paths. It does not:
@@ -81,8 +84,9 @@ of its runtime closure.
 ### Derived Quadlet source
 
 The Quadlet source becomes a derivation instead of an evaluation-time string.
-That derivation first mounts the prepared scaffold read-only and then reads
-`closureInfo/store-paths` to emit one nested line per path:
+The derivation reads `closureInfo/store-paths` and emits the scaffold mount line
+first, followed by one nested member line per path. Podman applies those mounts
+later when it creates the container:
 
 ```ini
 Volume=<rootfs>/nix/store:/nix/store:ro,bind,nodev,nosuid
@@ -132,12 +136,14 @@ hard limits:
 | Quantity | Initial limit |
 | --- | ---: |
 | Closure members | 512 |
-| Generated Quadlet source | 128 KiB |
+| Generated closure-mount fragment | 128 KiB |
 
-Exceeding either limit fails with the workload name, measured value, configured
-limit, and guidance to reduce `config.runtime.packages`. There is no complete-
-store fallback. Raising a limit requires runtime evidence through the
-compatibility work in [#129].
+Exceeding the member limit fails with the workload name, measured count, limit,
+and guidance to reduce `config.runtime.packages`. Exceeding the fragment limit
+reports its measured byte size and the same package guidance because unrelated
+command, environment, dependency, and service text is excluded from this
+measurement. There is no complete-store fallback. Raising a limit requires
+runtime evidence through the compatibility work in [#129].
 
 The pinned real Quadlet generator must also remain covered with a deliberately
 large fixture. Its generated service must remain below 512 KiB and its
@@ -222,8 +228,10 @@ Implementation may proceed in [#209] with this scope:
    mount followed by sorted per-path mounts and fixed options;
 4. enforce member and source-size limits with actionable diagnostics;
 5. add generator, rootful, rootless, regular-file, absent-path, GC-reference,
-   malformed-input, and no-fallback tests; and
-6. update the threat model and reference from complete-store to closure-scoped
+   malformed-input, writable-rootfs, `CAP_SYS_ADMIN` boundary, and no-fallback
+   tests; and
+6. update the threat model, design, overview, Quadlet, reference, capability,
+   and compatibility documentation from complete-store to closure-scoped
    exposure.
 
 Reporting closure member count and NAR size through a future unified inspection
