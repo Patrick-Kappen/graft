@@ -1,6 +1,9 @@
 version = 1
 name = "graft-cdi-runtime"
 
+[deploy]
+target = "system"
+
 [config.runtime]
 packages = ["busybox"]
 command = [

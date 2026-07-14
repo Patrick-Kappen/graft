@@ -1,6 +1,9 @@
 version = 1
 name = "escape-system"
 
+[deploy]
+target = "system"
+
 [config.runtime]
 command = [
   "/bin/echo",

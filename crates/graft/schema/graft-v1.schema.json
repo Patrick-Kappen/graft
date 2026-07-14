@@ -27,14 +27,46 @@
       }
     },
     "deploy": {
-      "description": "Module deployment settings.",
-      "anyOf": [
-        {
-          "$ref": "#/$defs/Deploy"
+      "description": "Required module deployment settings for a complete workload.",
+      "type": "object",
+      "properties": {
+        "activation": {
+          "description": "Optional service-manager startup activation.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DeployActivation"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
-        {
-          "type": "null"
+        "enable": {
+          "description": "Whether the NixOS / HM module should render this container.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "target": {
+          "description": "Required scope to render the Quadlet unit in.",
+          "oneOf": [
+            {
+              "description": "NixOS system manager and rootful Podman.",
+              "type": "string",
+              "const": "system"
+            },
+            {
+              "description": "Home Manager user manager; Podman is rootless only for a non-root account.",
+              "type": "string",
+              "const": "user"
+            }
+          ]
         }
+      },
+      "additionalProperties": false,
+      "required": [
+        "target"
       ]
     },
     "name": {
@@ -53,7 +85,8 @@
   "additionalProperties": false,
   "required": [
     "version",
-    "name"
+    "name",
+    "deploy"
   ],
   "$defs": {
     "Config": {
@@ -105,7 +138,7 @@
           ]
         },
         "security": {
-          "description": "Explicit non-relaxing container hardening controls.",
+          "description": "Secure container defaults and explicit typed relaxations.",
           "anyOf": [
             {
               "$ref": "#/$defs/Security"
@@ -294,42 +327,6 @@
         }
       ]
     },
-    "Deploy": {
-      "description": "Module deployment settings (`[deploy]`).",
-      "type": "object",
-      "properties": {
-        "activation": {
-          "description": "Optional service-manager startup activation.",
-          "anyOf": [
-            {
-              "$ref": "#/$defs/DeployActivation"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "enable": {
-          "description": "Whether the NixOS / HM module should render this container.",
-          "type": [
-            "boolean",
-            "null"
-          ]
-        },
-        "target": {
-          "description": "Scope to render the Quadlet unit in.",
-          "anyOf": [
-            {
-              "$ref": "#/$defs/DeployTarget"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        }
-      },
-      "additionalProperties": false
-    },
     "DeployActivation": {
       "description": "Supported deployment activation intent.",
       "oneOf": [
@@ -337,21 +334,6 @@
           "description": "Request the workload during normal target-manager startup.",
           "type": "string",
           "const": "startup"
-        }
-      ]
-    },
-    "DeployTarget": {
-      "description": "Deploy scope.",
-      "oneOf": [
-        {
-          "description": "NixOS system manager and rootful Podman.",
-          "type": "string",
-          "const": "system"
-        },
-        {
-          "description": "Home Manager user manager; Podman is rootless only for a non-root account.",
-          "type": "string",
-          "const": "user"
         }
       ]
     },
@@ -401,12 +383,11 @@
           }
         },
         "readOnly": {
-          "description": "Make the container root filesystem read-only. Only `true` is supported.",
+          "description": "Make the container root filesystem read-only, or explicitly retain a writable overlay.",
           "type": [
             "boolean",
             "null"
-          ],
-          "const": true
+          ]
         },
         "tmpfs": {
           "description": "Ordered absolute container paths backed by writable tmpfs mounts.",
@@ -558,25 +539,38 @@
       "description": "Security settings (`[config.security]`).",
       "type": "object",
       "properties": {
-        "dropCapabilities": {
-          "description": "Ordered non-empty list of `all` or canonical `CAP_*` capability names.",
+        "addCapabilities": {
+          "description": "Ordered canonical capabilities restored after dropping all defaults.",
           "type": [
             "array",
             "null"
           ],
           "items": {
             "type": "string",
-            "pattern": "^(all|CAP_[A-Z][A-Z0-9_]*)$"
+            "pattern": "^CAP_[A-Z][A-Z0-9_]*$"
           },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "dropCapabilities": {
+          "description": "Secure drop-all baseline. Omission and explicit `[\"all\"]` are equivalent.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string",
+            "pattern": "^all$"
+          },
+          "maxItems": 1,
           "minItems": 1
         },
         "noNewPrivileges": {
-          "description": "Prevent processes from gaining privileges. Only `true` is supported.",
+          "description": "Prevent processes from gaining privileges, or explicitly relax that baseline.",
           "type": [
             "boolean",
             "null"
-          ],
-          "const": true
+          ]
         }
       },
       "additionalProperties": false

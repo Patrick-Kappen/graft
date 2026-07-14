@@ -37,7 +37,8 @@ pub struct ContainerConfig {
     pub children: Option<GraphRefs>,
     /// Typed relationships to Graft workloads or explicit external units.
     pub dependencies: Option<Vec<Dependency>>,
-    /// Module deployment settings.
+    /// Required module deployment settings for a complete workload.
+    #[schemars(required)]
     pub deploy: Option<Deploy>,
     /// Validation behaviour.
     #[schemars(skip)]
@@ -133,7 +134,8 @@ pub enum DependencyLifecycle {
 pub struct Deploy {
     /// Whether the NixOS / HM module should render this container.
     pub enable: Option<bool>,
-    /// Scope to render the Quadlet unit in.
+    /// Required scope to render the Quadlet unit in.
+    #[schemars(required)]
     pub target: Option<DeployTarget>,
     /// Optional service-manager startup activation.
     pub activation: Option<DeployActivation>,
@@ -191,7 +193,7 @@ pub struct Config {
     /// Extra Quadlet `.volume` units (`[[config.volumes]]`).
     #[schemars(skip)]
     pub volumes: Option<Vec<VolumeUnit>>,
-    /// Explicit non-relaxing container hardening controls.
+    /// Secure container defaults and explicit typed relaxations.
     pub security: Option<Security>,
     #[schemars(skip)]
     pub resources: Option<Resources>,
@@ -340,8 +342,7 @@ pub struct Health {
 #[derive(Debug, Clone, Deserialize, Default, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct Filesystem {
-    /// Make the container root filesystem read-only. Only `true` is supported.
-    #[schemars(extend("const" = true))]
+    /// Make the container root filesystem read-only, or explicitly retain a writable overlay.
     pub read_only: Option<bool>,
     #[schemars(skip)]
     pub read_only_tmpfs: Option<bool>,
@@ -482,16 +483,17 @@ pub struct VolumeUnit {
 #[derive(Debug, Clone, Deserialize, Default, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct Security {
-    /// Ordered non-empty list of `all` or canonical `CAP_*` capability names.
+    /// Secure drop-all baseline. Omission and explicit `["all"]` are equivalent.
+    #[schemars(length(min = 1, max = 1), inner(regex(pattern = r"^all$")))]
+    pub drop_capabilities: Option<Vec<String>>,
+    /// Ordered canonical capabilities restored after dropping all defaults.
     #[schemars(
         length(min = 1),
-        inner(regex(pattern = r"^(all|CAP_[A-Z][A-Z0-9_]*)$"))
+        inner(regex(pattern = r"^CAP_[A-Z][A-Z0-9_]*$")),
+        extend("uniqueItems" = true)
     )]
-    pub drop_capabilities: Option<Vec<String>>,
-    #[schemars(skip)]
     pub add_capabilities: Option<Vec<String>>,
-    /// Prevent processes from gaining privileges. Only `true` is supported.
-    #[schemars(extend("const" = true))]
+    /// Prevent processes from gaining privileges, or explicitly relax that baseline.
     pub no_new_privileges: Option<bool>,
     #[schemars(skip)]
     pub privileged: Option<bool>,

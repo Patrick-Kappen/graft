@@ -188,13 +188,20 @@ mod tests {
                 version = 1
                 name = "worker"
 
+[deploy]
+target = "system"
+
                 [config.network]
                 mode = "container"
                 container = "database"
             "#,
         )
         .unwrap();
-        fs::write(&database, "version = 1\nname = \"database\"\n").unwrap();
+        fs::write(
+            &database,
+            "version = 1\nname = \"database\"\n[deploy]\ntarget = \"system\"\n",
+        )
+        .unwrap();
         let cli = Cli {
             toml_file: Some(worker),
             context_files: vec![database.clone(), database],
@@ -225,6 +232,9 @@ mod tests {
                 version = 1
                 name = "worker"
 
+[deploy]
+target = "system"
+
                 [[dependencies]]
                 target = { workload = "database" }
                 requirement = "required"
@@ -232,7 +242,11 @@ mod tests {
             "#,
         )
         .unwrap();
-        fs::write(&database, "version = 1\nname = \"database\"\n").unwrap();
+        fs::write(
+            &database,
+            "version = 1\nname = \"database\"\n[deploy]\ntarget = \"system\"\n",
+        )
+        .unwrap();
         let cli = Cli {
             toml_file: None,
             context_files: Vec::new(),
@@ -265,7 +279,11 @@ mod tests {
         let directory = tempdir().unwrap();
         let worker = directory.path().join("worker.toml");
         let invalid = directory.path().join("invalid.toml");
-        fs::write(&worker, "version = 1\nname = \"worker\"\n").unwrap();
+        fs::write(
+            &worker,
+            "version = 1\nname = \"worker\"\n[deploy]\ntarget = \"system\"\n",
+        )
+        .unwrap();
         fs::write(&invalid, "[[[").unwrap();
         let cli = Cli {
             toml_file: Some(worker),
@@ -285,10 +303,14 @@ mod tests {
         let database = directory.path().join("database.toml");
         fs::write(
             &worker,
-            "version = 1\nname = \"worker\"\n[config.network]\nmode = \"container\"\ncontainer = \"database\"\n",
+            "version = 1\nname = \"worker\"\n[deploy]\ntarget = \"system\"\n[config.network]\nmode = \"container\"\ncontainer = \"database\"\n",
         )
         .unwrap();
-        fs::write(&database, "version = 1\nname = \"database\"\n").unwrap();
+        fs::write(
+            &database,
+            "version = 1\nname = \"database\"\n[deploy]\ntarget = \"system\"\n",
+        )
+        .unwrap();
         let cli = Cli {
             toml_file: None,
             context_files: Vec::new(),
@@ -310,7 +332,7 @@ mod tests {
         let worker = directory.path().join("worker.toml");
         fs::write(
             &worker,
-            "version = 1\nname = \"worker\"\n[config.network]\nmode = \"container\"\ncontainer = \"missing\"\n",
+            "version = 1\nname = \"worker\"\n[deploy]\ntarget = \"system\"\n[config.network]\nmode = \"container\"\ncontainer = \"missing\"\n",
         )
         .unwrap();
         let cli = Cli {
@@ -331,7 +353,7 @@ mod tests {
         let invalid = directory.path().join("invalid.toml");
         fs::write(
             &worker,
-            "version = 1\nname = \"worker\"\n[config.network]\nmode = \"container\"\ncontainer = \"invalid\"\n",
+            "version = 1\nname = \"worker\"\n[deploy]\ntarget = \"system\"\n[config.network]\nmode = \"container\"\ncontainer = \"invalid\"\n",
         )
         .unwrap();
         fs::write(&invalid, "name = \"invalid\"\n").unwrap();
@@ -352,7 +374,7 @@ mod tests {
         let unsupported = directory.path().join("unsupported.toml");
         fs::write(
             &unsupported,
-            "version = 1\nname = \"unsupported\"\n[config.resources]\nmemory = \"512m\"\n",
+            "version = 1\nname = \"unsupported\"\n[deploy]\ntarget = \"system\"\n[config.resources]\nmemory = \"512m\"\n",
         )
         .unwrap();
         let cli = Cli {

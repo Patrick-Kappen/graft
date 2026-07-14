@@ -56,7 +56,7 @@ pub struct ResolvedContainer {
     /// Optional network settings rendered into Quadlet `[Container]`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub network: Option<ResolvedNetwork>,
-    /// Optional explicit non-relaxing security controls.
+    /// Concrete security defaults and explicit typed relaxations.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub security: Option<ResolvedSecurity>,
     /// Optional systemd service settings.
@@ -168,7 +168,7 @@ pub struct ResolvedContainerSettings {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResolvedFilesystem {
-    /// Optional read-only root filesystem hardening.
+    /// Concrete read-only root filesystem policy.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub read_only: Option<bool>,
     /// Optional ordered absolute paths rendered as Quadlet `Tmpfs=`.
@@ -190,14 +190,17 @@ pub struct ResolvedDevice {
     pub source: String,
 }
 
-/// Resolved explicit non-relaxing security controls.
+/// Resolved concrete security defaults and explicit typed relaxations.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResolvedSecurity {
-    /// Ordered capabilities removed from the runtime default set.
+    /// Concrete drop-all capability baseline.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub drop_capabilities: Option<Vec<String>>,
-    /// Explicit no-new-privileges hardening.
+    /// Ordered capabilities restored after dropping all defaults.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub add_capabilities: Option<Vec<String>>,
+    /// Concrete no-new-privileges policy.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub no_new_privileges: Option<bool>,
 }
@@ -684,7 +687,7 @@ fn validate_unsupported_network_intent(network: Option<&Network>) -> Result<()> 
 fn validate_unsupported_security_intent(security: Option<&Security>) -> Result<()> {
     let Some(Security {
         drop_capabilities: _,
-        add_capabilities,
+        add_capabilities: _,
         no_new_privileges: _,
         privileged,
         seccomp_profile,
@@ -700,7 +703,6 @@ fn validate_unsupported_security_intent(security: Option<&Security>) -> Result<(
         return Ok(());
     };
 
-    reject!(add_capabilities, "config.security.addCapabilities");
     reject!(privileged, "config.security.privileged");
     reject!(seccomp_profile, "config.security.seccompProfile");
     reject!(
@@ -863,7 +865,7 @@ fn resolve_internal(
             .deploy
             .as_ref()
             .and_then(|deploy| deploy.target.as_ref()),
-    );
+    )?;
     let install = resolve_install(config, deploy_target)?;
 
     Ok(ResolvedContainer {
@@ -1027,19 +1029,14 @@ fn resolve_filesystem(config: &ContainerConfig) -> Result<Option<ResolvedFilesys
         .config
         .as_ref()
         .and_then(|config| config.filesystem.as_ref());
-    let read_only = filesystem.and_then(|filesystem| filesystem.read_only);
-    if matches!(read_only, Some(false)) {
-        bail!(
-            "config.filesystem.readOnly = false is not supported; omit it until secure defaults and relaxations are defined"
-        );
-    }
+    let read_only = Some(
+        filesystem
+            .and_then(|filesystem| filesystem.read_only)
+            .unwrap_or(true),
+    );
     let tmpfs = resolve_tmpfs(filesystem)?;
     let volumes = resolve_volumes(filesystem)?;
     let devices = resolve_devices(filesystem)?;
-
-    if read_only.is_none() && tmpfs.is_none() && volumes.is_none() && devices.is_none() {
-        return Ok(None);
-    }
 
     Ok(Some(ResolvedFilesystem {
         read_only,
@@ -1083,59 +1080,55 @@ fn resolve_tmpfs(filesystem: Option<&Filesystem>) -> Result<Option<Vec<String>>>
 }
 
 fn resolve_security(config: &ContainerConfig) -> Result<Option<ResolvedSecurity>> {
-    let Some(security) = config
+    let security = config
         .config
         .as_ref()
-        .and_then(|config| config.security.as_ref())
-    else {
-        return Ok(None);
-    };
+        .and_then(|config| config.security.as_ref());
 
-    if let Some(drop_capabilities) = &security.drop_capabilities {
+    if let Some(drop_capabilities) = security.and_then(|value| value.drop_capabilities.as_ref()) {
         if drop_capabilities.is_empty() {
             bail!("config.security.dropCapabilities cannot be empty");
         }
-        if drop_capabilities.len() > 1
-            && drop_capabilities
-                .iter()
-                .any(|capability| capability == "all")
-        {
-            bail!("config.security.dropCapabilities cannot combine 'all' with other capabilities");
+        if drop_capabilities.as_slice() != ["all"] {
+            bail!(
+                "config.security.dropCapabilities must be [\"all\"]; use config.security.addCapabilities for required capabilities"
+            );
+        }
+    }
+
+    let add_capabilities = security.and_then(|value| value.add_capabilities.as_ref());
+    if let Some(add_capabilities) = add_capabilities {
+        if add_capabilities.is_empty() {
+            bail!("config.security.addCapabilities cannot be empty");
         }
 
         let mut seen = BTreeSet::new();
-        for (index, capability) in drop_capabilities.iter().enumerate() {
-            let field_name = format!("config.security.dropCapabilities[{index}]");
+        for (index, capability) in add_capabilities.iter().enumerate() {
+            let field_name = format!("config.security.addCapabilities[{index}]");
             validate_non_empty_no_control(&field_name, capability)?;
 
-            let is_canonical = capability == "all"
-                || capability.strip_prefix("CAP_").is_some_and(|name| {
-                    let mut chars = name.chars();
-                    chars.next().is_some_and(|first| first.is_ascii_uppercase())
-                        && chars
-                            .all(|ch| ch.is_ascii_uppercase() || ch.is_ascii_digit() || ch == '_')
-                });
+            let is_canonical = capability.strip_prefix("CAP_").is_some_and(|name| {
+                let mut chars = name.chars();
+                chars.next().is_some_and(|first| first.is_ascii_uppercase())
+                    && chars.all(|ch| ch.is_ascii_uppercase() || ch.is_ascii_digit() || ch == '_')
+            });
             if !is_canonical {
-                bail!("{field_name} must be 'all' or a canonical CAP_* name");
+                bail!("{field_name} must be a canonical CAP_* name");
             }
             if !seen.insert(capability) {
                 bail!("{field_name} duplicates an earlier capability");
             }
         }
     }
-    if matches!(security.no_new_privileges, Some(false)) {
-        bail!(
-            "config.security.noNewPrivileges = false is not supported; omit it until secure defaults and relaxations are defined"
-        );
-    }
-
-    if security.drop_capabilities.is_none() && security.no_new_privileges.is_none() {
-        return Ok(None);
-    }
 
     Ok(Some(ResolvedSecurity {
-        drop_capabilities: security.drop_capabilities.clone(),
-        no_new_privileges: security.no_new_privileges,
+        drop_capabilities: Some(vec!["all".to_string()]),
+        add_capabilities: add_capabilities.cloned(),
+        no_new_privileges: Some(
+            security
+                .and_then(|value| value.no_new_privileges)
+                .unwrap_or(true),
+        ),
     }))
 }
 
@@ -1725,7 +1718,7 @@ fn workload_key(config: &ContainerConfig) -> Result<WorkloadKey> {
                 .deploy
                 .as_ref()
                 .and_then(|deploy| deploy.target.as_ref()),
-        ),
+        )?,
         name: resolve_name(config)?,
     })
 }
@@ -1932,10 +1925,13 @@ fn validate_runtime_mode(runtime: Option<&Runtime>) -> Result<()> {
     }
 }
 
-fn resolve_deploy_target(target: Option<&DeployTarget>) -> ResolvedDeployTarget {
+fn resolve_deploy_target(target: Option<&DeployTarget>) -> Result<ResolvedDeployTarget> {
     match target {
-        Some(DeployTarget::User) => ResolvedDeployTarget::User,
-        Some(DeployTarget::System) | None => ResolvedDeployTarget::System,
+        Some(DeployTarget::User) => Ok(ResolvedDeployTarget::User),
+        Some(DeployTarget::System) => Ok(ResolvedDeployTarget::System),
+        None => bail!(
+            "deploy.target is required; set deploy.target = \"user\" or deploy.target = \"system\""
+        ),
     }
 }
 
@@ -2157,6 +2153,10 @@ mod tests {
         ContainerConfig {
             version: Some(SUPPORTED_VERSION),
             name: Some("dev".to_string()),
+            deploy: Some(Deploy {
+                target: Some(DeployTarget::System),
+                ..Deploy::default()
+            }),
             ..ContainerConfig::default()
         }
     }
@@ -2165,6 +2165,10 @@ mod tests {
         ContainerConfig {
             version: Some(SUPPORTED_VERSION),
             name: Some("dev".to_string()),
+            deploy: Some(Deploy {
+                target: Some(DeployTarget::System),
+                ..Deploy::default()
+            }),
             config: Some(Config {
                 runtime: Some(runtime),
                 ..Config::default()
@@ -2177,6 +2181,10 @@ mod tests {
         ContainerConfig {
             version: Some(SUPPORTED_VERSION),
             name: Some("dev".to_string()),
+            deploy: Some(Deploy {
+                target: Some(DeployTarget::System),
+                ..Deploy::default()
+            }),
             config: Some(Config {
                 container: Some(container),
                 ..Config::default()
@@ -2189,6 +2197,10 @@ mod tests {
         ContainerConfig {
             version: Some(SUPPORTED_VERSION),
             name: Some("dev".to_string()),
+            deploy: Some(Deploy {
+                target: Some(DeployTarget::System),
+                ..Deploy::default()
+            }),
             config: Some(Config {
                 filesystem: Some(filesystem),
                 ..Config::default()
@@ -2201,6 +2213,10 @@ mod tests {
         ContainerConfig {
             version: Some(SUPPORTED_VERSION),
             name: Some("dev".to_string()),
+            deploy: Some(Deploy {
+                target: Some(DeployTarget::System),
+                ..Deploy::default()
+            }),
             config: Some(Config {
                 network: Some(network),
                 ..Config::default()
@@ -2283,6 +2299,10 @@ mod tests {
         ContainerConfig {
             version: Some(SUPPORTED_VERSION),
             name: Some("dev".to_string()),
+            deploy: Some(Deploy {
+                target: Some(DeployTarget::System),
+                ..Deploy::default()
+            }),
             config: Some(Config {
                 service: Some(service),
                 ..Config::default()
@@ -2295,6 +2315,10 @@ mod tests {
         ContainerConfig {
             version: Some(SUPPORTED_VERSION),
             name: Some("dev".to_string()),
+            deploy: Some(Deploy {
+                target: Some(DeployTarget::System),
+                ..Deploy::default()
+            }),
             config: Some(Config {
                 runtime: Some(Runtime {
                     command: Some(vec!["/bin/true".to_string()]),
@@ -2308,7 +2332,10 @@ mod tests {
     }
 
     fn config_with_toml(snippet: &str) -> ContainerConfig {
-        toml::from_str(&format!("version = 1\nname = \"dev\"\n\n{snippet}\n")).unwrap()
+        toml::from_str(&format!(
+            "version = 1\nname = \"dev\"\n\n[deploy]\ntarget = \"system\"\n\n{snippet}\n"
+        ))
+        .unwrap()
     }
 
     const UNSUPPORTED_FIELD_CASES: &[(&str, &str)] = &[
@@ -2511,10 +2538,6 @@ mod tests {
             "config.network.addHost",
         ),
         (
-            "[config.security]\naddCapabilities = [\"NET_BIND_SERVICE\"]",
-            "config.security.addCapabilities",
-        ),
-        (
             "[config.security]\nprivileged = false",
             "config.security.privileged",
         ),
@@ -2700,7 +2723,6 @@ mod tests {
             "[parents]\n\
              [children]\n\
              [validation]\n\
-             [deploy]\n\
              [config]\n\
              [config.runtime]\n\
              [config.runtime.packageOps]\n\
@@ -3467,7 +3489,7 @@ mod tests {
     #[test]
     fn volumes_have_no_default() {
         let resolved = resolve(&named_config()).unwrap();
-        assert_eq!(resolved.filesystem, None);
+        assert_eq!(resolved.filesystem.unwrap().volumes, None);
     }
 
     #[test]
@@ -3479,7 +3501,7 @@ mod tests {
 
         let resolved = resolve(&config).unwrap();
 
-        assert_eq!(resolved.filesystem, None);
+        assert_eq!(resolved.filesystem.unwrap().volumes, None);
     }
 
     #[test]
@@ -3494,7 +3516,7 @@ mod tests {
         assert_eq!(
             resolved.filesystem,
             Some(ResolvedFilesystem {
-                read_only: None,
+                read_only: Some(true),
                 tmpfs: Some(vec!["/run".to_string(), "/tmp".to_string()]),
                 volumes: None,
                 devices: None,
@@ -3515,7 +3537,7 @@ mod tests {
 
         let resolved = resolve(&config).unwrap();
 
-        assert_eq!(resolved.filesystem, None);
+        assert_eq!(resolved.filesystem.unwrap().tmpfs, None);
     }
 
     #[test]
@@ -3589,7 +3611,7 @@ mod tests {
         assert_eq!(
             resolved.filesystem,
             Some(ResolvedFilesystem {
-                read_only: None,
+                read_only: Some(true),
                 tmpfs: None,
                 volumes: Some(vec![ResolvedFilesystemVolume {
                     source: None,
@@ -3622,7 +3644,7 @@ mod tests {
         assert_eq!(
             resolved.filesystem,
             Some(ResolvedFilesystem {
-                read_only: None,
+                read_only: Some(true),
                 tmpfs: None,
                 volumes: Some(vec![ResolvedFilesystemVolume {
                     source: Some("/host/data".to_string()),
@@ -3650,7 +3672,7 @@ mod tests {
         assert_eq!(
             resolved.filesystem,
             Some(ResolvedFilesystem {
-                read_only: None,
+                read_only: Some(true),
                 tmpfs: None,
                 volumes: Some(vec![ResolvedFilesystemVolume {
                     source: Some("/host/config".to_string()),
@@ -3888,7 +3910,7 @@ mod tests {
 
         let resolved = resolve(&config).unwrap();
 
-        assert_eq!(resolved.filesystem, None);
+        assert_eq!(resolved.filesystem.unwrap().devices, None);
     }
 
     #[test]
@@ -3914,7 +3936,7 @@ mod tests {
         assert_eq!(
             resolved.filesystem,
             Some(ResolvedFilesystem {
-                read_only: None,
+                read_only: Some(true),
                 tmpfs: None,
                 volumes: None,
                 devices: Some(vec![
@@ -4121,11 +4143,18 @@ mod tests {
     }
 
     #[test]
-    fn hardening_controls_have_no_defaults() {
+    fn minimal_config_receives_secure_defaults() {
         let resolved = resolve(&named_config()).unwrap();
 
-        assert_eq!(resolved.security, None);
-        assert_eq!(resolved.filesystem, None);
+        assert_eq!(resolved.filesystem.unwrap().read_only, Some(true));
+        assert_eq!(
+            resolved.security,
+            Some(ResolvedSecurity {
+                drop_capabilities: Some(vec!["all".to_string()]),
+                add_capabilities: None,
+                no_new_privileges: Some(true),
+            })
+        );
     }
 
     #[test]
@@ -4150,6 +4179,7 @@ mod tests {
             resolved.security,
             Some(ResolvedSecurity {
                 drop_capabilities: Some(vec!["all".to_string()]),
+                add_capabilities: None,
                 no_new_privileges: Some(true),
             })
         );
@@ -4160,10 +4190,10 @@ mod tests {
     }
 
     #[test]
-    fn capability_drop_order_is_preserved() {
+    fn capability_addition_order_is_preserved() {
         let config = config_with_toml(
             "[config.security]\n\
-             dropCapabilities = [\"CAP_NET_BIND_SERVICE\", \"CAP_CHOWN\"]",
+             addCapabilities = [\"CAP_NET_BIND_SERVICE\", \"CAP_CHOWN\"]",
         );
 
         let resolved = resolve(&config).unwrap();
@@ -4171,35 +4201,27 @@ mod tests {
         assert_eq!(
             resolved.security,
             Some(ResolvedSecurity {
-                drop_capabilities: Some(vec![
+                drop_capabilities: Some(vec!["all".to_string()]),
+                add_capabilities: Some(vec![
                     "CAP_NET_BIND_SERVICE".to_string(),
                     "CAP_CHOWN".to_string(),
                 ]),
-                no_new_privileges: None,
+                no_new_privileges: Some(true),
             })
         );
     }
 
     #[test]
-    fn false_hardening_booleans_return_relaxation_errors() {
-        let cases = [
-            (
-                "[config.filesystem]\nreadOnly = false",
-                "config.filesystem.readOnly = false is not supported; omit it until secure defaults and relaxations are defined",
-            ),
-            (
-                "[config.security]\nnoNewPrivileges = false",
-                "config.security.noNewPrivileges = false is not supported; omit it until secure defaults and relaxations are defined",
-            ),
-        ];
+    fn explicit_false_values_resolve_as_typed_relaxations() {
+        let config = config_with_toml(
+            "[config.filesystem]\nreadOnly = false\n\n\
+             [config.security]\nnoNewPrivileges = false",
+        );
 
-        for (snippet, expected) in cases {
-            let config = config_with_toml(snippet);
+        let resolved = resolve(&config).unwrap();
 
-            let error = resolve(&config).unwrap_err();
-
-            assert_eq!(error.to_string(), expected);
-        }
+        assert_eq!(resolved.filesystem.unwrap().read_only, Some(false));
+        assert_eq!(resolved.security.unwrap().no_new_privileges, Some(false));
     }
 
     #[test]
@@ -4207,38 +4229,50 @@ mod tests {
         let cases = [
             ("[]", "config.security.dropCapabilities cannot be empty"),
             (
-                "[\"\"]",
-                "config.security.dropCapabilities[0] cannot be empty",
-            ),
-            (
-                "[\"cap_net_admin\"]",
-                "config.security.dropCapabilities[0] must be 'all' or a canonical CAP_* name",
-            ),
-            (
-                "[\"CAP_\"]",
-                "config.security.dropCapabilities[0] must be 'all' or a canonical CAP_* name",
-            ),
-            (
-                "[\"CAP_NET-ADMIN\"]",
-                "config.security.dropCapabilities[0] must be 'all' or a canonical CAP_* name",
-            ),
-            (
-                "[\"CAP_NET\\nADMIN\"]",
-                "config.security.dropCapabilities[0] cannot contain control characters",
+                "[\"CAP_CHOWN\"]",
+                "config.security.dropCapabilities must be [\"all\"]; use config.security.addCapabilities for required capabilities",
             ),
             (
                 "[\"all\", \"CAP_CHOWN\"]",
-                "config.security.dropCapabilities cannot combine 'all' with other capabilities",
-            ),
-            (
-                "[\"CAP_CHOWN\", \"CAP_CHOWN\"]",
-                "config.security.dropCapabilities[1] duplicates an earlier capability",
+                "config.security.dropCapabilities must be [\"all\"]; use config.security.addCapabilities for required capabilities",
             ),
         ];
 
         for (entries, expected) in cases {
             let config =
                 config_with_toml(&format!("[config.security]\ndropCapabilities = {entries}"));
+
+            let error = resolve(&config).unwrap_err();
+
+            assert_eq!(
+                error.to_string(),
+                expected,
+                "unexpected diagnostic for {entries}"
+            );
+        }
+    }
+
+    #[test]
+    fn invalid_capability_additions_return_specific_errors() {
+        let cases = [
+            ("[]", "config.security.addCapabilities cannot be empty"),
+            (
+                "[\"all\"]",
+                "config.security.addCapabilities[0] must be a canonical CAP_* name",
+            ),
+            (
+                "[\"cap_chown\"]",
+                "config.security.addCapabilities[0] must be a canonical CAP_* name",
+            ),
+            (
+                "[\"CAP_CHOWN\", \"CAP_CHOWN\"]",
+                "config.security.addCapabilities[1] duplicates an earlier capability",
+            ),
+        ];
+
+        for (entries, expected) in cases {
+            let config =
+                config_with_toml(&format!("[config.security]\naddCapabilities = {entries}"));
 
             let error = resolve(&config).unwrap_err();
 
@@ -5484,6 +5518,10 @@ mod tests {
             let config = ContainerConfig {
                 version: Some(SUPPORTED_VERSION),
                 name: Some("dev".to_string()),
+                deploy: Some(Deploy {
+                    target: Some(DeployTarget::System),
+                    ..Deploy::default()
+                }),
                 config: Some(Config {
                     service: Some(Service {
                         lifecycle: Some(ServiceLifecycle::LongRunning),
@@ -5532,6 +5570,7 @@ mod tests {
             name: Some("dev".to_string()),
             deploy: Some(Deploy {
                 enable: Some(false),
+                target: Some(DeployTarget::System),
                 ..Deploy::default()
             }),
             ..ContainerConfig::default()
@@ -5545,12 +5584,6 @@ mod tests {
     #[test]
     fn startup_activation_maps_to_fixed_install_targets() {
         for (target, expected_deploy_target, expected_install_target, expected_json) in [
-            (
-                None,
-                ResolvedDeployTarget::System,
-                ResolvedInstallTarget::MultiUser,
-                "multi-user.target",
-            ),
             (
                 Some(DeployTarget::System),
                 ResolvedDeployTarget::System,
@@ -5596,8 +5629,8 @@ mod tests {
             name: Some("dev".to_string()),
             deploy: Some(Deploy {
                 enable: Some(false),
+                target: Some(DeployTarget::System),
                 activation: Some(DeployActivation::Startup),
-                ..Deploy::default()
             }),
             ..ContainerConfig::default()
         };
@@ -5632,6 +5665,7 @@ mod tests {
                 })
             };
             config.deploy = Some(Deploy {
+                target: Some(DeployTarget::System),
                 activation: Some(DeployActivation::Startup),
                 ..Deploy::default()
             });
@@ -5674,9 +5708,16 @@ mod tests {
     }
 
     #[test]
-    fn deploy_target_defaults_to_system() {
-        let resolved = resolve(&named_config()).unwrap();
-        assert_eq!(resolved.deploy.target, ResolvedDeployTarget::System);
+    fn missing_deploy_target_returns_migration_error() {
+        let mut config = named_config();
+        config.deploy = None;
+
+        let error = resolve(&config).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "deploy.target is required; set deploy.target = \"user\" or deploy.target = \"system\""
+        );
     }
 
     #[test]
@@ -5733,9 +5774,13 @@ mod tests {
 
         assert_eq!(json.get("install"), None);
         assert_eq!(json.get("container"), None);
-        assert_eq!(json.get("filesystem"), None);
+        assert_eq!(json["filesystem"]["readOnly"], true);
         assert_eq!(json.get("network"), None);
-        assert_eq!(json.get("security"), None);
+        assert_eq!(
+            json["security"]["dropCapabilities"],
+            serde_json::json!(["all"])
+        );
+        assert_eq!(json["security"]["noNewPrivileges"], true);
         assert_eq!(json.get("service"), None);
         assert_eq!(json["deploy"].get("enable"), None);
     }

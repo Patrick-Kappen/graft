@@ -1,6 +1,9 @@
 version = 1
 name = "graft-example"
 
+[deploy]
+target = "system"
+
 [config.runtime]
 packages = ["bash"]
 command = ["bash", "-c", "echo graft-example-ready; exec /bin/graft-pause"]

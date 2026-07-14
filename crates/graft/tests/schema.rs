@@ -101,7 +101,10 @@ fn schema_exposes_only_supported_fields() {
         ("FilesystemVolume", &["mode", "source", "target"][..]),
         ("Network", &["container", "mode", "publish"][..]),
         ("Runtime", &["command", "mode", "packages"][..]),
-        ("Security", &["dropCapabilities", "noNewPrivileges"][..]),
+        (
+            "Security",
+            &["addCapabilities", "dropCapabilities", "noNewPrivileges"][..],
+        ),
         (
             "Service",
             &[
@@ -116,10 +119,10 @@ fn schema_exposes_only_supported_fields() {
     ];
 
     for (definition, expected) in expected_properties {
-        let value = if definition == "root" {
-            &schema
-        } else {
-            &schema["$defs"][definition]
+        let value = match definition {
+            "root" => &schema,
+            "Deploy" => &schema["properties"]["deploy"],
+            _ => &schema["$defs"][definition],
         };
         let properties = value["properties"]
             .as_object()
@@ -162,7 +165,7 @@ fn schema_exposes_only_supported_fields() {
 }
 
 #[test]
-fn schema_constrains_hardening_to_non_relaxing_values() {
+fn schema_exposes_secure_defaults_and_typed_relaxations() {
     let schema: Value =
         serde_json::from_str(TRACKED_SCHEMA).expect("tracked Graft schema should be valid JSON");
 
@@ -171,15 +174,31 @@ fn schema_constrains_hardening_to_non_relaxing_values() {
         1
     );
     assert_eq!(
+        schema["$defs"]["Security"]["properties"]["dropCapabilities"]["maxItems"],
+        1
+    );
+    assert_eq!(
         schema["$defs"]["Security"]["properties"]["dropCapabilities"]["items"]["pattern"],
-        "^(all|CAP_[A-Z][A-Z0-9_]*)$"
+        "^all$"
     );
     assert_eq!(
-        schema["$defs"]["Security"]["properties"]["noNewPrivileges"]["const"],
-        true
+        schema["$defs"]["Security"]["properties"]["addCapabilities"]["items"]["pattern"],
+        "^CAP_[A-Z][A-Z0-9_]*$"
     );
     assert_eq!(
-        schema["$defs"]["Filesystem"]["properties"]["readOnly"]["const"],
+        schema["$defs"]["Security"]["properties"]["addCapabilities"]["uniqueItems"],
         true
     );
+    assert!(schema["$defs"]["Security"]["properties"]["noNewPrivileges"]
+        .get("const")
+        .is_none());
+    assert!(schema["$defs"]["Filesystem"]["properties"]["readOnly"]
+        .get("const")
+        .is_none());
+    assert!(schema["required"]
+        .as_array()
+        .is_some_and(|required| required.iter().any(|field| field == "deploy")));
+    assert!(schema["properties"]["deploy"]["required"]
+        .as_array()
+        .is_some_and(|required| required.iter().any(|field| field == "target")));
 }

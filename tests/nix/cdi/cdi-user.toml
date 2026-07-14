@@ -5,7 +5,7 @@ name = "nix-check-cdi-user"
 target = "user"
 
 [config.filesystem]
-readOnly = true
+readOnly = false
 
 [[config.filesystem.devices]]
 source = "nvidia.com/gpu=all"
@@ -14,5 +14,6 @@ source = "nvidia.com/gpu=all"
 source = "vendor.example/device_class=device-1.2"
 
 [config.security]
-dropCapabilities = ["CAP_NET_BIND_SERVICE", "CAP_CHOWN"]
-noNewPrivileges = true
+dropCapabilities = ["all"]
+addCapabilities = ["CAP_NET_BIND_SERVICE", "CAP_CHOWN"]
+noNewPrivileges = false

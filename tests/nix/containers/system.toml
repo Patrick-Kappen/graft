@@ -2,6 +2,7 @@ version = 1
 name = "nix-check-system"
 
 [deploy]
+target = "system"
 activation = "startup"
 
 [config.container]

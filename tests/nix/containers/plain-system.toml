@@ -1,2 +1,5 @@
 version = 1
 name = "nix-check-plain-system"
+
+[deploy]
+target = "system"
