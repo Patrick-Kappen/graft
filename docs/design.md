@@ -44,6 +44,9 @@ Example:
 version = 1
 name = "node-dev"
 
+[deploy]
+target = "user"
+
 [config.runtime]
 packages = ["nodejs"]
 ```
@@ -153,7 +156,7 @@ The CLI may only add defaults that belong to Graft semantics.
 | `deploy.target` | required explicit `system` or `user`; no authority default |
 | `config.runtime.mode` | currently only `rootfs-store` |
 | supported container fields | no defaults; include only if user sets them |
-| environment, publish, volumes, CDI devices | no defaults; preserve deterministic ordering rules |
+| environment, published ports, typed mounts, CDI devices | no hidden entries; preserve documented defaults and ordering rules |
 | read-only rootfs, capability policy, and no-new-privileges | concrete secure defaults; typed relaxations remain explicit |
 | `dependencies` | no defaults; typed relations resolve to sorted concrete source-unit or external-unit identities |
 | `config.network.mode` | absent preserves Quadlet's target-specific default; `none` and typed container references are supported |

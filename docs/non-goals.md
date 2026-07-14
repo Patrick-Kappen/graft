@@ -101,7 +101,6 @@ host commands; those remain governed by the
 Current examples:
 
 - `PublishPort=` values
-- `Volume=` strings assembled from TOML parts
 - systemd service timing values such as `RestartSec=` and `TimeoutStartSec=`
 
 Line-safe passthrough means:
