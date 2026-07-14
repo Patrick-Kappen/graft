@@ -48,6 +48,9 @@ TOML is user intent only. It is not Quadlet and it is not Nix.
 version = 1
 name = "node-dev"
 
+[deploy]
+target = "user"
+
 [config.runtime]
 packages = ["nodejs"]
 ```
@@ -176,7 +179,8 @@ WorkingDir=/workspace
 Environment="GREETING=hello world"
 EnvironmentFile="/run/graft/node-dev.env"
 PublishPort=127.0.0.1:8080:8080
-Volume=/home/me/project:/workspace
+Volume=/home/me/project:/workspace:ro,bind
+Tmpfs=/tmp:rw,noexec,nosuid,nodev,size=64M
 ReadOnly=true
 DropCapability=all
 NoNewPrivileges=true

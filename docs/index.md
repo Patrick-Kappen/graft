@@ -1,113 +1,89 @@
-# Graft
+# Graft manual
 
-<p align="center">
-  <img src="assets/graft-banner.png" alt="Graft turns TOML workload intent into a Nix-store rootfs, Podman Quadlet unit, and systemd service">
-</p>
+Graft turns typed TOML workload intent into Nix-store rootfs containers managed
+by Podman Quadlet and systemd. This manual documents the current alpha contract,
+its security boundaries, and the difference between implemented behavior and
+future direction.
 
-**Graft turns small TOML workload definitions into Nix-store rootfs containers
-managed by Podman Quadlet and systemd.** The same typed intent path supports
-NixOS system containers and Home Manager user containers.
+## Choose a quickstart
 
-> **Early MVP:** the current `rootfs-store` path works for system/rootful and
-> Home Manager user-manager workloads. Podman is rootless only for a non-root
-> account. Lifecycle commands, secure defaults, temporary agents, and
-> multi-host control remain roadmap work.
+Start with the manager that should own the generated service:
 
-## Start here
+- [NixOS quickstart](quickstart/nixos.md) — a system-managed, rootful Podman
+  container;
+- [Home Manager quickstart](quickstart/home-manager.md) — a user-managed
+  container that is rootless when the Home Manager account is non-root.
 
-Choose the scope that owns the generated systemd service:
+Both quickstarts use tracked, schema-validated examples and cover prerequisites,
+flake wiring, activation, manual startup, inspection, and removal.
 
-- [NixOS system-container quickstart](quickstart/nixos.md) — system manager,
-  rootful Podman;
-- [Home Manager user-container quickstart](quickstart/home-manager.md) —
-  non-root user manager and rootless Podman.
+## What Graft does today
 
-Both paths include flake wiring, host prerequisites, a public package-only TOML
-workload, Git tracking, activation, status, logs, stop, cleanup, expected
-Quadlet output, and automated drift validation.
-
-## What the current path does
-
-A workload declares package and command intent:
-
-```toml
-version = 1
-name = "graft-example"
-
-[config.runtime]
-packages = ["bash"]
-command = ["bash", "-c", "echo graft-example-ready; exec /bin/graft-pause"]
-```
-
-Graft resolves that intent and Nix materialises it:
+The current `rootfs-store` path is:
 
 ```text
-TOML
-  → deterministic resolved JSON
-  → Nix-store rootfs
-  → Quadlet .container
+TOML intent
+  → validated resolved JSON
+  → NixOS or Home Manager materialisation
+  → Nix-store rootfs + Quadlet .container file
   → systemd service
   → Podman container
 ```
 
-The generated service uses a Nix store rootfs and logs:
+The implemented contract includes:
 
-```text
-graft-example-ready
-```
+- explicit `system` or `user` targets;
+- Nix-provided packages and argv commands;
+- typed lifecycle, startup, dependency, network, filesystem, CDI, and selected
+  container settings;
+- a read-only rootfs, dropped capabilities, and no-new-privileges by default;
+- explicit typed relaxations where the current contract permits them;
+- no implicit autostart or hidden restart policy.
 
-The [Overview](overview.md), [Design](design.md), and
-[Quadlet output](quadlet.md) chapters explain each boundary.
+Graft currently exposes the complete host `/nix/store` read-only so rootfs
+symlinks resolve. Replacing that mount with mandatory per-workload closure
+exposure is an approved design, not yet implemented. Containers share the host
+kernel and are not a VM-equivalent isolation boundary.
 
-## Host requirements
+## Find the right chapter
 
-The current path requires Linux, Nix, systemd, and Podman with Quadlet support.
-Graft materialises workload output; it does not silently enable Podman, rootless
-overlay support, user linger, firewall/DNS policy, accounts, or other host
-configuration.
+### Configure and operate a workload
 
-NixOS owns system/rootful materialisation. Home Manager owns the current
-account's user-manager materialisation. Podman is rootless only for a non-root
-account; a root-owned user manager retains root authority, and Graft does not
-enforce the UID. Rootless under a non-root account is the preferred direction
-for unattended server workloads, but containers still share the host kernel and
-are not a VM-equivalent isolation boundary. Review the current
-[Threat model and trust boundaries](threat-model.md) before selecting a target
-or config source.
+Use the [Configuration reference](reference.md) for accepted TOML. The chapters
+on [lifecycle](lifecycle.md), [startup](activation.md),
+[dependencies](dependencies.md), [networking](networking.md),
+[filesystems](filesystem-policy.md), [CDI](cdi.md), and
+[hardening](hardening.md) explain the corresponding typed contracts.
 
-## Current, planned, and vision
+### Understand the pipeline
 
-| Horizon | Status |
-| --- | --- |
-| **Available now** | Rootfs-store materialisation for NixOS and Home Manager, selected typed container fields, secure defaults and typed relaxations, typed dependencies, and manual or explicit startup lifecycle. |
-| **Active roadmap** | Contract hardening, typed timers, lifecycle CLI, secure rootless policy, temporary instances, deterministic merging, and explicit multi-host deployment. |
-| **Long-term vision** | Portable repository environments with deliberate local, remote, or temporary placement and possible additional artifact/control integrations. |
+Read the [Overview](overview.md) for the conceptual flow, then
+[Architecture and responsibilities](design.md) for layer ownership and
+[Generated Quadlet output](quadlet.md) for materialisation details.
 
-Only **Available now** is implemented. Read [Roadmap](roadmap.md) for active
-delivery and [Long-term vision](vision.md) for future direction that has no
-promised syntax or schedule.
+### Evaluate security and availability
 
-## Use the manual
+The [Threat model](threat-model.md) states current guarantees, trust boundaries,
+and residual risks. [Capability policy](capability-policy.md) classifies
+first-class, dangerous, and forbidden authority. [Capability status](capabilities.md)
+is the authoritative current/planned/deferred matrix.
 
-- **Configure workloads:** [Reference](reference.md),
-  [Typed workload dependencies](dependencies.md),
-  [Container Device Interface references](cdi.md),
-  [Container hardening](hardening.md),
-  [Capability status](capabilities.md), and the generated supported schema at
-  `crates/graft/schema/graft-v1.schema.json`
-- **Understand output:** [Overview](overview.md), [Design](design.md), and
-  [Quadlet output](quadlet.md)
-- **Understand boundaries:** [Threat model and trust boundaries](threat-model.md),
-  [Capability policy](capability-policy.md), and
-  [Non-goals and deferred scope](non-goals.md)
-- **Track direction:** [Roadmap](roadmap.md) and [Long-term vision](vision.md)
-- **Contribute:** [Repository contribution entry point](https://github.com/Patrick-Kappen/graft/contribute)
-  and [Development](development.md)
-- **Security:** open the [Repository security page](https://github.com/Patrick-Kappen/graft/security)
-  and choose **Report a vulnerability** for private reporting
+### Understand project direction
 
-The threat model documents current guarantees and accepted residual risks;
-secure defaults remain active work. See
-[Security hardening](roadmap.md#security-hardening) before treating an alpha
-workload as a strong isolation boundary. Never disclose a suspected
-vulnerability or secret in a public issue.
+[Roadmap](roadmap.md) describes active delivery. [Long-term vision](vision.md)
+is non-committed direction. [Non-goals](non-goals.md) records deliberate current
+exclusions. The [closure-scoped store design](closure-scoped-store.md) is an
+approved future implementation contract and is labelled accordingly.
+
+## Host responsibility
+
+Graft materialises workload output. It does not silently configure Podman,
+rootless overlay support, systemd user linger, accounts, firewall or DNS policy,
+or other host prerequisites. Review the relevant quickstart and threat model
+before selecting a target or trusting a configuration source.
+
+For private vulnerability reporting, use the repository's
+[security page](https://github.com/Patrick-Kappen/graft/security) and select
+**Report a vulnerability**. Contributors should start with
+[Development](development.md) and the repository
+[contribution guide](https://github.com/Patrick-Kappen/graft/blob/main/CONTRIBUTING.md).

@@ -1,25 +1,43 @@
 # Summary
 
-- [Graft](index.md)
-- [Overview](overview.md)
+[Introduction](index.md)
+
+# Start here
+
 - [NixOS quickstart](quickstart/nixos.md)
 - [Home Manager quickstart](quickstart/home-manager.md)
-- [Long-term vision](vision.md)
-- [Design](design.md)
+
+# Using Graft
+
+- [Configuration reference](reference.md)
+- [Workload lifecycle](lifecycle.md)
+- [Startup activation](activation.md)
+- [Workload dependencies](dependencies.md)
+- [Container networking](networking.md)
+- [Filesystems and mounts](filesystem-policy.md)
+- [CDI resource references](cdi.md)
+- [Container hardening](hardening.md)
+
+# Understanding Graft
+
+- [Overview](overview.md)
+- [Architecture and responsibilities](design.md)
+- [Generated Quadlet output](quadlet.md)
+
+# Security and trust
+
 - [Threat model and trust boundaries](threat-model.md)
 - [Capability policy](capability-policy.md)
-- [Workload lifecycle semantics](lifecycle.md)
-- [Workload startup activation](activation.md)
-- [Typed workload dependencies](dependencies.md)
-- [Container network intent](networking.md)
-- [Container Device Interface references](cdi.md)
-- [Container hardening](hardening.md)
-- [Secure target defaults design](secure-defaults.md)
-- [Filesystem and mount policy](filesystem-policy.md)
-- [Closure-scoped Nix store exposure](closure-scoped-store.md)
-- [Quadlet output](quadlet.md)
-- [Roadmap](roadmap.md)
-- [Non-goals and deferred scope](non-goals.md)
-- [Reference](reference.md)
 - [Capability status](capabilities.md)
+- [Secure-default design record](secure-defaults.md)
+
+# Project direction
+
+- [Roadmap](roadmap.md)
+- [Long-term vision](vision.md)
+- [Non-goals and deferred scope](non-goals.md)
+- [Approved closure-scoped store design](closure-scoped-store.md)
+
+# Contributing
+
 - [Development](development.md)
