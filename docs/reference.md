@@ -177,8 +177,11 @@ another capability fail resolution. Graft validates capability-name syntax but
 does not inspect whether the host runtime recognizes a particular canonical
 name.
 
-Graft does not yet apply implicit secure defaults. With the tested upstream
-`ReadOnlyTmpfs=true` default, a read-only root filesystem still receives
+Graft does not yet apply implicit secure defaults. The approved
+[secure target defaults design](secure-defaults.md) is a future breaking
+migration and does not change the current field table until #163 is
+implemented. With the tested upstream `ReadOnlyTmpfs=true` default, a read-only
+root filesystem still receives
 read-write tmpfs mounts at `/dev`, `/dev/shm`, `/run`, `/tmp`, and `/var/tmp`;
 mountpoint modes and dropped capabilities can still deny process writes.
 Explicit tmpfs mounts, volumes, and host CDI specs can also introduce writable

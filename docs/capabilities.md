@@ -128,7 +128,7 @@ yet.
 | `config.network.dns`, `dnsOption`, `dnsSearch`, and `addHost` | Field-specific resolver error | Planned network Phase B: [#193] |
 | `config.networks`, including nested labels and raw maps | Field-specific resolver error | Planned typed `.network` resources: [#147] |
 | `config.volumes`, including nested labels and raw maps | Field-specific resolver error | Planned typed `.volume` resources: [#148] |
-| `config.security.addCapabilities`, `privileged`, `seccompProfile`, `securityLabelDisable`, `securityLabelFileType`, `securityLabelLevel`, `securityLabelNested`, `securityLabelType`, `securityOpt`, and `userns` | Field-specific resolver error | Current boundary: [Threat model](threat-model.md); classification: [Capability policy](capability-policy.md); defaults and remaining controls: [#139] and [#163] |
+| `config.security.addCapabilities`, `privileged`, `seccompProfile`, `securityLabelDisable`, `securityLabelFileType`, `securityLabelLevel`, `securityLabelNested`, `securityLabelType`, `securityOpt`, and `userns` | Field-specific resolver error | Typed canonical `addCapabilities` is approved by the [secure defaults design](secure-defaults.md) but remains unavailable until [#163]; the other fields retain their documented deferred or forbidden boundaries |
 | `config.resources.*` | Field-specific resolver error | Planned limits: [#145] |
 | `config.secrets` | Field-specific resolver error | Planned credential pipeline: [#143] and [#166] |
 | `config.workspace.*`, `config.home.*`, and `config.attach.*` | Field-specific resolver error | Deferred workspace/instance design: [#151], [#153], and [#160] |
@@ -145,14 +145,14 @@ fails closed.
 
 | Capability | Current input result | Class | Availability and owner |
 | --- | --- | --- | --- |
-| Explicit capability drops, no-new-privileges, and read-only rootfs | Non-relaxing typed values are accepted and rendered only when configured; no secure defaults or `false` relaxation values exist yet | First-class | Current through partial [#163]; defaults remain in [#139] and [#163] |
+| Explicit capability drops, no-new-privileges, and read-only rootfs | Non-relaxing typed values are accepted and rendered only when configured; no secure defaults or `false` relaxation values exist yet | First-class | Current through partial [#163]; concrete defaults and typed opt-outs are approved in the [secure defaults design](secure-defaults.md) but not implemented |
 | Qualified CDI resource name without remapping or permissions | Colon-free qualified `source` is accepted, ordered, and rendered as `AddDevice=`; host registry/spec is not inspected | First-class | Current through [#203] |
 | Direct host devices, device directories, target remapping, and permissions | Direct paths fail source validation; parser-reserved `target` and `permissions` return indexed field errors | Dangerous | Deferred to [#142] and [#164] |
 | Host network namespace sharing | Unsupported `config.network.mode` value | Dangerous | Planned in [#193] |
 | PID, IPC, UTS, user, or cgroup namespace sharing | Unsupported enum, unknown field, or field-specific error | Dangerous | Deferred until namespace-specific intent and target rules have an approved implementation issue |
 | `privileged` | Field-specific error | Dangerous | Deferred; [#163] keeps unsupported privileged intent rejected |
-| Capability additions and unconfined seccomp/labels | Field-specific error | Dangerous | Policy in [#139], remaining controls in [#163] |
-| Automatic per-container user namespaces | Field-specific error | First-class | Planned in [#139] and [#141] |
+| Capability additions and unconfined seccomp/labels | Field-specific error | Dangerous | Canonical capability additions are approved for the drop-all baseline in [#163]; unconfined seccomp/labels remain deferred and unavailable |
+| Automatic per-container user namespaces | Field-specific error | First-class | Deferred to [#140] and [#141]; the secure-defaults phase preserves runtime behavior |
 | Custom UID/GID maps and subordinate-ID selection | Field-specific error | Dangerous | Deferred within [#140] and [#141] |
 | Host-path, sensitive-source, or writable-host mounts | Literal `config.filesystem.volumes` parts are delimiter- and line-safe but have no semantic source/path/mode, existence, or target-overlap policy; omitting `mode = "ro"` on a source-backed volume can select an upstream writable default | Dangerous | Current legacy exception to explicit-dangerous-intent policy; [#142] and [#163] must make writable authority explicit or reject it with migration diagnostics |
 | Host environment-file path references | One ordered non-empty, control-free path value is accepted per entry; Quadlet resolves relative paths against the source-unit directory | Dangerous | Current explicit host crossing without traversal, symlink, existence, ownership, permission, lifecycle, or disclosure attestation; typed credentials planned in [#143] and [#166] |
@@ -204,7 +204,6 @@ Graft's tests actually exercise.
 
 [#107]: https://github.com/Patrick-Kappen/graft/issues/107
 [#129]: https://github.com/Patrick-Kappen/graft/issues/129
-[#139]: https://github.com/Patrick-Kappen/graft/issues/139
 [#140]: https://github.com/Patrick-Kappen/graft/issues/140
 [#141]: https://github.com/Patrick-Kappen/graft/issues/141
 [#142]: https://github.com/Patrick-Kappen/graft/issues/142

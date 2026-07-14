@@ -14,10 +14,12 @@ noNewPrivileges = true
 
 These controls are optional. Graft does not yet apply implicit security
 defaults: omitting a field renders no corresponding Quadlet key and preserves
-the tested Podman/Quadlet default. Secure target-specific defaults and explicit
-relaxation policy remain in
-[#139](https://github.com/Patrick-Kappen/graft/issues/139) and the remaining
-scope of [#163](https://github.com/Patrick-Kappen/graft/issues/163).
+the tested Podman/Quadlet default. The approved
+[secure target defaults design](secure-defaults.md) will replace that behavior
+through the remaining
+[#163](https://github.com/Patrick-Kappen/graft/issues/163) implementation. Until
+that implementation lands, the current schema and behavior on this page remain
+authoritative.
 
 ## Supported controls
 
@@ -27,8 +29,9 @@ scope of [#163](https://github.com/Patrick-Kappen/graft/issues/163).
 | `config.security.dropCapabilities` | Non-empty ordered list containing either `all` alone or canonical `CAP_*` names | Removes capabilities from Podman's default container capability set. |
 | `config.security.noNewPrivileges` | `true` only | Prevents container processes from gaining privileges through mechanisms such as set-user-ID binaries and file capabilities. |
 
-`false` is deliberately unavailable for the boolean controls. Until secure
-defaults define what a relaxation means, omit the field instead. Capability
+`false` is deliberately unavailable for the boolean controls. The approved
+design defines future explicit relaxations, but until #163 implements them,
+omit the field instead. Capability
 names must match `CAP_[A-Z][A-Z0-9_]*`; duplicates and combining `all` with
 another entry fail resolution. Graft validates the syntax but does not determine
 whether the selected host kernel and runtime recognize a particular capability
@@ -91,5 +94,8 @@ change the target's trust boundary.
 
 Capability additions, privileged mode, security-label changes, seccomp profile
 selection, raw security options, and user-namespace policy remain unavailable
-and fail closed. See the [Capability policy](capability-policy.md) and
-[Threat model](threat-model.md) for their classifications and residual risks.
+and fail closed. The future secure baseline permits only typed capability
+additions after dropping all defaults; it does not authorize the other fields.
+See the [Secure target defaults design](secure-defaults.md),
+[Capability policy](capability-policy.md), and [Threat model](threat-model.md)
+for their classifications and residual risks.

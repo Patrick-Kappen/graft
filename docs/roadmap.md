@@ -171,11 +171,12 @@ Current hardening is deliberately explicit and non-relaxing:
 - no-new-privileges
 - a read-only container root filesystem
 
-Omission preserves tested upstream defaults; target-specific secure defaults
-and relaxation policy remain in [#139](https://github.com/Patrick-Kappen/graft/issues/139)
-and the remaining scope of
-[#163](https://github.com/Patrick-Kappen/graft/issues/163). See
-[Explicit container hardening](hardening.md).
+Omission currently preserves tested upstream defaults. The approved
+[secure target defaults design](secure-defaults.md) defines the breaking
+explicit-target migration, concrete shared baseline, and typed relaxations for
+the remaining
+[#163](https://github.com/Patrick-Kappen/graft/issues/163) implementation. See
+[Explicit container hardening](hardening.md) for the exact current boundary.
 
 Planned hardening:
 
