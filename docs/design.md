@@ -22,7 +22,7 @@ is defined separately in [Workload startup activation](activation.md). The
 approved typed namespace, shared-container reference, and network security
 boundaries are defined in [Container network intent](networking.md). Qualified
 host-managed resource references are defined in
-[Container Device Interface references](cdi.md). Current non-relaxing process
+[Container Device Interface references](cdi.md). Current process
 and rootfs controls are defined in [Explicit container hardening](hardening.md).
 Security assumptions, target authority, and current invariant evidence are
 defined in [Threat model and trust boundaries](threat-model.md). The boundary
@@ -151,7 +151,7 @@ The CLI may only add defaults that belong to Graft semantics.
 | `config.runtime.mode` | currently only `rootfs-store` |
 | supported container fields | no defaults; include only if user sets them |
 | environment, publish, volumes, CDI devices | no defaults; preserve deterministic ordering rules |
-| explicit capability drops, no-new-privileges, and read-only rootfs | no defaults; only non-relaxing values; include only when configured |
+| read-only rootfs, capability policy, and no-new-privileges | concrete secure defaults; typed relaxations remain explicit |
 | `dependencies` | no defaults; typed relations resolve to sorted concrete source-unit or external-unit identities |
 | `config.network.mode` | absent preserves Quadlet's target-specific default; `none` and typed container references are supported |
 | `config.service.lifecycle` | absent means Quadlet's long-running notify default; explicit intent resolves to typed service fields |

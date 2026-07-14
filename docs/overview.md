@@ -70,12 +70,12 @@ Current CLI rules:
 - use `/bin/graft-pause` when an implicit or long-running lifecycle has no
   command; require an explicit command for `job` and `setup`
 - preserve user commands exactly
-- default `deploy.target` to `system`
+- require explicit `deploy.target = "system"` or `"user"`
 - support only `rootfs-store` today
-- include supported container, environment, filesystem, network, security, and
-  service fields only when explicitly set
-- validate explicit non-relaxing capability-drop, no-new-privileges, and
-  read-only-rootfs intent without adding hidden defaults
+- include supported container, environment, network, and service fields only
+  when explicitly set
+- resolve read-only rootfs, drop-all capabilities, and no-new-privileges as
+  concrete defaults while preserving typed explicit relaxations
 - validate colon-free qualified CDI resource names while leaving host registry
   policy to Podman and the operator
 - resolve typed workload dependencies through the explicit source set and

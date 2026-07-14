@@ -155,7 +155,7 @@ Quadlet translates each line to one Podman `--device` argument. The host CDI
 registry owns the resulting OCI edits; see
 [Container Device Interface references](cdi.md).
 
-Explicit hardening renders without an alternate raw-security path:
+The concrete security baseline renders without an alternate raw-security path:
 
 ```ini
 ReadOnly=true
@@ -164,12 +164,12 @@ NoNewPrivileges=true
 ```
 
 Quadlet translates these keys to Podman's read-only rootfs, capability-drop,
-and no-new-privileges controls. Graft currently accepts only non-relaxing
-values and adds no implicit hardening defaults. See
-[Explicit container hardening](hardening.md).
+and no-new-privileges controls. Boolean opt-outs render explicit `false` source
+keys, while canonical capability additions render ordered `AddCapability=`
+lines after drop-all. See [Container hardening](hardening.md).
 
 Environment files, published ports, volumes, CDI references, and capability
-drops preserve user order. Environment variables are sorted by key.
+additions preserve user order. Environment variables are sorted by key.
 Environment-file path values and command argv are quoted for systemd argument
 parsing. Quadlet resolves relative environment-file paths against the
 source-unit directory and passes each as one Podman

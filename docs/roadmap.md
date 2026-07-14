@@ -22,7 +22,7 @@ The current implementation proves the core rootfs-store path:
   long-running lifecycle intent; finite workloads require a command.
 - Common Quadlet fields are rendered for container identity, working directory,
   quoted environment, environment files, published ports, volumes, qualified
-  CDI references, explicit non-relaxing hardening, service timing, and typed
+  CDI references, secure defaults and typed relaxations, service timing, and typed
   systemd dependency relationships.
 
 The generated TOML schema intentionally exposes only the implemented MVP
@@ -165,17 +165,15 @@ classifies first-class intent, dangerous authority, and forbidden escape
 hatches. The current implementation proves the flow, not the final isolation
 model.
 
-Current hardening is deliberately explicit and non-relaxing:
+Current hardening applies a concrete shared baseline:
 
-- capability drops, including `all`
+- drop all runtime-default capabilities
 - no-new-privileges
 - a read-only container root filesystem
 
-Omission currently preserves tested upstream defaults. The approved
-[secure target defaults design](secure-defaults.md) defines the breaking
-explicit-target migration, concrete shared baseline, and typed relaxations for
-the remaining
-[#163](https://github.com/Patrick-Kappen/graft/issues/163) implementation. See
+`deploy.target` is required. Typed boolean opt-outs and canonical capability
+additions are explicit dangerous intent implemented through
+[#163](https://github.com/Patrick-Kappen/graft/issues/163). See
 [Explicit container hardening](hardening.md) for the exact current boundary.
 
 Planned hardening:

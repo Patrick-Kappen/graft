@@ -1,59 +1,19 @@
-# Explicit container hardening
+# Container hardening
 
-Graft supports a narrow set of explicit, non-relaxing hardening controls for
-both system and user targets:
-
-```toml
-[config.filesystem]
-readOnly = true
-
-[config.security]
-dropCapabilities = ["all"]
-noNewPrivileges = true
-```
-
-These controls are optional. Graft does not yet apply implicit security
-defaults: omitting a field renders no corresponding Quadlet key and preserves
-the tested Podman/Quadlet default. The approved
-[secure target defaults design](secure-defaults.md) will replace that behavior
-through the remaining
-[#163](https://github.com/Patrick-Kappen/graft/issues/163) implementation. Until
-that implementation lands, the current schema and behavior on this page remain
-authoritative.
-
-## Supported controls
-
-| TOML field | Accepted value | Effect |
-| --- | --- | --- |
-| `config.filesystem.readOnly` | `true` only | Makes the container root filesystem read-only. |
-| `config.security.dropCapabilities` | Non-empty ordered list containing either `all` alone or canonical `CAP_*` names | Removes capabilities from Podman's default container capability set. |
-| `config.security.noNewPrivileges` | `true` only | Prevents container processes from gaining privileges through mechanisms such as set-user-ID binaries and file capabilities. |
-
-`false` is deliberately unavailable for the boolean controls. The approved
-design defines future explicit relaxations, but until #163 implements them,
-omit the field instead. Capability
-names must match `CAP_[A-Z][A-Z0-9_]*`; duplicates and combining `all` with
-another entry fail resolution. Graft validates the syntax but does not determine
-whether the selected host kernel and runtime recognize a particular capability
-name.
-
-The resolver keeps only explicit intent:
+Graft applies the same concrete process-hardening baseline to every explicit
+system or user target:
 
 ```json
 {
-  "filesystem": {
-    "readOnly": true
-  },
+  "filesystem": { "readOnly": true },
   "security": {
-    "dropCapabilities": [
-      "all"
-    ],
+    "dropCapabilities": ["all"],
     "noNewPrivileges": true
   }
 }
 ```
 
-The shared Nix renderer materialises it mechanically:
+The shared renderer emits:
 
 ```ini
 ReadOnly=true
@@ -61,41 +21,65 @@ DropCapability=all
 NoNewPrivileges=true
 ```
 
-Quadlet 5.8.2 translates these keys to Podman's `--read-only`, `--cap-drop`, and
-`--security-opt=no-new-privileges` arguments. Each capability is rendered as a
-separate ordered `DropCapability=` line.
+`deploy.target` is required. `system` uses rootful Podman; `user` is rootless
+only when its user manager belongs to a non-root account. A root-owned user
+manager remains rootful.
+
+## Explicit relaxations
+
+Workloads must state each weaker choice directly:
+
+```toml
+[config.filesystem]
+readOnly = false
+
+[config.security]
+noNewPrivileges = false
+addCapabilities = ["CAP_NET_BIND_SERVICE"]
+```
+
+| TOML field | Accepted value | Effect |
+| --- | --- | --- |
+| `config.filesystem.readOnly` | Boolean; defaults to `true` | `false` retains the writable runtime overlay. |
+| `config.security.dropCapabilities` | Omitted or exactly `["all"]` | Drops the runtime-default capability set. |
+| `config.security.addCapabilities` | Non-empty ordered unique canonical `CAP_*` names | Restores only named capabilities after drop-all. |
+| `config.security.noNewPrivileges` | Boolean; defaults to `true` | `false` explicitly opts out of no-new-privileges. |
+
+Partial legacy drop lists fail with a migration diagnostic directing the user
+to `addCapabilities`. Empty additions, duplicates, `all`, non-canonical names,
+and control characters fail resolution. The resolver preserves addition order.
+Quadlet 5.8.2 normalises generated Podman capability arguments to lowercase.
+
+`NoNewPrivileges=false` remains visible in resolved JSON and Quadlet source.
+Quadlet represents it in generated Podman argv by omitting
+`--security-opt=no-new-privileges`; Graft does not claim that this pins behavior
+against a future runtime default.
 
 ## Boundaries
 
-`readOnly = true` does not mean that every path visible to the workload is
-immutable. With the tested upstream default `ReadOnlyTmpfs=true`, Podman mounts
-read-write tmpfs filesystems at `/dev`, `/dev/shm`, `/run`, `/tmp`, and
-`/var/tmp`. Actual process writes remain subject to path ownership, directory
-modes, and the dropped capability set. In particular, a workload must not
-assume that `/tmp` is writable merely because the tmpfs mount is read-write;
-Nix-store-derived mountpoint modes plus `dropCapabilities = ["all"]` can still
-deny a write. Explicit `config.filesystem.tmpfs` paths deliberately add
-writable in-memory mounts and may mask rootfs content at their targets. Explicit
-volumes and host-managed CDI specs can also add writable mounts.
-`config.filesystem.readOnlyTmpfs` remains unavailable until its relaxation and
-compatibility contract is approved. Tmpfs options and cross-mount target
-collision policy remain deferred to #142 and #164.
+`ReadOnly=true` constrains the root filesystem, not every visible mount. Graft
+provides `/tmp` and `/var/tmp` mountpoints so Podman's tested read-only-rootfs
+tmpfs setup can initialise under rootless overlay. Nix normalises store
+directory modes to read-only metadata, so Graft does not promise that those
+tmpfs paths are process-writable for a non-root container user. Explicit tmpfs,
+volumes, and CDI-injected mounts remain separate writable boundaries. A current source-backed volume
+without `mode = "ro"` may still select the writable upstream default; migration
+of that legacy exception remains [#142]/[#164].
 
-Dropping capabilities does not remove the authority of mounted host paths,
-shared namespaces, CDI-provided resources, external systemd dependencies, the
-selected host account, or the host kernel. `noNewPrivileges` constrains
-privilege gain inside the process tree; it is not a replacement for a non-root
-container user, namespace isolation, seccomp, labels, resource limits, or a VM.
+Rootless capability additions apply inside the container user namespace and do
+not grant capability in the host's initial user namespace. The runtime may
+reject a request that the selected account or namespace mapping cannot grant;
+Graft propagates that failure without changing the requested set.
 
-System targets still run through rootful Podman. User targets run through the
-current Home Manager account and are rootless only when that account is
-non-root. These controls narrow process authority in either context but do not
-change the target's trust boundary.
+Capabilities do not remove authority conveyed by host paths, shared namespaces,
+CDI resources, external systemd dependencies, the selected host account, or the
+host kernel. No-new-privileges is not a replacement for a non-root container
+user, namespace isolation, seccomp, labels, resource limits, or a VM.
 
-Capability additions, privileged mode, security-label changes, seccomp profile
-selection, raw security options, and user-namespace policy remain unavailable
-and fail closed. The future secure baseline permits only typed capability
-additions after dropping all defaults; it does not authorize the other fields.
-See the [Secure target defaults design](secure-defaults.md),
-[Capability policy](capability-policy.md), and [Threat model](threat-model.md)
-for their classifications and residual risks.
+Privileged mode, unconfined seccomp, label relaxations, mask/unmask controls,
+raw security options, and user-namespace policy remain unavailable and fail
+closed. See the [Secure target defaults](secure-defaults.md),
+[Capability policy](capability-policy.md), and [Threat model](threat-model.md).
+
+[#142]: https://github.com/Patrick-Kappen/graft/issues/142
+[#164]: https://github.com/Patrick-Kappen/graft/issues/164

@@ -1,10 +1,9 @@
 # Threat model and trust boundaries
 
 > **Status:** this document defines the security assumptions and invariants of
-> the current `rootfs-store` MVP. It does not claim that the planned secure
-> defaults or production hardening are implemented. The approved
-> [secure target defaults design](secure-defaults.md) changes no current runtime
-> behavior until #163 lands.
+> the current `rootfs-store` MVP, including the implemented
+> [secure target defaults](secure-defaults.md). It does not claim complete
+> production isolation.
 
 Graft turns selected TOML files into resolved JSON, Nix-store root filesystems,
 Quadlet source units, generated systemd services, and Podman containers. This
@@ -230,7 +229,7 @@ invariant; it does not extend the invariant beyond its stated scope.
 | **GRAFT-TM-10** | External-unit dependency intent remains an exact, validated, visible same-manager unit name rather than host command text. | Strict concrete unit-name validation and fixed dependency axes in [`resolve.rs`][resolve-source]. | External-name, identity-collision, module parity, real Quadlet translation, and `systemd-analyze verify` tests. Unit existence and safety are host review responsibilities. |
 | **GRAFT-TM-11** | Repository quality gates scan for known dependency advisories, configured dependency-policy violations, recognized secret patterns in the current tracked-file snapshot, and high-confidence workflow findings before merge. | Pinned Nix tools and commit-pinned GitHub Actions; gitleaks uses its configured signatures and zizmor runs at `high` minimum confidence. | `cargo-audit`, `cargo-deny`, the tracked-file gitleaks scan, zizmor, actionlint, named CI jobs, and coverage in [`ci.yml`][ci-source]. These checks do not scan removed secrets in Git history; advisory databases, patterns, rules, and confidence thresholds can produce false negatives. They reduce supply-chain risk without proving the snapshot or dependencies benign. |
 | **GRAFT-TM-12** | Device intent accepted by Graft is limited to ordered, colon-free qualified CDI names; direct paths, duplicate references, target remapping, permissions, and arbitrary runtime arguments remain unavailable. The host CDI spec is trusted policy rather than validated Graft input. | CDI grammar and indexed field validation in [`resolve.rs`][resolve-source]; fixed `AddDevice=` rendering in [`render-quadlet.nix`][renderer-source]. | Resolver positive and negative CDI tests; generated-schema parity; `quadlet-cdi` NixOS/Home Manager generator verification and the controlled fake-spec runtime test wired through [`flake.nix`][flake-source]. |
-| **GRAFT-TM-13** | Current hardening can only narrow tested upstream defaults: capability drops are explicit and non-empty, while no-new-privileges and read-only rootfs accept only `true`. Omission adds no hardening, and relaxation syntax remains unavailable until #163 implements the approved secure-default design. | Hardening schema constraints and resolver validation in [`schema.rs`][schema-source] and [`resolve.rs`][resolve-source]; fixed `DropCapability=`, `NoNewPrivileges=`, and `ReadOnly=` rendering in [`render-quadlet.nix`][renderer-source]. | Resolver default, positive, ordering, false-value, malformed, mixed, and duplicate tests; schema parity; combined CDI/hardening system and user generator verification; controlled runtime checks for effective capabilities, no-new-privileges, and rootfs writes. |
+| **GRAFT-TM-13** | Every workload resolves read-only rootfs, drop-all capabilities, and no-new-privileges defaults; target selection is explicit, and typed boolean opt-outs plus canonical capability additions are visible dangerous intent. | Hardening schema constraints and resolver validation in [`schema.rs`][schema-source] and [`resolve.rs`][resolve-source]; fixed `DropCapability=`, `NoNewPrivileges=`, and `ReadOnly=` rendering in [`render-quadlet.nix`][renderer-source]. | Resolver default, positive, ordering, false-value, malformed, mixed, and duplicate tests; schema parity; combined CDI/hardening system and user generator verification; controlled runtime checks for effective capabilities, no-new-privileges, and rootfs writes. |
 | **GRAFT-TM-14** | Explicit tmpfs intent is limited to ordered unique absolute container paths. Relative paths, control characters, duplicates, `:` options syntax, terminal whitespace, and terminal `\` fail before materialisation. Tmpfs has no host source but creates a writable in-memory mount that can mask rootfs content. | Indexed path validation in [`resolve.rs`][resolve-source]; fixed ordered `Tmpfs=` rendering in [`render-quadlet.nix`][renderer-source]. | Resolver positive and negative tmpfs tests; generated-schema parity; NixOS and Home Manager module assertions plus real Quadlet generator verification in [`flake.nix`][flake-source]. Target-overlap policy remains deferred. |
 
 ## Threats, controls, and residual risk
@@ -255,9 +254,9 @@ Manager account's authority: Podman is rootless for a non-root account and
 rootful under UID 0. Graft does not enforce that account UID, per-container
 subordinate identities, seccomp policy, security labels, a mandatory non-root
 container user, or
-workdir-only writes. Explicit capability drops, no-new-privileges, and a
-read-only root filesystem are current non-relaxing controls, but they have no
-implicit Graft defaults. Direct host device paths, remapping, and permissions
+workdir-only writes. Drop-all capabilities, no-new-privileges, and a read-only
+root filesystem are concrete Graft defaults; typed opt-outs and capability
+additions remain explicit dangerous intent. Direct host device paths, remapping, and permissions
 remain unavailable and fail closed. Qualified CDI references are current, but
 their host-managed specs are trusted policy and can widen the container's effective
 OCI resources. System targets and root-owned user targets consume those specs
@@ -266,15 +265,14 @@ Podman and remain limited by host and runtime authorization. See
 [Container Device Interface references](cdi.md). The runtime's standard device
 set remains upstream policy.
 
-Other explicit `config.security.*` intent still fails closed. When the current
-hardening fields are absent, the runtime receives upstream defaults rather than
-Graft's future secure defaults. `ReadOnly=true` also preserves the tested
+Other explicit `config.security.*` intent still fails closed. Omitting supported
+hardening fields resolves Graft's concrete secure defaults. `ReadOnly=true` also preserves the tested
 upstream read-write-tmpfs mount default, without guaranteeing process write
 permissions, and does not constrain explicit tmpfs, volumes, or CDI-injected
 mounts.
 Capability classification is defined in the
-[Capability policy](capability-policy.md); defaults and remaining implementation
-are tracked by [#139] and [#163].
+[Capability policy](capability-policy.md); defaults and relaxations are
+implemented through [#139] and [#163].
 
 ### Host files, mounts, paths, and state
 
@@ -371,7 +369,7 @@ risk. Rootfs construction currently tolerates some package `/etc` copy errors;
 | Context | Required assumption | Current boundary |
 | --- | --- | --- |
 | Local development | The operator reviews selected TOML and package intent. Repository code and data processed inside the workload may be untrusted. | Prefer an explicit user target under a non-root account. Current Graft has no automatic workspace mount or interactive shell contract; explicit volumes carry their own host-file risk. The future baseline uses field-specific opt-outs rather than a development profile. |
-| Unattended server | Host administrators own account, UID, linger, authentication, firewall, updates, logging, storage, and recovery policy. | Rootless under a non-root account is preferred, but the approved secure defaults and per-container identities are not implemented. Early-alpha Graft is not a strong production isolation claim. |
+| Unattended server | Host administrators own account, UID, linger, authentication, firewall, updates, logging, storage, and recovery policy. | Rootless under a non-root account is preferred; secure defaults are implemented, but per-container identities are not. Early-alpha Graft is not a strong production isolation claim. |
 | Remote deployment | Any transport, credentials, host selection, approval, rollback, and remote Nix activation are trusted external tooling. | Graft has no remote deployment control plane yet; design and implementation remain in [#161] and [#174]. |
 | Temporary agents | Hostile code would require strict identity, mount, network, secret, TTL, cleanup, concurrency, and resource contracts. | Those contracts are not implemented. Do not treat current containers as disposable-agent isolation; use a VM when a shared kernel is insufficient. See [#151], [#153], and [#169]. |
 
@@ -415,10 +413,10 @@ A security-sensitive design or implementation must:
 7. update this model when assumptions or accepted residual risks change.
 
 The scoped qualified-CDI implementation is current through [#203], and
-non-relaxing explicit hardening is current through part of [#163]. The
+secure defaults and typed relaxations are current through [#163]. The
 [secure target defaults design](secure-defaults.md) approves explicit targets,
 a shared concrete baseline, and typed relaxations; current behavior changes
-only when the remaining [#163] enforcement lands. Direct device paths remain
+through the current [#163] enforcement. Direct device paths remain
 governed by [#142] and
 [#164]. Identity and rootfs-integrity gaps are tracked by [#107] and [#108]. Related isolation,
 mount, secret, resource, shadowing, remote, and temporary-agent work is linked in
