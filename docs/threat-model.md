@@ -195,8 +195,10 @@ read-only. By default, `:O` provides writable runtime overlay state, which is no
 a durable or reviewable persistence contract. Explicit
 `config.filesystem.readOnly = true` makes the container root filesystem
 read-only, while the tested upstream `ReadOnlyTmpfs=true` default still provides
-selected read-write tmpfs mounts. Effective process writes remain subject to
-mountpoint modes and the dropped capability set. Explicit volumes are rendered
+selected read-write tmpfs mounts. Explicit path-only `config.filesystem.tmpfs`
+intent can add further writable in-memory mounts and mask rootfs content at its
+targets. Effective process writes remain subject to mountpoint modes and the
+dropped capability set. Explicit volumes are rendered
 after the fixed bind and may overlap a path below `/nix/store` or expose a store
 path at another target; CDI specs can also inject mounts. Graft therefore does
 not guarantee an effectively read-only store tree or workload view. Volumes,
@@ -227,6 +229,7 @@ invariant; it does not extend the invariant beyond its stated scope.
 | **GRAFT-TM-11** | Repository quality gates scan for known dependency advisories, configured dependency-policy violations, recognized secret patterns in the current tracked-file snapshot, and high-confidence workflow findings before merge. | Pinned Nix tools and commit-pinned GitHub Actions; gitleaks uses its configured signatures and zizmor runs at `high` minimum confidence. | `cargo-audit`, `cargo-deny`, the tracked-file gitleaks scan, zizmor, actionlint, named CI jobs, and coverage in [`ci.yml`][ci-source]. These checks do not scan removed secrets in Git history; advisory databases, patterns, rules, and confidence thresholds can produce false negatives. They reduce supply-chain risk without proving the snapshot or dependencies benign. |
 | **GRAFT-TM-12** | Device intent accepted by Graft is limited to ordered, colon-free qualified CDI names; direct paths, duplicate references, target remapping, permissions, and arbitrary runtime arguments remain unavailable. The host CDI spec is trusted policy rather than validated Graft input. | CDI grammar and indexed field validation in [`resolve.rs`][resolve-source]; fixed `AddDevice=` rendering in [`render-quadlet.nix`][renderer-source]. | Resolver positive and negative CDI tests; generated-schema parity; `quadlet-cdi` NixOS/Home Manager generator verification and the controlled fake-spec runtime test wired through [`flake.nix`][flake-source]. |
 | **GRAFT-TM-13** | Current hardening can only narrow tested upstream defaults: capability drops are explicit and non-empty, while no-new-privileges and read-only rootfs accept only `true`. Omission adds no hardening, and relaxation syntax remains unavailable until secure defaults are designed. | Hardening schema constraints and resolver validation in [`schema.rs`][schema-source] and [`resolve.rs`][resolve-source]; fixed `DropCapability=`, `NoNewPrivileges=`, and `ReadOnly=` rendering in [`render-quadlet.nix`][renderer-source]. | Resolver default, positive, ordering, false-value, malformed, mixed, and duplicate tests; schema parity; combined CDI/hardening system and user generator verification; controlled runtime checks for effective capabilities, no-new-privileges, and rootfs writes. |
+| **GRAFT-TM-14** | Explicit tmpfs intent is limited to ordered unique absolute container paths. Relative paths, control characters, duplicates, and `:` options syntax fail before materialisation. Tmpfs has no host source but creates a writable in-memory mount that can mask rootfs content. | Indexed path validation in [`resolve.rs`][resolve-source]; fixed ordered `Tmpfs=` rendering in [`render-quadlet.nix`][renderer-source]. | Resolver positive and negative tmpfs tests; generated-schema parity; NixOS and Home Manager module assertions plus real Quadlet generator verification in [`flake.nix`][flake-source]. Target-overlap policy remains deferred. |
 
 ## Threats, controls, and residual risk
 
@@ -265,7 +268,8 @@ Other explicit `config.security.*` intent still fails closed. When the current
 hardening fields are absent, the runtime receives upstream defaults rather than
 Graft's future secure defaults. `ReadOnly=true` also preserves the tested
 upstream read-write-tmpfs mount default, without guaranteeing process write
-permissions, and does not constrain explicit volumes or CDI-injected mounts.
+permissions, and does not constrain explicit tmpfs, volumes, or CDI-injected
+mounts.
 Capability classification is defined in the
 [Capability policy](capability-policy.md); defaults and remaining implementation
 are tracked by [#139] and [#163].

@@ -71,9 +71,12 @@ read-write tmpfs filesystems at `/dev`, `/dev/shm`, `/run`, `/tmp`, and
 modes, and the dropped capability set. In particular, a workload must not
 assume that `/tmp` is writable merely because the tmpfs mount is read-write;
 Nix-store-derived mountpoint modes plus `dropCapabilities = ["all"]` can still
-deny a write. Explicit volumes and host-managed CDI specs can also add writable
-mounts. `config.filesystem.readOnlyTmpfs` remains unavailable until its
-relaxation and compatibility contract is approved.
+deny a write. Explicit `config.filesystem.tmpfs` paths deliberately add
+writable in-memory mounts and may mask rootfs content at their targets. Explicit
+volumes and host-managed CDI specs can also add writable mounts.
+`config.filesystem.readOnlyTmpfs` remains unavailable until its relaxation and
+compatibility contract is approved. Tmpfs options and cross-mount target
+collision policy remain deferred to #142 and #164.
 
 Dropping capabilities does not remove the authority of mounted host paths,
 shared namespaces, CDI-provided resources, external systemd dependencies, the

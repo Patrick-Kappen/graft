@@ -435,6 +435,7 @@
                 "ContainerName=nix-check-system"
                 "HostName=nix-check-system.local"
                 "EnvironmentFile=\"/etc/graft/system.env\"\nEnvironmentFile=\"/run/graft/shared.env\""
+                "Tmpfs=/run/graft-system\nTmpfs=/tmp/graft-system"
                 "Volume=/system-cache\nVolume=/tmp/graft-system-data:/data\nVolume=/tmp/graft-system-config:/config:ro"
                 "PublishPort=127.0.0.1:18080:80\nPublishPort=18443:443/tcp"
                 "\n[Install]\nWantedBy=multi-user.target"
@@ -521,6 +522,7 @@
                 "ContainerName=nix-check-user"
                 "HostName=nix-check-user.local"
                 "EnvironmentFile=\"/etc/graft/user.env\"\nEnvironmentFile=\"/run/graft/shared.env\""
+                "Tmpfs=/run/graft-user\nTmpfs=/tmp/graft-user"
                 "Volume=/user-cache\nVolume=/tmp/graft-user-data:/data\nVolume=/tmp/graft-user-config:/config:ro"
                 "PublishPort=127.0.0.1:28080:80\nPublishPort=28443:443/tcp"
                 "\n[Install]\nWantedBy=default.target"
@@ -795,6 +797,11 @@
               QUADLET_UNIT_DIRS="$PWD/source-user" \
                 ${pkgs.podman}/libexec/podman/quadlet -user \
                 generated-user generated-user generated-user
+
+              grep -E '^ExecStart=.* --tmpfs /run/graft-system --tmpfs /tmp/graft-system( |$)' \
+                generated-system/long-running-system.service
+              grep -E '^ExecStart=.* --tmpfs /run/graft-user --tmpfs /tmp/graft-user( |$)' \
+                generated-user/long-running-user.service
 
               for unit in long-running startup-job setup network-client; do
                 test -L "generated-system/multi-user.target.wants/$unit-system.service"

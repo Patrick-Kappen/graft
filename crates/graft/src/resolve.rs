@@ -171,6 +171,9 @@ pub struct ResolvedFilesystem {
     /// Optional read-only root filesystem hardening.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub read_only: Option<bool>,
+    /// Optional ordered absolute paths rendered as Quadlet `Tmpfs=`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tmpfs: Option<Vec<String>>,
     /// Optional volume mounts rendered as Quadlet `Volume=`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub volumes: Option<Vec<ResolvedFilesystemVolume>>,
@@ -641,7 +644,7 @@ fn validate_unsupported_filesystem_intent(filesystem: Option<&Filesystem>) -> Re
     let Some(Filesystem {
         read_only: _,
         read_only_tmpfs,
-        tmpfs,
+        tmpfs: _,
         mounts,
         volumes: _,
         devices: _,
@@ -651,7 +654,6 @@ fn validate_unsupported_filesystem_intent(filesystem: Option<&Filesystem>) -> Re
     };
 
     reject!(read_only_tmpfs, "config.filesystem.readOnlyTmpfs");
-    reject!(tmpfs, "config.filesystem.tmpfs");
     reject!(mounts, "config.filesystem.mounts");
 
     Ok(())
@@ -1031,18 +1033,47 @@ fn resolve_filesystem(config: &ContainerConfig) -> Result<Option<ResolvedFilesys
             "config.filesystem.readOnly = false is not supported; omit it until secure defaults and relaxations are defined"
         );
     }
+    let tmpfs = resolve_tmpfs(filesystem)?;
     let volumes = resolve_volumes(filesystem)?;
     let devices = resolve_devices(filesystem)?;
 
-    if read_only.is_none() && volumes.is_none() && devices.is_none() {
+    if read_only.is_none() && tmpfs.is_none() && volumes.is_none() && devices.is_none() {
         return Ok(None);
     }
 
     Ok(Some(ResolvedFilesystem {
         read_only,
+        tmpfs,
         volumes,
         devices,
     }))
+}
+
+fn resolve_tmpfs(filesystem: Option<&Filesystem>) -> Result<Option<Vec<String>>> {
+    let Some(tmpfs) = filesystem.and_then(|filesystem| filesystem.tmpfs.as_ref()) else {
+        return Ok(None);
+    };
+
+    if tmpfs.is_empty() {
+        return Ok(None);
+    }
+
+    let mut paths = BTreeSet::new();
+    for (index, path) in tmpfs.iter().enumerate() {
+        let field_name = format!("config.filesystem.tmpfs[{index}]");
+        validate_non_empty_no_control(&field_name, path)?;
+        if !path.starts_with('/') {
+            bail!("{field_name} must be an absolute container path");
+        }
+        if path.contains(':') {
+            bail!("{field_name} cannot contain ':'; tmpfs options are not supported");
+        }
+        if !paths.insert(path) {
+            bail!("{field_name} duplicates an earlier tmpfs path");
+        }
+    }
+
+    Ok(Some(tmpfs.clone()))
 }
 
 fn resolve_security(config: &ContainerConfig) -> Result<Option<ResolvedSecurity>> {
@@ -2454,10 +2485,6 @@ mod tests {
             "config.filesystem.readOnlyTmpfs",
         ),
         (
-            "[config.filesystem]\ntmpfs = [\"/tmp\"]",
-            "config.filesystem.tmpfs",
-        ),
-        (
             "[config.filesystem]\nmounts = [\"type=bind,src=/tmp,dst=/data\"]",
             "config.filesystem.mounts",
         ),
@@ -3450,6 +3477,88 @@ mod tests {
     }
 
     #[test]
+    fn tmpfs_paths_preserve_declaration_order() {
+        let config = filesystem_config(Filesystem {
+            tmpfs: Some(vec!["/run".to_string(), "/tmp".to_string()]),
+            ..Filesystem::default()
+        });
+
+        let resolved = resolve(&config).unwrap();
+
+        assert_eq!(
+            resolved.filesystem,
+            Some(ResolvedFilesystem {
+                read_only: None,
+                tmpfs: Some(vec!["/run".to_string(), "/tmp".to_string()]),
+                volumes: None,
+                devices: None,
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(&resolved).unwrap()["filesystem"]["tmpfs"],
+            serde_json::json!(["/run", "/tmp"])
+        );
+    }
+
+    #[test]
+    fn empty_tmpfs_is_omitted() {
+        let config = filesystem_config(Filesystem {
+            tmpfs: Some(Vec::new()),
+            ..Filesystem::default()
+        });
+
+        let resolved = resolve(&config).unwrap();
+
+        assert_eq!(resolved.filesystem, None);
+    }
+
+    #[test]
+    fn invalid_tmpfs_paths_return_indexed_errors() {
+        let cases = [
+            ("", "config.filesystem.tmpfs[0] cannot be empty"),
+            ("  ", "config.filesystem.tmpfs[0] cannot be empty"),
+            (
+                "tmp",
+                "config.filesystem.tmpfs[0] must be an absolute container path",
+            ),
+            (
+                "/tmp\ncache",
+                "config.filesystem.tmpfs[0] cannot contain control characters",
+            ),
+            (
+                "/tmp:size=1G",
+                "config.filesystem.tmpfs[0] cannot contain ':'; tmpfs options are not supported",
+            ),
+        ];
+
+        for (path, expected) in cases {
+            let config = filesystem_config(Filesystem {
+                tmpfs: Some(vec![path.to_string()]),
+                ..Filesystem::default()
+            });
+
+            let error = resolve(&config).unwrap_err();
+
+            assert_eq!(error.to_string(), expected);
+        }
+    }
+
+    #[test]
+    fn duplicate_tmpfs_path_returns_indexed_error() {
+        let config = filesystem_config(Filesystem {
+            tmpfs: Some(vec!["/tmp".to_string(), "/tmp".to_string()]),
+            ..Filesystem::default()
+        });
+
+        let error = resolve(&config).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "config.filesystem.tmpfs[1] duplicates an earlier tmpfs path"
+        );
+    }
+
+    #[test]
     fn target_only_volume_is_preserved() {
         let config = filesystem_config(Filesystem {
             volumes: Some(vec![FilesystemVolume {
@@ -3466,6 +3575,7 @@ mod tests {
             resolved.filesystem,
             Some(ResolvedFilesystem {
                 read_only: None,
+                tmpfs: None,
                 volumes: Some(vec![ResolvedFilesystemVolume {
                     source: None,
                     target: "/data".to_string(),
@@ -3498,6 +3608,7 @@ mod tests {
             resolved.filesystem,
             Some(ResolvedFilesystem {
                 read_only: None,
+                tmpfs: None,
                 volumes: Some(vec![ResolvedFilesystemVolume {
                     source: Some("/host/data".to_string()),
                     target: "/data".to_string(),
@@ -3525,6 +3636,7 @@ mod tests {
             resolved.filesystem,
             Some(ResolvedFilesystem {
                 read_only: None,
+                tmpfs: None,
                 volumes: Some(vec![ResolvedFilesystemVolume {
                     source: Some("/host/config".to_string()),
                     target: "/config".to_string(),
@@ -3788,6 +3900,7 @@ mod tests {
             resolved.filesystem,
             Some(ResolvedFilesystem {
                 read_only: None,
+                tmpfs: None,
                 volumes: None,
                 devices: Some(vec![
                     ResolvedDevice {
@@ -3813,9 +3926,10 @@ mod tests {
     }
 
     #[test]
-    fn read_only_volumes_and_cdi_devices_resolve_together() {
+    fn read_only_tmpfs_volumes_and_cdi_devices_resolve_together() {
         let config = filesystem_config(Filesystem {
             read_only: Some(true),
+            tmpfs: Some(vec!["/run/graft".to_string()]),
             volumes: Some(vec![FilesystemVolume {
                 source: None,
                 target: "/data".to_string(),
@@ -3835,6 +3949,7 @@ mod tests {
             resolved.filesystem,
             Some(ResolvedFilesystem {
                 read_only: Some(true),
+                tmpfs: Some(vec!["/run/graft".to_string()]),
                 volumes: Some(vec![ResolvedFilesystemVolume {
                     source: None,
                     target: "/data".to_string(),
@@ -4011,6 +4126,7 @@ mod tests {
             resolved.filesystem,
             Some(ResolvedFilesystem {
                 read_only: Some(true),
+                tmpfs: None,
                 volumes: None,
                 devices: None,
             })

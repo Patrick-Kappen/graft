@@ -21,6 +21,8 @@ Deferred in the current alpha:
   colon-free resource name
 - no port syntax parser for `PublishPort=` values
 - no filesystem path existence checks for volumes
+- no tmpfs options or target-collision policy across tmpfs, volumes, rootfs, and
+  fixed store bindings; current tmpfs support accepts absolute container paths only
 - no volume mode allowlist beyond line-safety validation
 - no Quadlet `.volume` or `.network` unit generation
 - no automatic firewall, DNS, or network alias management

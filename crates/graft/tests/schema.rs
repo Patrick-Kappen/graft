@@ -94,7 +94,10 @@ fn schema_exposes_only_supported_fields() {
         ("Deploy", &["activation", "enable", "target"][..]),
         ("Device", &["source"][..]),
         ("ExternalUnitDependencyTarget", &["externalUnit"][..]),
-        ("Filesystem", &["devices", "readOnly", "volumes"][..]),
+        (
+            "Filesystem",
+            &["devices", "readOnly", "tmpfs", "volumes"][..],
+        ),
         ("FilesystemVolume", &["mode", "source", "target"][..]),
         ("Network", &["container", "mode", "publish"][..]),
         ("Runtime", &["command", "mode", "packages"][..]),
@@ -148,6 +151,14 @@ fn schema_exposes_only_supported_fields() {
         "^[A-Za-z][A-Za-z0-9._-]*[A-Za-z0-9]/[A-Za-z][A-Za-z0-9._-]*[A-Za-z0-9]=[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
     );
     assert_eq!(schema["$defs"]["Device"]["required"][0], "source");
+    assert_eq!(
+        schema["$defs"]["Filesystem"]["properties"]["tmpfs"]["uniqueItems"],
+        true
+    );
+    assert_eq!(
+        schema["$defs"]["Filesystem"]["properties"]["tmpfs"]["items"]["pattern"],
+        r"^/[^:\u0000-\u001F\u007F]*$"
+    );
 }
 
 #[test]
