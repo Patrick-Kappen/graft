@@ -157,7 +157,7 @@ fn schema_exposes_only_supported_fields() {
     );
     assert_eq!(
         schema["$defs"]["Filesystem"]["properties"]["tmpfs"]["items"]["pattern"],
-        r"^/[^:\u0000-\u001F\u007F]*$"
+        r"^/(?:[^:\u0000-\u001F\u007F-\u009F]*[^:\u0000-\u001F\u007F-\u009F\s\\])?(?![\s\S])"
     );
 }
 
