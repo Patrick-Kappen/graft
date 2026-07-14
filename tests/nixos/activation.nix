@@ -103,7 +103,10 @@ in
         };
       };
 
-      environment.systemPackages = [ pkgs.kexec-tools ];
+      environment.systemPackages = [
+        pkgs.kexec-tools
+        pkgs.util-linux
+      ];
 
       environment.etc = {
         "containers/systemd/users/1000/linger-user.container".text = enabledLingerUser;
@@ -141,6 +144,27 @@ in
       withoutActivation = "${baseSystem}/specialisation/withoutActivation";
     in
     ''
+      def user_systemctl(uid, arguments):
+          return (
+              f"setpriv --reuid={uid} --regid=$(id -g {uid}) --clear-groups "
+              f"env XDG_RUNTIME_DIR=/run/user/{uid} "
+              f"DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{uid}/bus "
+              f"systemctl --user {arguments}"
+          )
+
+      def wait_for_user_unit(uid, unit):
+          machine.wait_until_succeeds(f"test -d /run/user/{uid}", timeout=120)
+          machine.wait_for_file(f"/run/user/{uid}/bus", timeout=120)
+          show_state = user_systemctl(uid, f"show {unit} -P ActiveState")
+          machine.wait_until_succeeds(
+              f'state="$({show_state})"; '
+              'case "$state" in active|failed) exit 0 ;; *) exit 1 ;; esac',
+              timeout=120,
+          )
+          is_active = user_systemctl(uid, f"is-active {unit}")
+          status = user_systemctl(uid, f"status {unit} --no-pager")
+          machine.succeed(f"{is_active} || {{ {status}; exit 1; }}")
+
       machine.start(allow_reboot=True)
       machine.wait_for_unit("multi-user.target")
 
@@ -162,10 +186,7 @@ in
       with subtest("linger starts the rootless user manager at boot"):
           machine.wait_for_file("/var/lib/systemd/linger/graftlinger")
           machine.wait_for_unit("user@1000.service")
-          machine.wait_until_succeeds(
-              "systemctl --user --machine=graftlinger@ is-active linger-user.service",
-              timeout=120,
-          )
+          wait_for_user_unit(1000, "linger-user.service")
           machine.succeed(
               "runuser -u graftlinger -- podman info --format '{{.Host.Security.Rootless}}' | grep -Fx true"
           )
@@ -180,10 +201,7 @@ in
           machine.wait_until_tty_matches("2", "Password: ")
           machine.send_chars("test\n")
           machine.wait_for_unit("user@1001.service")
-          machine.wait_until_succeeds(
-              "systemctl --user --machine=graftlogin@ is-active login-user.service",
-              timeout=120,
-          )
+          wait_for_user_unit(1001, "login-user.service")
           machine.send_chars("exit\n")
           machine.wait_until_fails("systemctl is-active user@1001.service", timeout=60)
           machine.wait_until_succeeds(
@@ -200,7 +218,7 @@ in
               "grep -Fx 'WantedBy=default.target' /etc/containers/systemd/users/1000/linger-user.container"
           )
           machine.succeed("systemctl is-active long-running-system.service")
-          machine.succeed("systemctl --user --machine=graftlinger@ is-active linger-user.service")
+          machine.succeed(user_systemctl(1000, "is-active linger-user.service"))
           machine.succeed("test -e /var/lib/graft-activation/job-runs")
           machine.succeed("test -e /var/lib/graft-activation/setup-runs")
           machine.succeed("systemctl is-active graft-foreign.service")
@@ -224,10 +242,7 @@ in
           machine.connect()
           machine.wait_for_unit("multi-user.target")
           machine.wait_for_unit("user@1000.service")
-          machine.wait_until_succeeds(
-              "systemctl --user --machine=graftlinger@ is-active default.target",
-              timeout=120,
-          )
+          wait_for_user_unit(1000, "default.target")
           machine.succeed("test -f /etc/containers/systemd/long-running-system.container")
           machine.fail("grep -Fx 'WantedBy=multi-user.target' /etc/containers/systemd/long-running-system.container")
           machine.succeed("test -f /etc/containers/systemd/users/1000/linger-user.container")
@@ -235,7 +250,7 @@ in
               "grep -Fx 'WantedBy=default.target' /etc/containers/systemd/users/1000/linger-user.container"
           )
           machine.fail("systemctl is-active long-running-system.service")
-          machine.fail("systemctl --user --machine=graftlinger@ is-active linger-user.service")
+          machine.fail(user_systemctl(1000, "is-active linger-user.service"))
           machine.wait_for_unit("network-client-system.service")
           machine.wait_for_unit("network-owner-system.service")
           machine.wait_until_succeeds("test $(systemctl show startup-job-system.service -P Result) = success")
@@ -260,11 +275,8 @@ in
           machine.wait_until_tty_matches("2", "Password: ")
           machine.send_chars("test\n")
           machine.wait_for_unit("user@1001.service")
-          machine.wait_until_succeeds(
-              "systemctl --user --machine=graftlogin@ is-active default.target",
-              timeout=120,
-          )
-          machine.fail("systemctl --user --machine=graftlogin@ is-active login-user.service")
+          wait_for_user_unit(1001, "default.target")
+          machine.fail(user_systemctl(1001, "is-active login-user.service"))
           machine.send_chars("exit\n")
           machine.wait_until_fails("systemctl is-active user@1001.service", timeout=60)
           machine.wait_until_succeeds(
@@ -288,10 +300,7 @@ in
           machine.wait_for_unit("multi-user.target")
           machine.wait_for_unit("long-running-system.service")
           machine.wait_for_unit("user@1000.service")
-          machine.wait_until_succeeds(
-              "systemctl --user --machine=graftlinger@ is-active linger-user.service",
-              timeout=120,
-          )
+          wait_for_user_unit(1000, "linger-user.service")
           job_runs_after_readd_reboot = int(
               machine.succeed("wc -l < /var/lib/graft-activation/job-runs").strip()
           )
