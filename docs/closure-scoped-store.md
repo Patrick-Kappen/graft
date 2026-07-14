@@ -11,9 +11,11 @@ realised rootfs runtime closure.
 ## Security invariant
 
 For a workload without an explicit mount or trusted CDI edit that changes the
-store view, every path visible immediately below `/nix/store` is a member of the
-realised Graft rootfs runtime closure. A host store path outside that closure is
-not visible through Graft-owned mounts.
+store view, `/nix/store` is a read-only scaffold and every path visible
+immediately below it is a member of the realised Graft rootfs runtime closure. A
+host store path outside that closure is not visible through Graft-owned mounts,
+and a process cannot create an additional direct child through writable-rootfs
+state.
 
 Closure scoping is mandatory rootfs mechanics for both manager targets. It is
 not TOML intent, has no workload opt-out, and never falls back to mounting the
@@ -45,9 +47,11 @@ The Nix materialiser uses `pkgs.closureInfo` over the final rootfs. Its
 installation, daemon call, or network fetch occurs during container startup.
 
 The final list is sorted bytewise and deduplicated before rendering. Every entry
-must be an absolute direct child of `/nix/store` and must exist as a directory or
-regular file after symlink resolution. Any malformed, missing, or unsupported
-entry fails the build.
+must be an absolute direct child of `/nix/store`. The store object is inspected
+without following links and must itself be a directory or regular file.
+Top-level symlinks and every malformed, missing, or unsupported entry fail the
+build; Podman must never dereference a closure member into unrelated host
+content.
 
 `nix-store -qR` is rejected as the implementation mechanism. It would require a
 Nix CLI/daemon query in a build, evaluation, activation, or startup phase and is
@@ -77,11 +81,19 @@ of its runtime closure.
 ### Derived Quadlet source
 
 The Quadlet source becomes a derivation instead of an evaluation-time string.
-That derivation reads `closureInfo/store-paths` and emits one line per path:
+That derivation first mounts the prepared scaffold read-only and then reads
+`closureInfo/store-paths` to emit one nested line per path:
 
 ```ini
+Volume=<rootfs>/nix/store:/nix/store:ro,bind,nodev,nosuid
 Volume=/nix/store/<path>:/nix/store/<path>:ro,bind,nodev,nosuid
 ```
+
+The parent mount is required even when the rootfs is writable: without it, a
+sufficiently privileged container process can add direct children to the empty
+scaffold through overlay state and violate the visibility invariant. Nested
+member targets already exist in the scaffold and remain mountable below its
+read-only parent.
 
 `noexec` is intentionally absent because selected package executables must run.
 `bind` is non-recursive: Nix store paths are immutable filesystem objects and
@@ -151,7 +163,9 @@ larger than ordinary command-line workloads.
 
 The generator accepted directory and regular-file store outputs with
 `ro,bind,nodev,nosuid`. An initially missing target placeholder failed at OCI
-startup, confirming that placeholders are mandatory rather than cosmetic.
+startup, confirming that placeholders are mandatory rather than cosmetic. The
+size measurements cover the per-member prototype before adding the single
+scaffold line; that fixed line does not materially change the recorded budgets.
 
 ### Runtime timings
 
@@ -171,6 +185,13 @@ All successful runs executed selected closure content, observed an unrelated
 host-store path as absent, and observed `/nix/store` as non-writable. Rootless
 and rootful creation rejected a nonexistent bind source; no test widened access
 to the complete store.
+
+A supplemental writable-rootfs prototype added `CAP_DAC_OVERRIDE` to exercise a
+process able to modify the overlay. Rootful execution without the scaffold bind
+successfully created an arbitrary `/nix/store` child. With the read-only scaffold
+bind, the same process wrote elsewhere in the rootfs but received a read-only
+filesystem error for the store child. Rootless execution with the scaffold also
+rejected the store write. Implementation tests must preserve this distinction.
 
 The measurements include cold-start noise and do not establish scalability
 past 372 mounts. They justify the initial 512-member and source-size limits,
@@ -193,10 +214,10 @@ fails closed. Closure scoping is not silently disabled for compatibility.
 Implementation may proceed in [#209] with this scope:
 
 1. build the package-environment closure metadata;
-2. create type-matched closure targets in the rootfs and assert the final
-   closure shape;
-3. derive one shared NixOS/Home Manager Quadlet source with sorted per-path
-   mounts and fixed options;
+2. reject top-level symlink outputs, create type-matched closure targets in the
+   rootfs, and assert the final closure shape;
+3. derive one shared NixOS/Home Manager Quadlet source with a read-only scaffold
+   mount followed by sorted per-path mounts and fixed options;
 4. enforce member and source-size limits with actionable diagnostics;
 5. add generator, rootful, rootless, regular-file, absent-path, GC-reference,
    malformed-input, and no-fallback tests; and

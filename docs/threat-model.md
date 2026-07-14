@@ -233,7 +233,7 @@ invariant; it does not extend the invariant beyond its stated scope.
 | **GRAFT-TM-11** | Repository quality gates scan for known dependency advisories, configured dependency-policy violations, recognized secret patterns in the current tracked-file snapshot, and high-confidence workflow findings before merge. | Pinned Nix tools and commit-pinned GitHub Actions; gitleaks uses its configured signatures and zizmor runs at `high` minimum confidence. | `cargo-audit`, `cargo-deny`, the tracked-file gitleaks scan, zizmor, actionlint, named CI jobs, and coverage in [`ci.yml`][ci-source]. These checks do not scan removed secrets in Git history; advisory databases, patterns, rules, and confidence thresholds can produce false negatives. They reduce supply-chain risk without proving the snapshot or dependencies benign. |
 | **GRAFT-TM-12** | Device intent accepted by Graft is limited to ordered, colon-free qualified CDI names; direct paths, duplicate references, target remapping, permissions, and arbitrary runtime arguments remain unavailable. The host CDI spec is trusted policy rather than validated Graft input. | CDI grammar and indexed field validation in [`resolve.rs`][resolve-source]; fixed `AddDevice=` rendering in [`render-quadlet.nix`][renderer-source]. | Resolver positive and negative CDI tests; generated-schema parity; `quadlet-cdi` NixOS/Home Manager generator verification and the controlled fake-spec runtime test wired through [`flake.nix`][flake-source]. |
 | **GRAFT-TM-13** | Every workload resolves read-only rootfs, drop-all capabilities, and no-new-privileges defaults; target selection is explicit, and typed boolean opt-outs plus canonical capability additions are visible dangerous intent. | Hardening schema constraints and resolver validation in [`schema.rs`][schema-source] and [`resolve.rs`][resolve-source]; fixed `DropCapability=`, `NoNewPrivileges=`, and `ReadOnly=` rendering in [`render-quadlet.nix`][renderer-source]. | Resolver default, positive, ordering, false-value, malformed, mixed, and duplicate tests; schema parity; combined CDI/hardening system and user generator verification; controlled runtime checks for effective capabilities, no-new-privileges, and rootfs writes. |
-| **GRAFT-TM-14** | Explicit tmpfs intent is limited to ordered unique absolute container paths. Relative paths, control characters, duplicates, `:` options syntax, terminal whitespace, and terminal `\` fail before materialisation. Tmpfs has no host source but creates a writable in-memory mount that can mask rootfs content. | Indexed path validation in [`resolve.rs`][resolve-source]; fixed ordered `Tmpfs=` rendering in [`render-quadlet.nix`][renderer-source]. | Resolver positive and negative tmpfs tests; generated-schema parity; NixOS and Home Manager module assertions plus real Quadlet generator verification in [`flake.nix`][flake-source]. Target-overlap policy remains deferred. |
+| **GRAFT-TM-14** | Typed tmpfs accepts only an absolute normalised target plus bounded mode and size. It always renders fixed `rw,noexec,nosuid,nodev` flags. Protected targets, duplicates, and ancestor or descendant overlaps fail across tmpfs, binds, and managed volumes; only tmpfs may target the approved temporary trees. | Indexed option and path validation plus shared mount-collision validation in [`resolve.rs`][resolve-source]; fixed ordered `Tmpfs=` rendering in [`render-quadlet.nix`][renderer-source]. | Resolver option, protected-target, temporary-tree, same-kind, and cross-kind collision tests; generated-schema parity; NixOS and Home Manager assertions, real Quadlet generation, and rootful/rootless runtime evidence. |
 
 ## Threats, controls, and residual risk
 
@@ -279,21 +279,22 @@ implemented through [#139] and [#163].
 
 ### Host files, mounts, paths, and state
 
-A configured volume can expose host content with the target manager's authority.
-Current volume parts are delimiter- and line-safe, but Graft does not check path
-existence, ownership, symlink traversal, source type, target overlap, read-only
-policy, or an approved host-path allowlist. A volume can overlap the generated
-`/nix/store` bind or expose a store source at another target. Writable mounts let
-a compromised workload alter host-owned data within its runtime authority.
-The approved [filesystem policy](filesystem-policy.md) under [#142] replaces
-this legacy behavior with read-only-by-default binds, typed managed volumes and
-tmpfs, and shared collision checks. Implementation and migration remain in
-[#164]. Dedicated direct-device fields stay deferred because pure resolution
-cannot attest their activation-time type. This does not prove effective device
-isolation: an otherwise allowed bind source can itself be a device or socket,
-or resolve to one through a symlink. Qualified CDI references do not attest the
-effective resources in the host spec; a spec may add devices, mounts,
-environment values, or hooks with the selected target's runtime authority.
+A typed bind can expose host content with the target manager's authority. Its
+source and target must be absolute, colon-free, and lexically normalised; binds
+default read-only, protected virtual sources fail, and writable access requires
+explicit `readOnly = false`. Shared validation rejects protected targets,
+duplicates, and ancestor or descendant overlaps across binds, managed volumes,
+and tmpfs, including every target equal to, above, or below `/nix/store`.
+Managed volumes are separate typed runtime-owned storage, with literal named
+resources remaining dangerous sharing authority. Graft still does not attest a
+bind source's existence, ownership, permissions, type, or symlink traversal. An
+allowed source can therefore expose a device, socket, or store path at another
+target, and a writable bind lets a compromised workload alter host-owned data
+within its runtime authority. Dedicated direct-device fields stay deferred
+because pure resolution cannot attest their activation-time type. Qualified CDI
+references do not attest the effective resources in the host spec; a spec may
+add devices, mounts, environment values, or hooks with the selected target's
+runtime authority.
 
 Overlay writes are disposable runtime state. Explicitly mounted persistent data
 needs separate permissions, backup, integrity, and retention policy. Graft does
@@ -425,9 +426,9 @@ secure defaults and typed relaxations are current through [#163]. The
 [secure target defaults design](secure-defaults.md) approves explicit targets,
 a shared concrete baseline, and typed relaxations; current behavior changes
 through the current [#163] enforcement. The approved
-[filesystem policy](filesystem-policy.md) defines the replacement for legacy
-volumes and defers direct devices pending host-aware attestation; mount
-implementation remains in [#164]. Identity and rootfs-integrity gaps are tracked
+[filesystem policy](filesystem-policy.md) from [#142] is current through [#164] and defers
+direct devices pending host-aware attestation. Identity and rootfs-integrity
+gaps are tracked
 by [#107] and [#108]. Related isolation,
 mount, secret, resource, shadowing, remote, and temporary-agent work is linked in
 the risk sections above.
