@@ -150,7 +150,7 @@ The CLI may only add defaults that belong to Graft semantics.
 | `name` | required; must be safe for container and unit output |
 | `config.runtime.packages` | always `graft-pause` + user packages |
 | `config.runtime.command` | user command; `/bin/graft-pause` if missing for implicit or long-running lifecycle; required for `job` and `setup` |
-| `deploy.target` | default `system`, unless user sets `user` |
+| `deploy.target` | required explicit `system` or `user`; no authority default |
 | `config.runtime.mode` | currently only `rootfs-store` |
 | supported container fields | no defaults; include only if user sets them |
 | environment, publish, volumes, CDI devices | no defaults; preserve deterministic ordering rules |

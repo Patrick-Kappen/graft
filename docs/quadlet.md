@@ -132,17 +132,17 @@ Typed `Network=` output supports `none` and resolved `.container` source-unit
 references. The source-unit form lets Quadlet add automatic `Requires=` and
 `After=` relationships; see [Container network intent](networking.md).
 
-Path-only tmpfs intent renders mechanically without an options suffix:
+Typed tmpfs intent renders with fixed safe flags and optional bounded mode and
+size values:
 
 ```ini
-Tmpfs=/run
-Tmpfs=/tmp
+Tmpfs=/scratch:rw,noexec,nosuid,nodev,mode=1777,size=16M
 ```
 
 Quadlet translates each line to one Podman `--tmpfs` argument. Graft rejects
-relative paths, duplicates, control characters, `:`, terminal whitespace, and
-terminal `\`, so raw tmpfs options, trimming, and line continuation cannot pass
-through this field.
+relative and protected targets, collisions, invalid modes and sizes, and raw
+option syntax. Typed binds and managed volumes render as ordered `Volume=`
+lines after tmpfs entries; see [Filesystem and mount policy](filesystem-policy.md).
 
 Qualified CDI references render mechanically without direct-device target or
 permission suffixes:
