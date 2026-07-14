@@ -285,11 +285,12 @@ a compromised workload alter host-owned data within its runtime authority.
 The approved [filesystem policy](filesystem-policy.md) under [#142] replaces
 this legacy behavior with read-only-by-default binds, typed managed volumes and
 tmpfs, and shared collision checks. Implementation and migration remain in
-[#164]. Direct host-device paths stay deferred because pure resolution cannot
-attest their activation-time type. Qualified CDI references do not attest the
-effective resources in the host spec; a spec may
-add devices, mounts, environment values, or hooks with the selected target's
-runtime authority.
+[#164]. Dedicated direct-device fields stay deferred because pure resolution
+cannot attest their activation-time type. This does not prove effective device
+isolation: an otherwise allowed bind source can itself be a device or socket,
+or resolve to one through a symlink. Qualified CDI references do not attest the
+effective resources in the host spec; a spec may add devices, mounts,
+environment values, or hooks with the selected target's runtime authority.
 
 Overlay writes are disposable runtime state. Explicitly mounted persistent data
 needs separate permissions, backup, integrity, and retention policy. Graft does

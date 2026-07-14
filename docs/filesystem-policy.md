@@ -157,9 +157,9 @@ Size limits constrain one mount, not total workload or host memory consumption.
 
 ## Direct devices remain unavailable
 
-CDI qualified names remain the only approved device-reference contract. This
-design does not approve direct `/dev` paths, target remapping, permissions,
-device directories, or optional-device prefixes.
+CDI qualified names remain the only approved dedicated device-reference
+contract. This design does not approve direct `/dev` fields, target remapping,
+permissions, device directories, or optional-device prefixes.
 
 Pure resolution cannot prove that an activation-time `/dev` path exists or is a
 device node rather than a directory or symlink. The runtime may accept broader
@@ -170,9 +170,16 @@ false guarantee.
 
 A future direct-device design requires an explicit host-aware attestation model
 that preserves pure resolution and defines time-of-check/time-of-use behavior.
-Until then direct paths remain dangerous deferred intent and fail closed. Graft
-never changes host device permissions, groups, labels, kernel modules, or user
-namespaces to satisfy a device request.
+Until then dedicated direct-device intent remains dangerous, deferred, and
+fail-closed. Graft never changes host device permissions, groups, labels, kernel
+modules, or user namespaces to satisfy a device request.
+
+This is not an effective-device isolation guarantee for host binds. Because
+Graft cannot attest source type or resolve activation-time symlinks, an allowed
+bind source outside `/dev` may itself be a device node or resolve to one. Such
+exposure remains residual dangerous bind authority and must be reviewed by the
+host administrator. Graft does not describe the bind as a device reference or
+infer device permissions from it.
 
 ## Path and collision rules
 
