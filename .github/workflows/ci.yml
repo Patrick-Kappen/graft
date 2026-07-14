@@ -2,9 +2,19 @@ name: CI
 
 on:
   pull_request:
-  push:
-    branches:
-      - main
+    paths:
+      - .github/workflows/ci.yml
+  workflow_dispatch:
+    inputs:
+      runtime_tests:
+        description: Run advisory activation and CDI VM tests
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 permissions:
   contents: read
@@ -13,6 +23,7 @@ jobs:
   workflow_lint:
     name: workflow-lint
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - name: Checkout
@@ -29,6 +40,7 @@ jobs:
   rust:
     name: rust
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     env:
       CODECOV_TOKEN_CONFIGURED: ${{ secrets.CODECOV_TOKEN != '' }}
 
@@ -68,6 +80,7 @@ jobs:
   coverage:
     name: coverage
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
@@ -101,6 +114,7 @@ jobs:
   security:
     name: security
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
       - name: Checkout
@@ -133,6 +147,7 @@ jobs:
   docs:
     name: docs
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - name: Checkout
@@ -175,6 +190,7 @@ jobs:
   nix:
     name: nix
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
@@ -211,6 +227,7 @@ jobs:
 
   activation_runtime:
     name: activation-runtime
+    if: ${{ inputs.runtime_tests }}
     runs-on: ubuntu-latest
     continue-on-error: true
     timeout-minutes: 30
@@ -227,6 +244,7 @@ jobs:
 
   cdi_runtime:
     name: cdi-runtime
+    if: ${{ inputs.runtime_tests }}
     runs-on: ubuntu-latest
     continue-on-error: true
     timeout-minutes: 20
@@ -244,6 +262,7 @@ jobs:
   checks:
     name: checks
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     needs:
       - workflow_lint
       - rust

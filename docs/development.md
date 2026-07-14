@@ -295,6 +295,40 @@ nix develop .#ci -c mdbook build
 git diff --check
 ```
 
+### GitHub Actions execution
+
+GitHub CI is deliberately manual for product and documentation changes.
+Pull-request pushes and merges do not start it automatically; a PR that changes
+`.github/workflows/ci.yml` itself is the narrow exception so branch protection
+can validate future CI changes. Run applicable local checks first, then dispatch
+CI once for the final commit that should satisfy branch protection:
+
+```bash
+gh workflow run ci.yml --ref <branch>
+```
+
+The required `workflow-lint`, `rust`, `coverage`, `security`, `docs`, and `nix`
+check contexts remain branch-protection requirements. Until the manual run
+finishes on the latest commit, the pull request remains blocked. A newer manual
+run for the same non-`main` ref cancels its obsolete predecessor; `main` runs
+are not cancelled automatically.
+
+Activation and CDI VM jobs are advisory and opt-in because they are expensive:
+
+```bash
+gh workflow run ci.yml --ref <branch> -f runtime_tests=true
+```
+
+Pages deployment is also manual and separate from CI:
+
+```bash
+gh workflow run pages.yml --ref main
+```
+
+Use the runtime option for changes affecting activation, user managers, Podman,
+Quadlet runtime behavior, CDI, rootfs materialisation, or shared security
+boundaries. A maintainer may also request it for compatibility evidence.
+
 The module-eval and Quadlet generator checks use IFD, so build them explicitly.
 The dependency check verifies all supported relations, Graft source-unit
 translation, unchanged explicit external units, target parity, and
