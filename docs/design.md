@@ -23,7 +23,7 @@ approved typed namespace, shared-container reference, and network security
 boundaries are defined in [Container network intent](networking.md). Qualified
 host-managed resource references are defined in
 [Container Device Interface references](cdi.md). Current process
-and rootfs controls are defined in [Explicit container hardening](hardening.md).
+and rootfs controls are defined in [Container hardening](hardening.md).
 Security assumptions, target authority, and current invariant evidence are
 defined in [Threat model and trust boundaries](threat-model.md). The boundary
 between
