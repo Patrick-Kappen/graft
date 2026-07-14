@@ -121,7 +121,7 @@ makes the following ownership decisions:
 | Area | Decision after this phase |
 | --- | --- |
 | User namespaces | Preserve runtime behavior until #140/#141 define account, ownership, store-bind, and rootless/rootful semantics. |
-| Seccomp | Preserve Podman's default profile; `unconfined` remains unavailable dangerous intent. |
+| Seccomp | Preserve Podman's default profile; `unconfined` remains unavailable as dangerous intent. |
 | SELinux/AppArmor | Preserve host/runtime defaults; label disable and equivalent relaxations remain unavailable. |
 | Mask/unmask | Preserve OCI/Podman defaults; raw paths and `ALL` remain unavailable. |
 | Tmpfs | Preserve `ReadOnlyTmpfs=true` behavior and current explicit path-only tmpfs; options and collisions remain #142/#164. |

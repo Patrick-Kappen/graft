@@ -142,7 +142,7 @@ but it does not make the original escape hatch acceptable.
 | Host network namespace sharing | Dangerous | Planned in [#193] | Explicit typed host mode and target-specific exposure rules are required. |
 | PID, IPC, UTS, user, or cgroup namespace sharing | Dangerous | Deferred | Namespace-specific intent and target rules are required before an implementation issue is approved. |
 | Writable rootfs, no-new-privileges opt-out, unconfined seccomp, disabled labels, unmasked host paths, and equivalent sandbox relaxations | Dangerous | Writable-rootfs and no-new-privileges opt-outs approved by [#139] for [#163]; other relaxations remain deferred | Approved relaxations must be explicit and visible in resolved and rendered output. Seccomp, label, and mask relaxations remain unavailable. |
-| Automatic per-container user namespaces | First-class | Planned in [#139] and [#141] | Effective host/container identities and rootless/rootful behavior must be resolved together. |
+| Automatic per-container user namespaces | First-class | Planned in [#140] and [#141] | Effective host/container identities and rootless/rootful behavior must be resolved together. |
 | Custom UID/GID maps and subordinate-ID selection | Dangerous | Deferred within [#140] and [#141] | Ownership authority, range conflicts, and mount translation require explicit policy. |
 | Failure handlers, conflicts, reverse lifecycle propagation, and stop effects on external units | Dangerous | Deferred | Activation and reverse effects require a concrete typed use case and graph validation. |
 | Raw Quadlet, Podman/systemd arguments, host commands, shell, and arbitrary unit maps | Forbidden | — | These bypass typed intent and Graft-owned rendering. |
