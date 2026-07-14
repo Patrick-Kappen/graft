@@ -83,6 +83,9 @@ Rootfs=/nix/store/...-graft-graft-example-env:O
 Exec="bash" "-c" "echo graft-example-ready; exec /bin/graft-pause"
 Volume=/nix/store:/nix/store:ro
 Environment="GRAFT_EXAMPLE=nixos-system"
+ReadOnly=true
+DropCapability=all
+NoNewPrivileges=true
 ```
 
 To stop the workload:

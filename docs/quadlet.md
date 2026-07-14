@@ -1,203 +1,112 @@
-# Quadlet — Graft output
+# Generated Quadlet output
 
-Quadlet is a Podman systemd generator. It reads `.container` files and generates
-ordinary systemd `.service` units from them. Current generator checks use Podman
-5.8.2 and systemd 260; see the versioned links in
+Quadlet is Podman's systemd generator. Graft users write TOML; the resolver
+emits JSON; Nix renders `.container` source units; Quadlet generates ordinary
+systemd services from them.
+
+Current generator checks use Podman/Quadlet 5.8.2 and systemd 260. These are
+tested versions, not yet a minimum-version promise; see
 [Capability status](capabilities.md#tested-upstream-context).
 
-In Graft, Quadlet is output. Users write TOML; the CLI resolves it to JSON; the
-NixOS and Home Manager modules render `.container` files.
+## Locations and identity
 
-```text
-TOML → CLI resolved JSON → NixOS/Home Manager module → .container
-```
-
-## File locations
-
-| Resolved target | Scope | Path |
+| Target | Manager and authority | Source-unit directory |
 | --- | --- | --- |
-| `system` | system manager, rootful | `/etc/containers/systemd/` |
+| `system` | system manager, rootful Podman | `/etc/containers/systemd/` |
 | `user` | current account's user manager; rootless only when non-root | `~/.config/containers/systemd/` |
 
-Symlinks are supported. NixOS can build a file in the store and link it through
-`environment.etc`. Home Manager can link a file through `xdg.configFile`.
+NixOS and Home Manager may place symlinks to immutable store files in those
+locations. The TOML filename currently selects the `.container` filename and
+resulting service stem; resolved top-level `name` selects `ContainerName=`. Keep
+them equal until [#107](https://github.com/Patrick-Kappen/graft/issues/107).
 
-Today, the `.container` filename and resulting systemd service stem come from
-the TOML filename. `ContainerName=` comes from resolved `name`. Keep the
-filename stem and `name` equal until
-[#107](https://github.com/Patrick-Kappen/graft/issues/107) defines the final
-identity contract.
+## Fixed rootfs-store output
 
-## Responsibilities
-
-### CLI
-
-The CLI translates TOML to resolved JSON:
-
-- package list
-- command / `Exec=`
-- deploy target
-- optional service settings
-- explicit root-filesystem and process hardening
-- typed concrete dependency identities
-- Graft defaults and automatic resource references
-
-The CLI does not render `.container` files.
-
-### Nix modules
-
-The NixOS and Home Manager modules render Quadlet mechanically from resolved
-JSON:
-
-- NixOS renders only `target = "system"`.
-- Home Manager renders only `target = "user"`.
-- `ContainerName=` comes from resolved `name`.
-- `Rootfs=` comes from the generated rootfs store path.
-- `Exec=` comes from resolved `runtime.command`.
-- `Volume=/nix/store:/nix/store:ro` is always rendered for store symlinks.
-- Typed tmpfs, binds, and managed volumes render in fixed tmpfs → bind → volume order with explicit safe options.
-- Qualified resolved CDI references render as ordered `AddDevice=` lines.
-- Explicit root-filesystem and process hardening renders as fixed `ReadOnly=`, `DropCapability=`, and `NoNewPrivileges=` keys.
-- Optional `[Unit]` dependency keys are rendered only from concrete resolved identities.
-- Optional `[Service]` keys are rendered only when resolved JSON contains them.
-- `[Container]` values that become generated command-line arguments escape `%` specifiers and `$` variables.
-- `[Install]` is not rendered by default.
-
-## Rootfs-store mapping
-
-The current `rootfs-store` mode uses a rootfs from the Nix store, not images.
-Non-rootfs artifact scope remains undecided in
-[#150](https://github.com/Patrick-Kappen/graft/issues/150); no future syntax is
-promised.
-
-| Quadlet option | Source |
-| --- | --- |
-| `ContainerName=` | resolved `name` |
-| `Rootfs=<path>:O` | rootfs built from resolved `runtime.packages` |
-| `Exec=` | resolved `runtime.command` |
-| `Volume=/nix/store:/nix/store:ro` | required for Nix store symlinks |
-| `Tmpfs=` | each ordered resolved `filesystem.tmpfs[]` path |
-| `AddDevice=` | each ordered resolved `filesystem.devices[].source` value |
-| `ReadOnly=` | explicit resolved `filesystem.readOnly` value |
-| `DropCapability=` | each ordered resolved `security.dropCapabilities` value |
-| `NoNewPrivileges=` | explicit resolved `security.noNewPrivileges` value |
-
-Example with implicit or long-running lifecycle and no user command:
+Every current workload starts with mechanically owned keys:
 
 ```ini
 [Container]
-ContainerName=node-dev
-Rootfs=/nix/store/xyz-graft-node-dev-env:O
+ContainerName=graft-example
+Rootfs=/nix/store/...-graft-graft-example-env:O
 Exec="/bin/graft-pause"
 Volume=/nix/store:/nix/store:ro
-```
-
-Example with a user command:
-
-```ini
-[Container]
-ContainerName=web
-Rootfs=/nix/store/xyz-graft-web-env:O
-Exec="node" "server.js"
-Volume=/nix/store:/nix/store:ro
-```
-
-## `graft-pause`
-
-`graft-pause` is always included in the rootfs:
-
-```text
-packages = ["graft-pause", ...user packages]
-```
-
-`Exec="/bin/graft-pause"` is used when an implicit or long-running lifecycle
-has no command. `job` and `setup` require an explicit command and fail
-resolution without one. A user command becomes quoted `Exec=` argv.
-
-`graft-pause` exits cleanly on `SIGTERM` and `SIGINT`, so `systemctl stop` and
-`systemctl --user stop` can finish without a SIGKILL timeout.
-
-This avoids default dependencies on `bashInteractive`, `coreutils`, or
-`sleep infinity`.
-
-## Optional container keys
-
-Graft renders optional Quadlet keys only when the resolved JSON contains them.
-The authoritative TOML → resolved JSON → Nix → Quadlet mapping is the
-[current-field capability matrix](capabilities.md#current-graft-v1-fields).
-This page describes output-specific behavior rather than maintaining a second
-field reference.
-
-Typed `Network=` output supports `none` and resolved `.container` source-unit
-references. The source-unit form lets Quadlet add automatic `Requires=` and
-`After=` relationships; see [Container network intent](networking.md).
-
-Typed tmpfs intent renders with fixed safe flags and optional bounded mode and
-size values:
-
-```ini
-Tmpfs=/scratch:rw,noexec,nosuid,nodev,mode=1777,size=16M
-```
-
-Quadlet translates each line to one Podman `--tmpfs` argument. Graft rejects
-relative and protected targets, collisions, invalid modes and sizes, and raw
-option syntax. Typed binds and managed volumes render as ordered `Volume=`
-lines after tmpfs entries; see [Filesystem and mount policy](filesystem-policy.md).
-
-Qualified CDI references render mechanically without direct-device target or
-permission suffixes:
-
-```ini
-AddDevice=nvidia.com/gpu=all
-```
-
-Quadlet translates each line to one Podman `--device` argument. The host CDI
-registry owns the resulting OCI edits; see
-[Container Device Interface references](cdi.md).
-
-The concrete security baseline renders without an alternate raw-security path:
-
-```ini
 ReadOnly=true
 DropCapability=all
 NoNewPrivileges=true
 ```
 
-Quadlet translates these keys to Podman's read-only rootfs, capability-drop,
-and no-new-privileges controls. Boolean opt-outs render explicit `false` source
-keys, while canonical capability additions render ordered `AddCapability=`
-lines after drop-all. See [Container hardening](hardening.md).
+`Exec=` preserves explicit argv with systemd-compatible quoting. An implicit or
+long-running workload without argv uses `/bin/graft-pause`; finite `job` and
+`setup` workloads must supply a command. Graft does not render `Image=` or pull
+an image for this backend.
 
-Environment files, published ports, volumes, CDI references, and capability
-additions preserve user order. Environment variables are sorted by key.
-Environment-file path values and command argv are quoted for systemd argument
-parsing. Quadlet resolves relative environment-file paths against the
-source-unit directory and passes each as one Podman
-`--env-file` argument; this is not systemd service `EnvironmentFile=` wildcard
-or optional-file syntax. Container values render literal `%` as `%%` and
-literal `$` as `$$` when they become generated command-line arguments.
+The fixed complete-store bind currently lets rootfs store symlinks resolve.
+Typed targets cannot overlap `/nix/store`. Closure-scoped replacement remains an
+approved future implementation and has no fallback to a writable or silently
+missing store.
 
-## Environment variables
+## Optional container output
 
-Environment variables are rendered as sorted, quoted systemd assignments:
+The renderer emits an optional key only when resolved JSON contains the
+corresponding current concept. The authoritative field-by-field mapping lives in
+[Capability status](capabilities.md#current-graft-v1-fields).
+
+Representative output is:
 
 ```ini
-Environment="BRACED=pre$${HOME}post"
-Environment="DOLLAR=cost $$5"
+HostName=example.internal
+User=1000
+Group=1000
+WorkingDir=/workspace
 Environment="GREETING=hello world"
-Environment="PERCENT=100%%"
-Environment="QUOTED=say \"hi\""
+EnvironmentFile="/run/graft/example.env"
+Tmpfs=/scratch:rw,noexec,nosuid,nodev,mode=1777,size=16M
+Volume=/srv/source:/workspace:ro,bind
+Volume=graft-data:/data:rw
+Volume=/cache
+AddDevice=vendor.example/class=device
+AddCapability=CAP_NET_BIND_SERVICE
+Network=none
+PublishPort=127.0.0.1:8080:8080
 ```
 
-The whole `KEY=value` assignment is quoted. Double quotes, backslashes, `%`
-specifier markers, and literal `$` characters are escaped before rendering.
-Environment values are not a secret transport.
+Relevant ordering is deterministic:
 
-## Unit dependencies
+1. fixed rootfs-store keys and selected container identity;
+2. sorted environment variables and ordered environment files;
+3. ordered tmpfs, binds, managed volumes, and CDI references;
+4. rootfs and process hardening, with additions after drop-all;
+5. network namespace and ordered published ports;
+6. optional service and install sections.
 
-A `[Unit]` section is rendered only when resolved typed dependencies contain at
-least one relationship. The resolver sorts concrete identity lists; Nix joins
-them mechanically without accepting free-form keys:
+Typed tmpfs always receives `rw,noexec,nosuid,nodev` plus validated optional mode
+and size. Binds always receive explicit `ro,bind` or `rw,bind`. Named managed
+volumes receive explicit `ro` or `rw`; anonymous volumes use target-only syntax
+and are writable. See [Filesystems and mounts](filesystem-policy.md).
+
+A qualified CDI name becomes one `AddDevice=` line. The host CDI registry owns
+any resulting OCI devices, mounts, environment, and hooks; see
+[CDI resource references](cdi.md).
+
+`Network=none` and resolved `.container` references are typed namespace output.
+Quadlet adds dependencies for source-unit references. Published ports are valid
+only with the implicit default network mode.
+
+## Quoting and escaping
+
+Commands, environment values, paths, and other container arguments are quoted
+for systemd parsing where required. Values that become generated command-line
+arguments escape literal `%` as `%%` and `$` as `$$`. Environment variables are
+sorted by key; order-sensitive lists preserve user order.
+
+Environment-file paths are Podman `--env-file` inputs, not systemd service
+`EnvironmentFile=` semantics. Relative paths are resolved by Quadlet against the
+source-unit directory. They are explicit host references and are not a secrets
+transport.
+
+## Unit relationships
+
+Typed dependencies may render a `[Unit]` section:
 
 ```ini
 [Unit]
@@ -206,113 +115,43 @@ After=database.container
 PartOf=database.container
 ```
 
-For Graft workload targets, Quadlet translates `.container` source-unit names
-to generated `.service` identities and fails generation if the source unit is
-missing. Exact `externalUnit` identities remain unchanged. Resource-specific
-references such as `Network=database.container` continue to let Quadlet add
-their automatic dependencies instead of duplicating lines here.
+Workload targets use Quadlet source-unit identities so the generator can map
+them to services and add resource dependencies. Exact validated external unit
+names remain unchanged. Raw `[Unit]` maps are unavailable; see
+[Workload dependencies](dependencies.md).
 
-See [Typed workload dependencies](dependencies.md) for input, validation,
-relation semantics, and external-unit boundaries. Raw `[Unit]` maps remain
-unsupported.
+## Service and startup sections
 
-## Service settings
-
-Service settings have no restart or timing defaults. An absent lifecycle leaves
-Quadlet's normal long-running notify behavior implicit.
-
-A `[Service]` section is rendered only when at least one supported service field
-is explicitly set. `config.service.lifecycle` maps typed workload intent to
-`Type=` and, for finite workloads, `RemainAfterExit=`. Supported fields also
-include `Restart=`, `RestartSec=`, `TimeoutStartSec=`, and `TimeoutStopSec=`.
-Literal timing values are copied verbatim and are not `%`-escaped by Graft.
-
-Example:
+Lifecycle and timing intent may render:
 
 ```ini
 [Service]
-Restart=on-failure
-RestartSec=10s
+Type=oneshot
+RemainAfterExit=yes
 TimeoutStartSec=2m
 TimeoutStopSec=30s
 ```
 
-Without explicit service settings, no `[Service]` section is rendered.
+No restart or timing policy is added by default. The exact lifecycle mapping is
+in [Workload lifecycle](lifecycle.md).
 
-## Startup activation
+No `[Install]` section is rendered by default. Explicit
+`deploy.activation = "startup"` resolves to `multi-user.target` for system
+workloads or `default.target` for user workloads:
 
-A `.container` file may exist without starting automatically. When
-`deploy.activation` is absent, the modules generate no `[Install]` section, so
-systemd knows the service without requesting it during manager startup.
-
-Explicit `deploy.activation = "startup"` maps to a fixed system or user target;
-see [Workload startup activation](activation.md). The resolver selects the target
-and the modules render the resolved `[Install]` relationship mechanically. Graft
-never invokes `systemctl enable` during build or materialisation.
-
-## Overlay
-
-By default, rootfs-store containers use a writable overlay above the read-only
-store rootfs:
-
-```text
-lowerdir = /nix/store/xxx-graft-env   (read-only)
-upperdir = container storage          (writable by default)
+```ini
+[Install]
+WantedBy=multi-user.target
 ```
 
-For paths backed by `Rootfs=` rather than another runtime or explicit mount,
-writes normally go to the upperdir. Explicit `config.filesystem.readOnly = true`
-makes those container rootfs paths read-only through Podman. The tested upstream
-`ReadOnlyTmpfs=true` default still provides read-write tmpfs mounts, although
-path modes and dropped capabilities can deny process writes. Typed binds,
-managed volumes, tmpfs, or CDI specs can add other writable mounts. The
-renderer currently binds `/nix/store` read-only, and typed targets cannot
-overlap it; an explicit bind can still expose a selected store source elsewhere,
-and trusted CDI edits can inject mounts. The current `Rootfs=...:O` mode does not configure a persistent, inspectable
-upperdir, so users must not rely on overlay writes after the runtime container
-is removed. It is not a promote flow.
-Reviewable overlay inspection, diff, and promotion are future work in
-[#160](https://github.com/Patrick-Kappen/graft/issues/160) and
-[#175](https://github.com/Patrick-Kappen/graft/issues/175).
+Graft never invokes `systemctl enable` during materialisation. See
+[Startup activation](activation.md).
 
-System containers (`target = "system"`) use rootful Podman with kernel overlayfs
-through `:O`. User-target containers run through the current Home Manager
-account's user manager. Podman and rootless overlay support such as
-`fuse-overlayfs` apply only when that account is non-root; a root-owned user
-manager remains rootful.
+## Overlay lifetime
 
-## Lifecycle
-
-Generated containers are normal systemd services. The typed distinction between
-long-running services, repeatable finite jobs, and retained setup jobs is defined
-in [Workload lifecycle semantics](lifecycle.md).
-
-System container:
-
-```bash
-sudo systemctl start <name>.service
-sudo systemctl stop <name>.service
-```
-
-User container:
-
-```bash
-systemctl --user start <name>.service
-systemctl --user stop <name>.service
-```
-
-A user timer may also trigger a generated user service. If that service must run
-without an active login session, enable systemd user linger in host
-configuration or with `loginctl enable-linger <user>`; Graft TOML does not carry
-host login policy.
-
-Stopping a service removes the runtime container when Podman runs it with
-`--rm`. The Quadlet file remains, so the service can be started again later.
-
-## Not used by rootfs-store Graft containers
-
-- `Image=` — Graft uses `Rootfs=` for this mode.
-- runtime image pulls by Graft
-- user-written `.container` files as input
-- default `Restart=on-failure`
-- default `[Install] WantedBy=...`
+`Rootfs=...:O` uses runtime-managed overlay storage. The secure baseline makes
+rootfs paths read-only, while typed mounts or trusted CDI edits may remain
+writable. Graft configures no persistent inspectable upperdir, so container
+writes must not be treated as durable state or a current promote workflow.
+Stopping the generated service removes the runtime container; the source unit
+remains available for a later start.

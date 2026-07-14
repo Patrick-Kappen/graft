@@ -1,48 +1,36 @@
-# Graft — Overview
+# Graft overview
 
-Graft runs Podman Quadlet containers from TOML files, built from the Nix store.
-The user writes Graft TOML; the CLI resolves it to JSON; NixOS and Home Manager
-materialise rootfs paths and Quadlet `.container` files.
+Graft materialises typed TOML workloads as Podman Quadlet containers backed by a
+Nix-store rootfs. Workload authors describe supported intent; Graft and Nix own
+the translation into runtime artefacts.
 
-The current `rootfs-store` backend is a Nix-native container workflow with no
-image pulls, no ad-hoc package installs inside containers, and no hand-written
-Quadlet boilerplate. Non-rootfs artifact scope remains undecided in
-[#150](https://github.com/Patrick-Kappen/graft/issues/150); placement direction
-is kept separately in [Long-term vision](vision.md).
+The current flagship backend is `rootfs-store`. It performs no image pull and no
+package installation inside the running container. Other artifact backends are
+not part of the current contract.
 
-## Core flow
+## From intent to service
 
 ```text
 Edit TOML
   ↓
-nixos-rebuild switch / Home Manager activation
+NixOS rebuild or Home Manager activation
   ↓
-Nix calls the Graft CLI via IFD
+Graft resolves the selected TOML set to deterministic JSON
   ↓
-CLI writes resolved JSON to stdout
+Nix builds a rootfs and renders a Quadlet .container file
   ↓
-Nix reads the JSON
+systemd discovers the generated service
   ↓
-Nix builds rootfs in the store → /nix/store/xxx-graft-<name>-env
-  ↓
-NixOS/Home Manager renders a Quadlet .container file
-  ↓
-target = "system" → /etc/containers/systemd/<name>.container
-target = "user"   → ~/.config/containers/systemd/<name>.container
-  ↓
-systemd knows about the unit; it does not auto-start by default
+Podman starts the container when explicitly requested
 ```
 
-Today, the generated `.container` filename and service stem come from the TOML
-filename, while `ContainerName=` comes from top-level `name`. Keep those values
-equal until [#107](https://github.com/Patrick-Kappen/graft/issues/107) defines
-the final identity contract.
+Graft does not autostart a workload merely because its TOML exists. Optional
+`deploy.activation = "startup"` requests a fixed manager-start relationship;
+otherwise the generated service waits for an explicit start or another unit.
 
-## Responsibilities
+## Typed workload intent
 
-### TOML
-
-TOML is user intent only. It is not Quadlet and it is not Nix.
+A minimal workload chooses its authority explicitly:
 
 ```toml
 version = 1
@@ -55,236 +43,79 @@ target = "user"
 packages = ["nodejs"]
 ```
 
-Users do not write rootfs boilerplate, `/nix/store` mounts, overlay setup, or
-default keep-alive commands.
+TOML does not contain rootfs assembly, store-mount boilerplate, overlay flags,
+raw Quadlet sections, or Nix expressions. The generated schema accepts only
+implemented fields. Unknown input and explicitly configured reserved fields fail
+closed instead of disappearing.
 
-### CLI
+The filename stem currently selects the generated source-unit and service name,
+while top-level `name` selects `ContainerName=`. Keep them equal until the final
+identity contract in [#107](https://github.com/Patrick-Kappen/graft/issues/107).
 
-The CLI translates TOML into a resolved JSON spec and writes that JSON to
-stdout. The CLI owns dependencies, validation, translation, and defaults
-represented in the resolved spec.
+## Two explicit authority scopes
 
-Current CLI rules:
+| Target | Materialiser | Service manager | Podman authority |
+| --- | --- | --- | --- |
+| `system` | NixOS | system manager | rootful |
+| `user` | Home Manager | current account's user manager | rootless only for a non-root account |
 
-- require `version = 1`
-- validate container names and supported values before JSON output
-- reject every explicitly configured reserved field instead of discarding it
-- add `graft-pause` to every rootfs
-- use `/bin/graft-pause` when an implicit or long-running lifecycle has no
-  command; require an explicit command for `job` and `setup`
-- preserve user commands exactly
-- require explicit `deploy.target = "system"` or `"user"`
-- support only `rootfs-store` today
-- include supported container, environment, network, and service fields only
-  when explicitly set
-- resolve read-only rootfs, drop-all capabilities, and no-new-privileges as
-  concrete defaults while preserving typed explicit relaxations
-- validate colon-free qualified CDI resource names while leaving host registry
-  policy to Podman and the operator
-- resolve typed workload dependencies through the explicit source set and
-  preserve exact validated external-unit identities
-- include `deploy.enable` only when explicitly set
-- never invent autostart
+A user target owned by root remains rootful. Graft does not infer or enforce the
+account UID. Host configuration remains responsible for Podman, rootless overlay
+support, user linger, accounts, firewall and DNS policy, and other prerequisites.
 
-### Nix modules
+## Rootfs and package model
 
-The NixOS and Home Manager modules are dumb materialisers. They read resolved
-JSON and mechanically:
+The resolver always includes Graft's small `graft-pause` package. Other package
+names resolve from the target host's pinned `pkgs`, and Nix builds the resulting
+rootfs before activation. An implicit or long-running workload without a command
+uses `/bin/graft-pause`; finite `job` and `setup` workloads require an explicit
+command.
 
-1. filter for their target (`system` for NixOS, `user` for Home Manager)
-2. map package names to Nix packages
-3. build a `pkgs.buildEnv`
-4. wrap it with real system directories (`/etc`, `/tmp`, `/var`, `/run`, ...)
-5. render the Quadlet `.container` file
-6. place the file in the matching Quadlet search path
+Graft uses Quadlet `Rootfs=<store-path>:O`, not `Image=`. The overlay itself is
+writable, but the current secure baseline renders `ReadOnly=true`, so rootfs
+paths are read-only unless the user explicitly opts out. Typed tmpfs, binds,
+managed volumes, or trusted CDI edits can create separate writable mounts.
 
-The modules do not infer semantic defaults or interpret TOML relationships.
-They apply the documented materialisation rule that absent `deploy.enable`
-means render.
+The renderer currently binds the complete host `/nix/store` read-only so store
+symlinks resolve. Typed mount targets cannot overlap that protected path, though
+a bind can expose a selected store source elsewhere and trusted CDI may inject
+mounts. Mandatory per-workload closure exposure is approved but remains future
+implementation in [#209](https://github.com/Patrick-Kappen/graft/issues/209).
 
-## IFD and JSON stdout
+## Runtime and security model
 
-The build integration uses Import From Derivation:
+Every workload is a normal Quadlet-generated systemd service. Typed lifecycle
+intent distinguishes long-running services, repeatable finite jobs, and retained
+setup jobs. Dependencies, startup, networking, filesystems, CDI references, and
+selected process settings each use dedicated validated contracts rather than raw
+systemd or Podman passthrough.
 
-```nix
-resolvedJson = pkgs.runCommand "graft-resolve-${name}" {} ''
-  ${graft}/bin/graft ${tomlFile} > $out
-'';
-
-resolved = builtins.fromJSON (builtins.readFile resolvedJson);
-```
-
-The JSON is a Nix store artefact, not a file to commit.
-
-Module-eval checks for this path should be built explicitly, for example with
-`nix build .#checks.x86_64-linux.nixos-module-eval`. Because they use IFD,
-`nix flake check` may omit them and must not be the only CI or release gate.
-
-Cache behaviour:
+Every resolved workload receives the shared baseline:
 
 ```text
-TOML unchanged        → same derivation → CLI does not run again
-TOML changed          → CLI runs → new resolved JSON
-packages changed      → rootfs changes
-command/restart only  → Quadlet changes; rootfs may stay cached
+read-only rootfs
+all runtime-default capabilities dropped
+no-new-privileges enabled
 ```
 
-## `graft-pause`
+Supported relaxations are explicit in TOML and remain visible in resolved JSON
+and generated Quadlet. Containers still share the host kernel and are not a
+VM-equivalent isolation boundary. Config roots, host bind sources, environment
+files, external units, named volumes, and CDI specifications cross distinct
+trust boundaries documented in the [Threat model](threat-model.md).
 
-`graft-pause` is a tiny keep-alive binary shipped by the same Rust crate as the
-CLI.
+## Layer responsibilities
 
-```text
-/bin/graft
-/bin/graft-pause
-```
+- **TOML** expresses reviewed workload intent.
+- **Graft CLI** validates, resolves references, applies semantic defaults, and
+  emits deterministic JSON.
+- **NixOS and Home Manager modules** mechanically build rootfs paths and render
+  the selected manager's Quadlet files.
+- **Quadlet** translates source units into systemd services.
+- **systemd** owns activation and lifecycle.
+- **Podman** creates and runs the containers.
 
-Rules:
-
-```text
-implicit or long-running lifecycle + no user command
-  → packages = ["graft-pause", ...], command = ["/bin/graft-pause"]
-job or setup lifecycle + no user command
-  → resolution error
-user command
-  → packages = ["graft-pause", ...], command = user command
-```
-
-`graft-pause` exits cleanly on `SIGTERM` and `SIGINT`, so stopping a Quadlet
-service should not fall back to SIGKILL or leave a failed unit.
-
-There is no default `bashInteractive`, no default `coreutils`, and no default
-`sleep infinity`.
-
-## Rendered Quadlet example
-
-A TOML with implicit or long-running lifecycle and no command resolves to a
-Quadlet file like:
-
-```ini
-[Container]
-ContainerName=node-dev
-Rootfs=/nix/store/xyz-graft-node-dev-env:O
-Exec="/bin/graft-pause"
-Volume=/nix/store:/nix/store:ro
-```
-
-Supported optional fields render mechanically when configured:
-
-```ini
-HostName=node-dev.local
-User=1000
-Group=1000
-WorkingDir=/workspace
-Environment="GREETING=hello world"
-EnvironmentFile="/run/graft/node-dev.env"
-PublishPort=127.0.0.1:8080:8080
-Volume=/home/me/project:/workspace:ro,bind
-Tmpfs=/tmp:rw,noexec,nosuid,nodev,size=64M
-ReadOnly=true
-DropCapability=all
-NoNewPrivileges=true
-
-[Service]
-Restart=on-failure
-RestartSec=10s
-TimeoutStartSec=2m
-TimeoutStopSec=30s
-```
-
-The modules do not render `[Install]` by default. A `.container` file can exist
-while the container does not start automatically. Explicit
-`deploy.activation = "startup"` resolves a fixed system or user target and
-renders the corresponding `[Install]` relationship; see
-[Workload startup activation](activation.md).
-
-## Rootfs-store container model
-
-- Graft uses `Rootfs=`, not `Image=`, for store-based containers.
-- The rootfs is a store path built from Nix packages.
-- `Rootfs=...:O` gives Podman a writable overlay above the read-only store rootfs
-  by default; explicit `config.filesystem.readOnly = true` makes container
-  rootfs paths read-only while preserving upstream read-write tmpfs mounts.
-- The current mode configures no persistent, inspectable upperdir. Do not rely
-  on overlay writes after the runtime container is removed; diff/promote is
-  future work tracked by [#160](https://github.com/Patrick-Kappen/graft/issues/160).
-- The renderer currently adds a fixed read-only `/nix/store` bind. Typed mount
-  targets cannot overlap the store, although an explicit bind can expose a
-  selected store source elsewhere and trusted CDI edits can inject mounts.
-- Graft itself adds only content from the generated rootfs/store closure;
-  explicit resources or the running application may introduce other content.
-- Graft performs no package installation or image pull at runtime; the workload
-  itself can still use its configured network access.
-
-System containers (`target = "system"`) use rootful Podman and kernel overlayfs
-via `:O`. User-target containers run through the current Home Manager account's
-user manager. Podman and rootless overlay support such as `fuse-overlayfs` apply
-only when that account is non-root; a root-owned user manager remains rootful.
-
-## Everything is a service
-
-All managed container runtime instances are Quadlet/systemd services. There is
-no separate shell-container concept in the current config model. A container
-stays alive as long as its resolved `Exec=` process stays alive.
-
-Other systemd units can trigger a generated service. An external non-root user
-timer may trigger a rootless workload with `config.service.lifecycle = "job"`;
-native
-typed timer
-generation remains in [#134](https://github.com/Patrick-Kappen/graft/issues/134).
-See [Workload lifecycle semantics](lifecycle.md) for finite and retained-job
-behavior. Host policy remains
-outside TOML: unattended user services need systemd user linger to be enabled by
-host configuration or `loginctl enable-linger <user>`, not by the container
-definition.
-
-## Package management
-
-Packages are declared in TOML and resolved at build time via Nix. To add a tool,
-add it to `packages = [...]` and rebuild. Do not install packages ad-hoc inside
-the container.
-
-## Current scope
-
-The current MVP proves the rootfs-store path for both NixOS and Home Manager.
-The generated schema contains only intent that reaches the implemented pipeline;
-parser-recognised roadmap fields fail closed instead of disappearing. See
-[Reference](reference.md) for current semantics,
-[Capability status](capabilities.md) for every pipeline stage,
-[Threat model and trust boundaries](threat-model.md) for current security
-assumptions, and [Non-goals](non-goals.md) for deliberate exclusions.
-
-For the active implementation direction, see [Roadmap](roadmap.md). For the
-later portable workload direction, see [Long-term vision](vision.md).
-
-## Project structure
-
-```text
-graft/
-  flake.nix
-  modules/
-    nixos.nix          # NixOS materialisation module
-    home-manager.nix   # Home Manager materialisation module
-  crates/
-    graft/             # Rust package: CLI resolver + graft-pause
-  examples/
-    quickstart/        # schema-validated runnable examples
-  docs/
-    design.md          # design decisions and principles
-    overview.md        # this file
-    reference.md       # current configuration contract
-    capabilities.md    # authoritative pipeline and status matrix
-    hardening.md       # current explicit hardening controls and boundaries
-    threat-model.md    # security assumptions, invariants, and residual risks
-    vision.md          # long-term product direction
-    quadlet.md         # Quadlet output notes
-    roadmap.md         # roadmap and future direction
-    non-goals.md       # deliberate exclusions and deferred scope
-    development.md     # contributor workflow and renderer checklist
-```
-
-## Flake outputs
-
-- `nixosModules.graft` — system containers → `/etc/containers/systemd/`
-- `homeManagerModules.graft` — user containers → `~/.config/containers/systemd/`
-- `packages.<system>.default` — Graft CLI + `graft-pause`
+See [Architecture and responsibilities](design.md) for the internal contracts
+and [Generated Quadlet output](quadlet.md) for exact materialisation behavior.
+Use the [Configuration reference](reference.md) for accepted TOML and
+[Capability status](capabilities.md) for the authoritative availability matrix.

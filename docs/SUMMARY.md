@@ -1,5 +1,7 @@
 # Summary
 
+<!-- markdownlint-disable MD025 -->
+
 [Introduction](index.md)
 
 # Start here
