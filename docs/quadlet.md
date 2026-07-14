@@ -264,10 +264,11 @@ For paths backed by `Rootfs=` rather than another runtime or explicit mount,
 writes normally go to the upperdir. Explicit `config.filesystem.readOnly = true`
 makes those container rootfs paths read-only through Podman. The tested upstream
 `ReadOnlyTmpfs=true` default still provides read-write tmpfs mounts, although
-path modes and dropped capabilities can deny process writes. Explicit volumes
-or CDI specs can add other writable mounts. The renderer's `/nix/store` bind is
-read-only, but later explicit volumes can overlap it or expose a store path elsewhere. The
-current `Rootfs=...:O` mode does not configure a persistent, inspectable
+path modes and dropped capabilities can deny process writes. Typed binds,
+managed volumes, tmpfs, or CDI specs can add other writable mounts. The
+renderer currently binds `/nix/store` read-only, and typed targets cannot
+overlap it; an explicit bind can still expose a selected store source elsewhere,
+and trusted CDI edits can inject mounts. The current `Rootfs=...:O` mode does not configure a persistent, inspectable
 upperdir, so users must not rely on overlay writes after the runtime container
 is removed. It is not a promote flow.
 Reviewable overlay inspection, diff, and promotion are future work in

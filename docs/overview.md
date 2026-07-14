@@ -204,11 +204,11 @@ renders the corresponding `[Install]` relationship; see
 - The current mode configures no persistent, inspectable upperdir. Do not rely
   on overlay writes after the runtime container is removed; diff/promote is
   future work tracked by [#160](https://github.com/Patrick-Kappen/graft/issues/160).
-- The renderer adds a fixed read-only `/nix/store` bind. Explicit volumes can
-  overlap that target or expose a store path elsewhere, so effective mount
-  protection remains operator-reviewed.
+- The renderer currently adds a fixed read-only `/nix/store` bind. Typed mount
+  targets cannot overlap the store, although an explicit bind can expose a
+  selected store source elsewhere and trusted CDI edits can inject mounts.
 - Graft itself adds only content from the generated rootfs/store closure;
-  explicit volumes or the running application may introduce other content.
+  explicit resources or the running application may introduce other content.
 - Graft performs no package installation or image pull at runtime; the workload
   itself can still use its configured network access.
 

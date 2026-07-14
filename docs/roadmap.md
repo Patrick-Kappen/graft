@@ -206,7 +206,6 @@ until a host-aware attestation contract can enforce their type safely.
 
 Remaining areas include:
 
-- typed binds, managed volumes, tmpfs options, and collision checks approved in the [filesystem policy](filesystem-policy.md)
 - Quadlet `.network` and `.volume` units
 - secrets and credentials
 - resources and health checks
