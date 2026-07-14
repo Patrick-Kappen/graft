@@ -16,6 +16,7 @@
 - [Container hardening](hardening.md)
 - [Secure target defaults design](secure-defaults.md)
 - [Filesystem and mount policy](filesystem-policy.md)
+- [Closure-scoped Nix store exposure](closure-scoped-store.md)
 - [Quadlet output](quadlet.md)
 - [Roadmap](roadmap.md)
 - [Non-goals and deferred scope](non-goals.md)
