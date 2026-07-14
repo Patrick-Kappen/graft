@@ -347,7 +347,9 @@ pub struct Filesystem {
     pub read_only_tmpfs: Option<bool>,
     /// Ordered absolute container paths backed by writable tmpfs mounts.
     #[schemars(
-        inner(regex(pattern = r"^/[^:\u0000-\u001F\u007F]*$")),
+        inner(regex(
+            pattern = r"^/(?:[^:\u0000-\u001F\u007F-\u009F]*[^:\u0000-\u001F\u007F-\u009F\s\\])?(?![\s\S])"
+        )),
         extend("uniqueItems" = true)
     )]
     pub tmpfs: Option<Vec<String>>,

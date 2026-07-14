@@ -140,8 +140,9 @@ Tmpfs=/tmp
 ```
 
 Quadlet translates each line to one Podman `--tmpfs` argument. Graft rejects
-relative paths, duplicates, control characters, and `:`, so raw tmpfs options
-cannot pass through this field.
+relative paths, duplicates, control characters, `:`, terminal whitespace, and
+terminal `\`, so raw tmpfs options, trimming, and line continuation cannot pass
+through this field.
 
 Qualified CDI references render mechanically without direct-device target or
 permission suffixes:

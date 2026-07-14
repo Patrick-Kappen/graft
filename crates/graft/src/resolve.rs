@@ -1068,6 +1068,12 @@ fn resolve_tmpfs(filesystem: Option<&Filesystem>) -> Result<Option<Vec<String>>>
         if path.contains(':') {
             bail!("{field_name} cannot contain ':'; tmpfs options are not supported");
         }
+        if path.chars().last().is_some_and(char::is_whitespace) {
+            bail!("{field_name} cannot end with whitespace");
+        }
+        if path.ends_with('\\') {
+            bail!("{field_name} cannot end with '\\'");
+        }
         if !paths.insert(path) {
             bail!("{field_name} duplicates an earlier tmpfs path");
         }
@@ -3528,6 +3534,15 @@ mod tests {
             (
                 "/tmp:size=1G",
                 "config.filesystem.tmpfs[0] cannot contain ':'; tmpfs options are not supported",
+            ),
+            (
+                "/tmp ",
+                "config.filesystem.tmpfs[0] cannot end with whitespace",
+            ),
+            ("/tmp\\", "config.filesystem.tmpfs[0] cannot end with '\\'"),
+            (
+                "/tmp\u{0085}",
+                "config.filesystem.tmpfs[0] cannot contain control characters",
             ),
         ];
 

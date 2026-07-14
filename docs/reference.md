@@ -194,8 +194,10 @@ tmpfs = ["/run", "/var", "/tmp", "/etc"]
 
 `config.filesystem.tmpfs` is an optional ordered list of unique absolute
 container paths. An empty list is omitted. Each path must be non-empty, start
-with `/`, contain no control characters, and contain no `:`. The colon
-restriction keeps Quadlet's `CONTAINER-DIR:OPTIONS` syntax unavailable; size,
+with `/`, contain no control characters, contain no `:`, and not end in
+whitespace or `\`. These terminal restrictions prevent Quadlet trimming or line
+continuation. The colon restriction keeps Quadlet's `CONTAINER-DIR:OPTIONS`
+syntax unavailable; size,
 mode, ownership, copy-up, and other tmpfs options remain deferred.
 
 Each resolved path renders as one ordered writable mount:

@@ -416,7 +416,7 @@
           ],
           "items": {
             "type": "string",
-            "pattern": "^/[^:\\u0000-\\u001F\\u007F]*$"
+            "pattern": "^/(?:[^:\\u0000-\\u001F\\u007F-\\u009F]*[^:\\u0000-\\u001F\\u007F-\\u009F\\s\\\\])?(?![\\s\\S])"
           },
           "uniqueItems": true
         },
