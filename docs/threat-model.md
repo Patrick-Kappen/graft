@@ -60,6 +60,7 @@ TOML safe.
 | Credentials and sensitive values | Keep unsupported secret flows from being mistaken for a protected transport. |
 | Workload identity and relationships | Prevent ambiguous, cross-target, missing, disabled, self, duplicate, or cyclic Graft references. |
 | Service availability | Avoid hidden activation and identify current denial-of-service gaps such as absent resource limits. |
+| Future control-plane identity and authority | Prevent local or remote clients from confusing hosts, scopes, workloads, generations, or typed permissions. |
 | Persistent data and foreign units | Keep materialisation and activation changes from implicitly deleting unrelated state. |
 
 ## Trust assumptions
@@ -129,6 +130,43 @@ container process sharing the host kernel
      network, and unit relationships
 host resources and other workloads
 ```
+
+### Planned control-plane boundary
+
+The future [control-plane architecture](control-plane.md) adds Nix-managed
+system and per-account user workers outside the deterministic materialisation
+pipeline. Local CLI and TUI clients connect over typed Unix-socket APIs; an
+optional controller may later connect through an authenticated remote protocol.
+The worker adapts approved operations to the materialisation manifest, systemd
+D-Bus, journald, Podman, cgroups, and bounded storage accounting.
+
+That boundary introduces additional threats which must be resolved before
+implementation:
+
+- hostile, spoofed, or compromised clients and sockets;
+- confused-deputy requests crossing system, user, host, workload, or generation
+  identity;
+- treating Unix peer credentials as sufficient authorization rather than an
+  authenticated input to host policy;
+- stale or malicious manifests, search-path shadowing, and workload-name reuse;
+- backend-controlled logs, paths, labels, metrics, and diagnostics reaching a
+  terminal or remote client;
+- unbounded log, event, metric, storage, or concurrent-operation requests;
+- replay, downgrade, revocation, reconnect, and partial-delivery failures on the
+  future remote protocol;
+- controller compromise being mistaken for authority to bypass local Nix
+  policy; and
+- operational caches or history becoming a hidden desired-state database.
+
+The planned split keeps a user worker within its owning account and a system
+worker within system scope. A normal CLI/TUI may aggregate authorized views, but
+system mutation requires explicit host authorization and ambiguous cross-scope
+names fail closed. The worker does not accept raw shell, Nix, systemd, D-Bus,
+Podman, Quadlet, or host-path passthrough. Controller loss cannot stop workloads
+or block local clients, and worker restart reconstructs observations from
+read-only manifests and authoritative backends rather than persisted intent.
+Detailed controls and evidence remain acceptance criteria of [#240], [#242],
+and [#245]; this section does not claim they are implemented today.
 
 ### 1. Config selection and parsing
 
@@ -451,6 +489,9 @@ Suspected violations of these boundaries must follow the private
 [#174]: https://github.com/Patrick-Kappen/graft/issues/174
 [#193]: https://github.com/Patrick-Kappen/graft/issues/193
 [#203]: https://github.com/Patrick-Kappen/graft/issues/203
+[#240]: https://github.com/Patrick-Kappen/graft/issues/240
+[#242]: https://github.com/Patrick-Kappen/graft/issues/242
+[#245]: https://github.com/Patrick-Kappen/graft/issues/245
 [activation-test]: https://github.com/Patrick-Kappen/graft/blob/main/tests/nixos/activation.nix
 [ci-source]: https://github.com/Patrick-Kappen/graft/blob/main/.github/workflows/ci.yml
 [closure-test]: https://github.com/Patrick-Kappen/graft/blob/main/tests/nixos/closure.nix
