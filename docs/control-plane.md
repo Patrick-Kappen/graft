@@ -170,8 +170,9 @@ The first operation groups are:
 - capabilities: component/API versions and supported operation sets.
 
 The [Local worker and API contract](worker-api.md) chooses bounded
-length-prefixed JSON framing and a typed versioned envelope, while final command
-syntax and operation-specific fields remain in [#135] and [#137]. The protocol
+length-prefixed JSON framing and a typed versioned envelope. The
+[Local lifecycle operations](lifecycle-operations.md) contract fixes `up`,
+`down`, and `restart`; final observability fields remain in [#137]. The protocol
 rejects unknown mutation intent, validates bounds, versions explicitly, and
 returns typed errors rather than raw backend output.
 
@@ -378,7 +379,8 @@ The first local control plane does not provide:
 1. Approve this umbrella architecture in [#232].
 2. Specify the worker, local API, authorization, and manifest contract in
    [#240].
-3. Specify lifecycle semantics in [#135] and observability in [#137].
+3. Implement the approved [local lifecycle contract](lifecycle-operations.md)
+   after specifying observability in [#137].
 4. Specify Nix installation, socket, service, and ownership policy in [#242].
 5. Implement the worker and CLI integration in [#241] and [#136].
 6. Design and implement the TUI in [#243] and [#244].
