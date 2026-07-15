@@ -140,9 +140,9 @@ scan ambient directories or discover configuration through environment state.
 Unknown TOML fields fail deserialization. Parser-recognised reserved fields are
 excluded from the supported schema and fail normal resolution even when their
 explicit value is `false`, zero, empty, or otherwise apparently harmless.
-`validation.level` cannot downgrade that behavior. Omitting `deploy.target`
-uses the current public `system` default, which is visible in resolved JSON but
-must not be mistaken for user/rootless execution during review.
+`validation.level` cannot downgrade that behavior. `deploy.target` is required;
+omission fails before materialisation so rootful system authority cannot result
+from an implicit target choice.
 
 ### 2. Resolution and Nix materialisation
 
@@ -191,11 +191,11 @@ reduces runtime privilege through Podman's rootless model, but a kernel/runtime
 vulnerability or an explicitly exposed same-user resource can still cross the
 boundary. Use a VM when the workload must not share the host kernel.
 
-The generated rootfs lower layer and fixed `/nix/store:/nix/store:ro` bind are
-read-only. By default, `:O` provides writable runtime overlay state, which is not
-a durable or reviewable persistence contract. Explicit
-`config.filesystem.readOnly = true` makes the container root filesystem
-read-only, while upstream-managed and typed tmpfs mounts can still provide
+The generated rootfs lower layer, `/nix/store` scaffold, and realised closure
+member mounts are read-only. The `:O` mode provides runtime overlay state, which
+is not a durable or reviewable persistence contract, while Graft's default
+`config.filesystem.readOnly = true` blocks writes to container rootfs paths.
+Upstream-managed and typed tmpfs mounts can still provide
 selected writable paths. Effective process writes remain subject to mountpoint
 modes and the dropped capability set. Typed mount targets cannot overlap
 `/nix/store`, but an explicit bind can expose a selected store source at another
@@ -206,11 +206,11 @@ dependencies cross back into host or manager resources and must be reviewed as
 such. Graft validates a CDI qualified name but does not inspect the host spec
 that can inject device nodes, mounts, environment values, and OCI hooks.
 
-The approved [closure-scoped store design](closure-scoped-store.md) replaces the
-complete-store bind with mandatory per-closure mounts in [#209]. Until that
-implementation lands, unrelated host store paths remain visible through the
-current fixed bind. Closure scoping does not constrain explicit binds or trusted
-CDI edits.
+The implemented [closure-scoped store contract](closure-scoped-store.md) fails
+materialisation unless the derived source contains the exact realised rootfs
+closure within fixed member and fragment limits. Unrelated host store paths are
+not visible through Graft-owned mounts, and no complete-store fallback exists.
+Closure scoping does not constrain explicit binds or trusted CDI edits.
 
 ## Current security invariants and evidence
 
@@ -226,7 +226,7 @@ invariant; it does not extend the invariant beyond its stated scope.
 | **GRAFT-TM-04** | Graft workload references use only the explicit source set and cannot silently cross target, identity, enablement, or lifecycle constraints. | `ConfigSource`, `ConfigIndex`, and graph validation in [`resolve.rs`][resolve-source]; one explicit set invocation in [`materialise-containers.nix`][materialiser-source]. | Missing, disabled, self, cross-target, duplicate, identity-membership, and mixed-cycle resolver tests; Quadlet dependency and network checks in [`flake.nix`][flake-source]. |
 | **GRAFT-TM-05** | A resolved workload is materialised only by the module matching its effective `system` or `user` target; `user` selects manager scope, not an enforced non-root UID. | Target filtering in [`materialise-containers.nix`][materialiser-source]; separate [`nixos.nix`][nixos-source] and [`home-manager.nix`][home-manager-source] destinations. | Module assertions prove opposite-target files are absent; [`activation.nix`][activation-test] proves rootful system execution and rootless user-manager execution for its non-root test accounts. |
 | **GRAFT-TM-06** | Materialisation does not imply startup. Typed startup has only fixed system/user targets, and dependency activation remains explicit. | Resolver maps `startup` to `multi-user.target` or `default.target`; absent intent renders no `[Install]`. | Resolver startup tests; `quadlet-activation` generator checks; manager transitions and foreign-unit preservation in [`activation.nix`][activation-test]. |
-| **GRAFT-TM-07** | Configured rootfs package names resolve only from host-selected sources: mandatory `graft-pause` from the configured Graft package and other names from `pkgs`. The renderer emits `Rootfs=<store-path>:O` over the read-only lower layer and currently a fixed read-only `/nix/store` bind. Typed targets cannot overlap the store, but explicit binds can expose selected store paths elsewhere and trusted CDI edits remain outside this invariant. | Package mapping and rootfs construction in [`materialise-containers.nix`][materialiser-source]; fixed `Rootfs=:O`, current store bind, and ordered typed mounts in [`render-quadlet.nix`][renderer-source]. | Nix module and real Quadlet generator checks in [`flake.nix`][flake-source]. Effective runtime mount behavior and overlay durability are explicitly excluded. |
+| **GRAFT-TM-07** | Configured rootfs package names resolve only from host-selected sources: mandatory `graft-pause` from the configured Graft package and other names from `pkgs`. `Rootfs=<store-path>:O` uses the read-only lower layer; the initial Graft-owned `/nix/store` view contains only a read-only scaffold and the realised rootfs runtime closure. Typed targets cannot overlap the store, but explicit binds can expose selected store paths elsewhere and trusted CDI edits remain outside this invariant. | Package mapping, `pkgs.closureInfo`, type-matched placeholders, closure equality and limits, and derived source construction in [`materialise-containers.nix`][materialiser-source]; fixed `Rootfs=:O` and ordered typed mounts in [`render-quadlet.nix`][renderer-source]. | NixOS/Home Manager closure parity, regular-file, ordering, retention, generator, missing-source, rootful, and rootless checks in [`flake.nix`][flake-source] and [`closure.nix`][closure-test]. Overlay durability is explicitly excluded. |
 | **GRAFT-TM-08** | Implemented non-default network namespaces are typed as `none` or a validated same-target Graft workload reference. | Network resolver and graph validation; source-unit rendering lets Quadlet own runtime identity and dependencies. | Resolver network matrix; `quadlet-network` generation; rootless no-network and shared-loopback checks in [`network.sh`][network-test]. |
 | **GRAFT-TM-09** | Current declarative startup changes do not implicitly remove mounted state, workspace markers, or foreign units. | Modules replace managed source-unit declarations only; no Graft cleanup control plane exists. | Removal, reboot, restoration, and preservation scenarios in [`activation.nix`][activation-test]. |
 | **GRAFT-TM-10** | External-unit dependency intent remains an exact, validated, visible same-manager unit name rather than host command text. | Strict concrete unit-name validation and fixed dependency axes in [`resolve.rs`][resolve-source]. | External-name, identity-collision, module parity, real Quadlet translation, and `systemd-analyze verify` tests. Unit existence and safety are host review responsibilities. |
@@ -244,10 +244,11 @@ and real-generator checks reduce command, unit, and Quadlet injection through
 supported fields. Raw `[Unit]`, `[Service]`, `[Install]`, Podman arguments, host
 shell, and arbitrary Nix are not accepted input paths.
 
-Residual risk remains in deliberately broad upstream syntaxes such as volume
-parts, published ports, environment-file paths, and systemd timing values.
-Graft currently validates their line structure but does not attest paths,
-parse every upstream grammar, or prove the resulting host policy safe.
+Residual risk remains in deliberately broad upstream syntaxes such as
+published ports, environment-file paths, and systemd timing values, and in
+typed host resources whose activation-time properties cannot be attested.
+Graft validates their documented structure but does not prove the resulting
+host policy safe.
 
 ### Runtime privilege and container escape
 
@@ -390,8 +391,8 @@ For the current alpha, Graft explicitly does not guarantee:
 - safe execution of unreviewed selected TOML or untrusted system/rootful or
   root-owned user-target workloads;
 - isolation from other processes running as the same rootless host account;
-- secure container defaults, per-container UID/GID isolation, mount policy,
-  resource limits, secret transport, or egress control;
+- per-container UID/GID isolation, host-source attestation, resource limits,
+  secret transport, or egress control;
 - safety, availability, or contents of host-managed CDI specs and resources;
 - safety, existence, or behavior of explicitly named external systemd units;
 - protection from host-local Quadlet shadowing or systemd drop-ins;
@@ -421,14 +422,10 @@ A security-sensitive design or implementation must:
    incompatible combinations; and
 7. update this model when assumptions or accepted residual risks change.
 
-The scoped qualified-CDI implementation is current through [#203], and
-secure defaults and typed relaxations are current through [#163]. The
-[secure target defaults design](secure-defaults.md) approves explicit targets,
-a shared concrete baseline, and typed relaxations; current behavior changes
-through the current [#163] enforcement. The approved
-[filesystem policy](filesystem-policy.md) from [#142] is current through [#164] and defers
-direct devices pending host-aware attestation. Identity and rootfs-integrity
-gaps are tracked
+Qualified CDI references are current through [#203], secure defaults and typed
+relaxations through [#163], and the [filesystem policy](filesystem-policy.md)
+through [#164]. Direct devices remain deferred pending host-aware attestation.
+Identity and rootfs-integrity gaps are tracked
 by [#107] and [#108]. Related isolation,
 mount, secret, resource, shadowing, remote, and temporary-agent work is linked in
 the risk sections above.
@@ -439,7 +436,6 @@ Suspected violations of these boundaries must follow the private
 [#107]: https://github.com/Patrick-Kappen/graft/issues/107
 [#108]: https://github.com/Patrick-Kappen/graft/issues/108
 [#139]: https://github.com/Patrick-Kappen/graft/issues/139
-[#142]: https://github.com/Patrick-Kappen/graft/issues/142
 [#143]: https://github.com/Patrick-Kappen/graft/issues/143
 [#145]: https://github.com/Patrick-Kappen/graft/issues/145
 [#151]: https://github.com/Patrick-Kappen/graft/issues/151
@@ -453,9 +449,9 @@ Suspected violations of these boundaries must follow the private
 [#174]: https://github.com/Patrick-Kappen/graft/issues/174
 [#193]: https://github.com/Patrick-Kappen/graft/issues/193
 [#203]: https://github.com/Patrick-Kappen/graft/issues/203
-[#209]: https://github.com/Patrick-Kappen/graft/issues/209
 [activation-test]: https://github.com/Patrick-Kappen/graft/blob/main/tests/nixos/activation.nix
 [ci-source]: https://github.com/Patrick-Kappen/graft/blob/main/.github/workflows/ci.yml
+[closure-test]: https://github.com/Patrick-Kappen/graft/blob/main/tests/nixos/closure.nix
 [flake-source]: https://github.com/Patrick-Kappen/graft/blob/main/flake.nix
 [home-manager-source]: https://github.com/Patrick-Kappen/graft/blob/main/modules/home-manager.nix
 [materialiser-source]: https://github.com/Patrick-Kappen/graft/blob/main/modules/lib/materialise-containers.nix

@@ -131,7 +131,7 @@ yet.
 | `config.container.pod`, `entrypoint`, `stopSignal`, `stopTimeout`, `timezone`, `notify`, `runInit`, `environmentHost`, and `health.*` | Field-specific resolver error | Planned health/graceful behavior: [#146]; pod and host-environment contracts remain deferred |
 | `config.container.annotations`, `ip`, `ip6`, `networkAlias`, `exposeHostPort`, `uidMap`, `gidMap`, `subUidMap`, `subGidMap`, `shmSize`, `mask`, `unmaskPaths`, `sysctl`, and `logDriver` | Field-specific resolver error | Planned or deferred through [#141], [#145], [#146], and [#193] |
 | `config.container.podmanArgs` and `globalArgs` | Field-specific resolver error | Forbidden raw runtime passthrough; future needs require typed intent |
-| `config.filesystem.readOnlyTmpfs` and `mounts` | Field-specific resolver error | Broader mount and root-filesystem policy remain in [#142] and [#164] |
+| `config.filesystem.readOnlyTmpfs` and `mounts` | Field-specific resolver error | Deferred alternate rootfs and generic-mount concepts; current storage uses typed `tmpfs`, `binds`, and `volumes` |
 | `config.filesystem.devices[].target` and `config.filesystem.devices[].permissions` | Indexed field-specific resolver error | Direct-device remapping and permissions remain deferred to [#142] and [#164] |
 | `config.network.dns`, `dnsOption`, `dnsSearch`, and `addHost` | Field-specific resolver error | Planned network Phase B: [#193] |
 | `config.networks`, including nested labels and raw maps | Field-specific resolver error | Planned typed `.network` resources: [#147] |
@@ -179,7 +179,7 @@ fails closed.
 
 | Concept | Status |
 | --- | --- |
-| `rootfs-store` `.container` workloads | Current flagship backend |
+| `rootfs-store` `.container` workloads | Current flagship backend with mandatory closure-scoped, read-only store exposure and no complete-store fallback |
 | Typed `.network` resources | Planned in [#147] |
 | Typed `.volume` resources | Planned in [#148] |
 | Typed `.pod` resources and membership | Designed through [#149]; implementation tracked by [#167] |

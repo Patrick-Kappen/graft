@@ -23,11 +23,10 @@ Deferred in the current alpha:
 - no port syntax parser for `PublishPort=` values
 - no activation-time filesystem existence, type, ownership, or symlink checks
   for host sources
-- no implemented tmpfs options or target-collision policy across tmpfs,
-  volumes, rootfs, and fixed store bindings; the approved
-  [filesystem policy](filesystem-policy.md) owns their typed replacement
-- no legacy volume mode allowlist beyond line-safety validation; raw mount
-  options remain forbidden by the approved replacement policy
+- no raw mount options, recursive bind propagation, or automatic host-source
+  existence, type, ownership, and symlink attestation; current typed binds,
+  managed volumes, tmpfs options, and target collisions follow the
+  [filesystem policy](filesystem-policy.md)
 - no Quadlet `.volume` or `.network` unit generation
 - no automatic firewall, DNS, or network alias management
 - no systemd timespan parser for service timing values
@@ -102,7 +101,6 @@ host commands; those remain governed by the
 Current examples:
 
 - `PublishPort=` values
-- `Volume=` strings assembled from TOML parts
 - systemd service timing values such as `RestartSec=` and `TimeoutStartSec=`
 
 Line-safe passthrough means:

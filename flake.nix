@@ -65,6 +65,11 @@
               inherit pkgs graftPackage;
             }
           );
+          closure-runtime-test = pkgs.testers.runNixOSTest (
+            import ./tests/nixos/closure.nix {
+              inherit pkgs graftPackage;
+            }
+          );
         }
       );
 
@@ -73,6 +78,52 @@
         let
           pkgs = nixpkgs.legacyPackages.${system};
           inherit (pkgs) lib;
+
+          closureRegularFile = pkgs.writeText "graft-closure-regular-file" "regular-file\n";
+          closureSymlink = pkgs.runCommand "graft-closure-symlink" { } ''
+            ln -s ${closureRegularFile} $out
+          '';
+          closureFixturePackage = pkgs.runCommand "graft-closure-fixture" { } ''
+            mkdir -p $out/share
+            ln -s ${closureRegularFile} $out/share/regular-file
+          '';
+          largeClosureMembers = lib.genList (
+            index: builtins.toFile "graft-closure-member-${lib.fixedWidthString 3 "0" (toString index)}" ""
+          ) 511;
+          largeClosureRootfs = pkgs.runCommand "graft-large-closure-rootfs" { } ''
+            mkdir -p $out/nix/store
+            ${lib.concatMapStringsSep "\n" (member: ''
+              touch "$out/nix/store/${builtins.baseNameOf member}"
+              printf '%s\n' ${lib.escapeShellArg "${member}"} >> "$out/member-references"
+            '') largeClosureMembers}
+            mkdir "$out/nix/store/$(basename "$out")"
+          '';
+          largeClosureInfo = pkgs.closureInfo { rootPaths = [ largeClosureRootfs ]; };
+          largeClosureTemplate = pkgs.writeText "graft-large-closure-template.container" ''
+            [Container]
+            ContainerName=closure-large
+            Rootfs=${largeClosureRootfs}:O
+            @GRAFT_STORE_MOUNTS@
+            Exec="/bin/true"
+            ReadOnly=true
+          '';
+          largeClosureSource = pkgs.runCommand "graft-large-closure.container" { } ''
+            LC_ALL=C sort -u ${largeClosureInfo}/store-paths > actual-paths
+            ${pkgs.bash}/bin/bash ${./modules/lib/render-closure-mounts.sh} \
+              actual-paths \
+              ${largeClosureRootfs} \
+              ${largeClosureTemplate} \
+              "$out" \
+              services.graft \
+              closure-large \
+              @GRAFT_STORE_MOUNTS@ \
+              ${./modules/lib/check-closure-limits.sh}
+          '';
+          closureTestPkgs = pkgs.extend (
+            _: _: {
+              graftClosureFixture = closureFixturePackage;
+            }
+          );
 
           moduleTestOptions = { lib, ... }: {
             options = {
@@ -88,18 +139,36 @@
 
               environment.etc = lib.mkOption {
                 type = lib.types.attrsOf (
-                  lib.types.submodule {
-                    options.text = lib.mkOption { type = lib.types.str; };
-                  }
+                  lib.types.submodule (
+                    { config, ... }:
+                    {
+                      options = {
+                        source = lib.mkOption { type = lib.types.path; };
+                        text = lib.mkOption {
+                          type = lib.types.str;
+                          default = builtins.readFile config.source;
+                        };
+                      };
+                    }
+                  )
                 );
                 default = { };
               };
 
               xdg.configFile = lib.mkOption {
                 type = lib.types.attrsOf (
-                  lib.types.submodule {
-                    options.text = lib.mkOption { type = lib.types.str; };
-                  }
+                  lib.types.submodule (
+                    { config, ... }:
+                    {
+                      options = {
+                        source = lib.mkOption { type = lib.types.path; };
+                        text = lib.mkOption {
+                          type = lib.types.str;
+                          default = builtins.readFile config.source;
+                        };
+                      };
+                    }
+                  )
                 );
                 default = { };
               };
@@ -238,6 +307,41 @@
             ];
           };
 
+          closureNixosEval = lib.evalModules {
+            specialArgs.pkgs = closureTestPkgs;
+            modules = [
+              moduleTestOptions
+              self.nixosModules.graft
+              {
+                services.graft = {
+                  enable = true;
+                  configRoot = ./tests/nix/closure;
+                };
+              }
+            ];
+          };
+
+          closureHomeManagerEval = lib.evalModules {
+            specialArgs.pkgs = closureTestPkgs;
+            modules = [
+              moduleTestOptions
+              self.homeManagerModules.graft
+              {
+                programs.graft = {
+                  enable = true;
+                  configRoot = ./tests/nix/closure;
+                };
+              }
+            ];
+          };
+
+          closureNixosSource =
+            closureNixosEval.config.environment.etc."containers/systemd/closure-system.container".source;
+          closureHomeManagerSource =
+            closureHomeManagerEval.config.xdg.configFile."containers/systemd/closure-user.container".source;
+          closureNixosSourceClosure = pkgs.closureInfo { rootPaths = [ closureNixosSource ]; };
+          closureHomeManagerSourceClosure = pkgs.closureInfo { rootPaths = [ closureHomeManagerSource ]; };
+
           nixosRendered = nixosEval.config.environment.etc."containers/systemd/system.container".text;
           nixosPlainRendered =
             nixosEval.config.environment.etc."containers/systemd/plain-system.container".text;
@@ -296,7 +400,8 @@
           expectedQuickstartInfixes = [
             "ContainerName=graft-example"
             ''Exec="bash" "-c" "echo graft-example-ready; exec /bin/graft-pause"''
-            "Volume=/nix/store:/nix/store:ro"
+            "/nix/store:/nix/store:ro,bind,nodev,nosuid"
+            ":ro,bind,nodev,nosuid"
           ];
           expectedEnvironmentLines = lib.concatStringsSep "\n" [
             ''Environment="EMPTY="''
@@ -611,19 +716,157 @@
             assert !(lib.hasInfix "WorkingDir=" quickstartHomeManagerRendered);
             pkgs.writeText "graft-home-manager-module-eval" homeManagerRendered;
 
+          closure-scoped-store =
+            pkgs.runCommand "graft-closure-scoped-store"
+              {
+                nativeBuildInputs = [
+                  pkgs.coreutils
+                  pkgs.gnugrep
+                  pkgs.podman
+                  pkgs.systemd
+                ];
+              }
+              ''
+                set -euo pipefail
+                mkdir "$out"
+
+                check_source() {
+                  source_file=$1
+                  source_closure=$2
+                  expected_name=$3
+
+                  grep -Fx "ContainerName=$expected_name" "$source_file"
+                  ! grep -Fx 'Volume=/nix/store:/nix/store:ro' "$source_file"
+
+                  volume_lines=$(mktemp)
+                  grep '^Volume=' "$source_file" > "$volume_lines"
+                  first_volume=$(head -n 1 "$volume_lines")
+                  case "$first_volume" in
+                    Volume=*/nix/store:/nix/store:ro,bind,nodev,nosuid) ;;
+                    *) echo "missing first read-only store scaffold in $source_file" >&2; exit 1 ;;
+                  esac
+
+                  tail -n +2 "$volume_lines" | cut -d: -f1 | sed 's/^Volume=//' | LC_ALL=C sort -cu
+                  member_count=$(($(wc -l < "$volume_lines") - 1))
+                  test "$member_count" -gt 0
+                  test "$member_count" -le 512
+
+                  regular_line="Volume=${closureRegularFile}:${closureRegularFile}:ro,bind,nodev,nosuid"
+                  grep -Fx "$regular_line" "$source_file"
+                  grep -Fx ${lib.escapeShellArg "${closureRegularFile}"} "$source_closure/store-paths"
+
+                  scaffold_path="''${first_volume#Volume=}"
+                  scaffold_path="''${scaffold_path%:/nix/store:ro,bind,nodev,nosuid}"
+                  rootfs_path="''${scaffold_path%/nix/store}"
+                  test -d "$scaffold_path/$(basename "$rootfs_path")"
+                  test -f "$scaffold_path/$(basename ${lib.escapeShellArg "${closureRegularFile}"})"
+
+                  cp "$source_file" "$out/$expected_name.container"
+                }
+
+                check_source ${closureNixosSource} ${closureNixosSourceClosure} closure-system
+                check_source ${closureHomeManagerSource} ${closureHomeManagerSourceClosure} closure-user
+
+                mkdir -p symlink-rootfs/nix/store
+                printf '%s\n' ${closureSymlink} > symlink-paths
+                if ${pkgs.bash}/bin/bash ${./modules/lib/prepare-closure-targets.sh} \
+                  symlink-paths symlink-rootfs services.graft symlink-test \
+                  2> symlink-error; then
+                  echo "top-level closure symlink was accepted" >&2
+                  exit 1
+                fi
+                grep -F "top-level closure symlink '${closureSymlink}' is unsupported" symlink-error
+
+                printf '/nix/store/expected\n' > expected-paths
+                printf '/nix/store/expected\n/nix/store/unexpected\n' > mismatched-paths
+                if ${pkgs.bash}/bin/bash ${./modules/lib/check-closure-equality.sh} \
+                  expected-paths mismatched-paths services.graft mismatch-test \
+                  2> mismatch-error; then
+                  echo "mismatched final closure was accepted" >&2
+                  exit 1
+                fi
+                grep -F "final closure mismatch for container 'mismatch-test'" mismatch-error
+                grep -F '+/nix/store/unexpected' mismatch-error
+
+                seq 512 | sed 's#^#/nix/store/member-#' > exact-members
+                truncate -s 131072 exact-fragment
+                ${pkgs.bash}/bin/bash ${./modules/lib/check-closure-limits.sh} \
+                  exact-members exact-fragment services.graft exact-limit
+
+                cp exact-members too-many-members
+                printf '/nix/store/member-513\n' >> too-many-members
+                if ${pkgs.bash}/bin/bash ${./modules/lib/check-closure-limits.sh} \
+                  too-many-members exact-fragment services.graft too-many \
+                  2> member-limit-error; then
+                  echo "513-member closure was accepted" >&2
+                  exit 1
+                fi
+                grep -F "has 513 members; limit is 512" member-limit-error
+
+                truncate -s 131073 oversized-fragment
+                if ${pkgs.bash}/bin/bash ${./modules/lib/check-closure-limits.sh} \
+                  exact-members oversized-fragment services.graft oversized \
+                  2> fragment-limit-error; then
+                  echo "131073-byte closure fragment was accepted" >&2
+                  exit 1
+                fi
+                grep -F "is 131073 bytes; limit is 131072" fragment-limit-error
+
+                test "$(wc -l < ${largeClosureInfo}/store-paths)" -eq 512
+                test "$(grep -c '^Volume=' ${largeClosureSource})" -eq 513
+
+                mkdir source-system source-user generated-system generated-user
+                cp ${closureNixosSource} source-system/closure-system.container
+                cp ${largeClosureSource} source-system/closure-large.container
+                cp ${closureHomeManagerSource} source-user/closure-user.container
+
+                QUADLET_UNIT_DIRS="$PWD/source-system" \
+                  ${pkgs.podman}/libexec/podman/quadlet \
+                  generated-system generated-system generated-system
+                QUADLET_UNIT_DIRS="$PWD/source-user" \
+                  ${pkgs.podman}/libexec/podman/quadlet -user \
+                  generated-user generated-user generated-user
+
+                grep -Fq -- ${lib.escapeShellArg "-v ${closureRegularFile}:${closureRegularFile}:ro,bind,nodev,nosuid"} \
+                  generated-system/closure-system.service
+                grep -Fq -- ${lib.escapeShellArg "-v ${closureRegularFile}:${closureRegularFile}:ro,bind,nodev,nosuid"} \
+                  generated-user/closure-user.service
+                test "$(wc -c < generated-system/closure-large.service)" -lt 524288
+                large_exec_size=$(grep '^ExecStart=' generated-system/closure-large.service | wc -c)
+                test "$large_exec_size" -lt 196608
+
+                mkdir -p runtime/systemd
+                XDG_RUNTIME_DIR="$PWD/runtime" \
+                  SYSTEMD_UNIT_PATH="$PWD/generated-system:$PWD/generated-user:${pkgs.podman}/share/systemd/user:${pkgs.systemd}/example/systemd/user:${pkgs.systemd}/example/systemd/system" \
+                  ${lib.getExe' pkgs.systemd "systemd-analyze"} --user verify \
+                  generated-system/*.service generated-user/*.service
+
+                cp generated-system/*.service generated-user/*.service "$out/"
+              '';
+
           documentation-drift =
             pkgs.runCommand "graft-documentation-drift"
               {
                 nativeBuildInputs = [ pkgs.python3 ];
               }
               ''
-                python3 - "${./crates/graft/schema/graft-v1.schema.json}" "${./docs/capabilities.md}" <<'PY'
+                python3 - \
+                  "${./crates/graft/schema/graft-v1.schema.json}" \
+                  "${./docs/capabilities.md}" \
+                  "${./README.md}" \
+                  "${./website/index.html}" \
+                  "${./examples/quickstart/nixos/containers/graft-example.toml}" <<'PY'
+                import html
                 import json
+                import re
                 import sys
+                import tomllib
                 from collections import Counter
                 from pathlib import Path
 
-                schema_path, documentation_path = map(Path, sys.argv[1:])
+                schema_path, documentation_path, readme_path, website_path, fixture_path = map(
+                    Path, sys.argv[1:]
+                )
                 schema = json.loads(schema_path.read_text())
                 definitions = schema["$defs"]
 
@@ -699,6 +942,52 @@
                     if extra:
                         messages.append("absent from supported schema: " + ", ".join(extra))
                     raise SystemExit("\n".join(messages))
+
+                readme = readme_path.read_text()
+                readme_examples = re.findall(r"```toml\n(.*?)```", readme, re.DOTALL)
+                if len(readme_examples) != 1:
+                    raise SystemExit("README must contain exactly one TOML example")
+
+                readme_example = tomllib.loads(readme_examples[0])
+                fixture = tomllib.loads(fixture_path.read_text())
+                expected_example = {
+                    "version": fixture["version"],
+                    "name": fixture["name"],
+                    "deploy": {"target": fixture["deploy"]["target"]},
+                    "config": {"runtime": fixture["config"]["runtime"]},
+                }
+                if readme_example != expected_example:
+                    raise SystemExit(
+                        "README example must exactly match the public quickstart projection"
+                    )
+
+                website = website_path.read_text()
+                website_examples = re.findall(r"<pre><code>(.*?)</code></pre>", website, re.DOTALL)
+                if len(website_examples) != 1:
+                    raise SystemExit("website must contain exactly one complete TOML example")
+
+                website_toml = html.unescape(re.sub(r"<[^>]+>", "", website_examples[0]))
+                website_example = tomllib.loads(website_toml)
+                if website_example != expected_example:
+                    raise SystemExit(
+                        "website example must exactly match the public quickstart projection"
+                    )
+
+                hero_contract = (
+                    f'<p><b>version</b> = <span>{fixture["version"]}</span></p>',
+                    f'<p><b>name</b> = <span>{json.dumps(fixture["name"])}</span></p>',
+                    '<p class="terminal-section">[deploy]</p>',
+                    f'<p><b>target</b> = <span>{json.dumps(fixture["deploy"]["target"])}</span></p>',
+                    f'<p><b>packages</b> = <span>{json.dumps(fixture["config"]["runtime"]["packages"], separators=(",", ":"))}</span></p>',
+                )
+                missing_hero_contract = [
+                    fragment for fragment in hero_contract if fragment not in website
+                ]
+                if missing_hero_contract:
+                    raise SystemExit(
+                        "website hero differs from validated quickstart intent: "
+                        + ", ".join(missing_hero_contract)
+                    )
                 PY
                 touch $out
               '';

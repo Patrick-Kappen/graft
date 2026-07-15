@@ -45,6 +45,7 @@ jobs:
     if: ${{ github.ref == 'refs/heads/site-legacy' && github.event.repository.private == false }}
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     permissions:
       pages: write

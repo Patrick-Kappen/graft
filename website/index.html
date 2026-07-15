@@ -58,7 +58,7 @@
       <section class="hero" id="top">
         <div class="container hero-grid">
           <div class="hero-copy reveal">
-            <p class="eyebrow"><span></span> Early MVP · v0.3.0-alpha.1</p>
+            <p class="eyebrow"><span></span> Early alpha · rootfs-store</p>
             <h1>Small intent.<br><em>Reproducible containers.</em></h1>
             <p class="hero-intro">
               Graft turns typed TOML workload definitions into Nix-store rootfs
@@ -79,22 +79,24 @@
             </ul>
           </div>
 
-          <div class="hero-visual reveal" role="img" aria-label="Graft resolving TOML intent into a systemd-managed Podman container">
+          <div class="hero-visual reveal" role="img" aria-label="Graft resolving valid TOML intent into a systemd-managed Podman container">
             <div class="orb"></div>
             <div class="terminal-card">
               <div class="terminal-bar">
                 <div class="terminal-dots" aria-hidden="true"><span></span><span></span><span></span></div>
-                <span>node-dev.toml</span>
+                <span>graft-example.toml</span>
                 <span class="terminal-status"><i></i> graft ✓</span>
               </div>
               <div class="terminal-body">
                 <p class="terminal-comment"># TOML → Nix → Quadlet</p>
                 <p><b>version</b> = <span>1</span></p>
-                <p><b>name</b> = <span>"node-dev"</span></p>
+                <p><b>name</b> = <span>"graft-example"</span></p>
+                <br>
+                <p class="terminal-section">[deploy]</p>
+                <p><b>target</b> = <span>"system"</span></p>
                 <br>
                 <p class="terminal-section">[config.runtime]</p>
-                <p><b>packages</b> = <span>["nodejs"]</span></p>
-                <p><b>command</b> = <span>["node", "server.js"]</span></p>
+                <p><b>packages</b> = <span>["bash"]</span></p>
                 <div class="terminal-flow">
                   <span>TOML</span><i>→</i><span>JSON</span><i>→</i><span>rootfs</span><i>→</i><span>Quadlet</span>
                 </div>
@@ -186,9 +188,9 @@
               <h3>The current path is real—and deliberately narrow.</h3>
               <p>
                 Graft currently supports NixOS system containers and Home Manager
-                user containers through the same typed resolver. Secure defaults,
-                lifecycle commands, temporary instances, and multi-host control
-                remain active roadmap work.
+                user containers through the same typed resolver, with an explicit
+                target and secure baseline. Runtime CLI commands, temporary
+                instances, and multi-host control remain roadmap work.
               </p>
               <div class="scope-links">
                 <a class="text-link" href="/docs/capabilities.html">Current capabilities <span aria-hidden="true">→</span></a>
@@ -201,11 +203,14 @@
               <pre><code><span class="code-key">version</span> = <span class="code-number">1</span>
 <span class="code-key">name</span> = <span class="code-string">"graft-example"</span>
 
+<span class="code-section">[deploy]</span>
+<span class="code-key">target</span> = <span class="code-string">"system"</span>
+
 <span class="code-section">[config.runtime]</span>
 <span class="code-key">packages</span> = [<span class="code-string">"bash"</span>]
 <span class="code-key">command</span> = [
   <span class="code-string">"bash"</span>, <span class="code-string">"-c"</span>,
-  <span class="code-string">"exec /bin/graft-pause"</span>
+  <span class="code-string">"echo graft-example-ready; exec /bin/graft-pause"</span>
 ]</code></pre>
               <div class="code-result"><i></i><span>graft-example.service</span><strong>ready</strong></div>
             </div>

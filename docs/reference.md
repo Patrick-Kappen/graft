@@ -11,7 +11,7 @@ Related authoritative sources:
 - [Capability status](capabilities.md) — each field's parser, resolver, Nix, and Quadlet stages plus deferred and forbidden boundaries;
 - [Container Device Interface references](cdi.md) — qualified device-name syntax and host registry trust boundary;
 - [Container hardening](hardening.md) — current security defaults and typed relaxations and their limits;
-- [Filesystem and mount policy](filesystem-policy.md) — approved replacement contract for current legacy volume behavior; not yet current input;
+- [Filesystem and mount policy](filesystem-policy.md) — current typed bind, managed-volume, tmpfs, and target-collision contract;
 - [Roadmap](roadmap.md) — planned implementation direction;
 - [Non-goals and deferred scope](non-goals.md) — deliberate current exclusions.
 
@@ -122,6 +122,11 @@ command = ["bash", "-c", "exec /bin/graft-pause"]
 `coreutils`, restart policy, or startup activation is added. Custom package names
 require an explicitly trusted host overlay or package-set extension; TOML never
 evaluates arbitrary repository Nix.
+
+The materialiser derives the realised rootfs closure, creates type-matched store
+targets, and emits a read-only scaffold plus sorted member mounts. Closure
+scoping is mandatory rootfs mechanics, not configurable TOML, and has no
+complete-store fallback. See [Closure-scoped Nix store](closure-scoped-store.md).
 
 ## Container
 

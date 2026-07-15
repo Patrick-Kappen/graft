@@ -86,7 +86,6 @@ For broad syntaxes, prefer line-safe passthrough:
 Current examples:
 
 - `PublishPort=` values
-- `Volume=` strings assembled from TOML parts
 - systemd service timing values such as `RestartSec=`
 
 If an implementation repeatedly says "out of scope", "not yet", or "no parser
@@ -282,6 +281,7 @@ nix develop .#ci -c deadnix --fail .
 nix build \
   .#checks.x86_64-linux.nixos-module-eval \
   .#checks.x86_64-linux.home-manager-module-eval \
+  .#checks.x86_64-linux.closure-scoped-store \
   .#checks.x86_64-linux.quadlet-activation \
   .#checks.x86_64-linux.quadlet-dependencies \
   .#checks.x86_64-linux.quadlet-lifecycle \
@@ -297,37 +297,31 @@ git diff --check
 
 ### GitHub Actions execution
 
-GitHub CI is deliberately manual for product and documentation changes.
-Pull-request pushes and merges do not start it automatically; a PR that changes
-`.github/workflows/ci.yml` itself is the narrow exception so branch protection
-can validate future CI changes. Run applicable local checks first, then dispatch
-CI once for the final commit that should satisfy branch protection:
-
-```bash
-gh workflow run ci.yml --ref <branch>
-```
+GitHub CI is deliberately maintainer-dispatched for product and documentation
+changes. Pull-request pushes and merges do not start it automatically; a PR that
+changes `.github/workflows/ci.yml` itself is the narrow exception so branch
+protection can validate future CI changes. Those self-validation runs use a
+separate group and cannot race with manual-run cancellation. Run applicable local checks before
+requesting the protected GitHub checks on the final commit.
 
 The required `workflow-lint`, `rust`, `coverage`, `security`, `docs`, and `nix`
-check contexts remain branch-protection requirements. Until the manual run
-finishes on the latest commit, the pull request remains blocked. A newer manual
-run for the same non-`main` ref cancels its obsolete predecessor; `main` runs
-are not cancelled automatically.
+contexts remain branch-protection requirements. A pull request stays blocked
+until a maintainer dispatches them successfully for its latest commit. A newer
+dispatch for the same feature ref cancels its obsolete predecessor. Protected
+`main` and tag runs use unique groups and are never cancelled by another run.
+A new commit on an internal pull-request branch starts only a minimal
+cancellation workflow; it supersedes an in-progress expensive run without
+executing the quality matrix. It does not satisfy any required check context.
 
-Activation and CDI VM jobs are advisory and opt-in because they are expensive:
-
-```bash
-gh workflow run ci.yml --ref <branch> -f runtime_tests=true
-```
-
-Pages deployment is also manual and separate from CI:
-
-```bash
-gh workflow run pages.yml --ref main
-```
-
-Use the runtime option for changes affecting activation, user managers, Podman,
-Quadlet runtime behavior, CDI, rootfs materialisation, or shared security
-boundaries. A maintainer may also request it for compatibility evidence.
+External-fork refs cannot be selected directly by manual dispatch and remain
+isolated from internal cancellation groups. Direct CI for an untrusted fork is
+therefore unavailable in this manual model. A maintainer must first review and
+adopt the proposed change as trusted internal work; copying an unreviewed fork
+SHA into a dispatchable repository ref is not an accepted validation path.
+Advisory activation and CDI VM jobs are opt-in and should be requested for
+changes affecting activation, user managers, Podman, Quadlet runtime behavior,
+CDI, rootfs materialisation, or shared security boundaries. Documentation deployment is separate, manual, and
+restricted to its configured protected publication ref.
 
 The module-eval and Quadlet generator checks use IFD, so build them explicitly.
 The dependency check verifies all supported relations, Graft source-unit

@@ -81,47 +81,120 @@ let
     else
       throw "${optionName}: unknown package '${package}' in container '${containerName}'";
 
-  containerEnvs = lib.mapAttrs (
+  containerInners = lib.mapAttrs (
     _: ctr:
+    pkgs.buildEnv {
+      name = "graft-${ctr.name}-inner";
+      paths = map (packageFor ctr.name) ctr.runtime.packages;
+      ignoreCollisions = true;
+    }
+  ) containers;
+
+  packageClosures = lib.mapAttrs (
+    name: _: pkgs.closureInfo { rootPaths = [ containerInners.${name} ]; }
+  ) containers;
+
+  containerEnvs = lib.mapAttrs (
+    name: ctr:
     let
-      inner = pkgs.buildEnv {
-        name = "graft-${ctr.name}-inner";
-        paths = map (packageFor ctr.name) ctr.runtime.packages;
-        ignoreCollisions = true;
-      };
+      inner = containerInners.${name};
+      packageClosure = packageClosures.${name};
     in
     pkgs.runCommand "graft-${ctr.name}-env" { } ''
-      # Real system directories (so overlay can write to them)
-      mkdir -p $out/{etc,tmp,var/tmp,home,root,run,proc,sys,dev}
-      # Mount points required by crun/Podman at container start
+      set -euo pipefail
+
+      # Real system directories and runtime mountpoints.
+      mkdir -p $out/{etc,tmp,var/tmp,home,root,run,proc,sys,dev,nix/store}
       ln -s /proc/mounts $out/etc/mtab
       touch $out/etc/hostname $out/etc/hosts $out/etc/resolv.conf
       touch $out/run/.containerenv
 
-      # Symlink everything from the inner env except directories we own
+      # Symlink everything from the inner env except directories we own.
       for entry in ${inner}/*; do
-        name=$(basename "$entry")
-        case "$name" in
-          etc|tmp|var|home|root|run|proc|sys|dev) continue ;;
+        entry_name=$(basename "$entry")
+        case "$entry_name" in
+          etc|tmp|var|home|root|run|proc|sys|dev|nix) continue ;;
         esac
-        ln -s "$entry" "$out/$name"
+        ln -s "$entry" "$out/$entry_name"
       done
 
-      # Copy /etc contents from packages (if any) into our real /etc
+      # Copy /etc contents from packages (if any) into our real /etc.
       if [ -e ${inner}/etc ]; then
         cp -rL ${inner}/etc/. $out/etc/ 2>/dev/null || true
       fi
+
+      # OCI runtimes require every nested bind target before applying ReadOnly=.
+      ${pkgs.bash}/bin/bash ${./prepare-closure-targets.sh} \
+        ${packageClosure}/store-paths \
+        "$out" \
+        ${lib.escapeShellArg optionName} \
+        ${lib.escapeShellArg ctr.name}
+
+      # The final rootfs is itself a directory member of its runtime closure.
+      mkdir "$out/nix/store/$(basename "$out")"
     ''
+  ) containers;
+
+  finalClosures = lib.mapAttrs (
+    name: _: pkgs.closureInfo { rootPaths = [ containerEnvs.${name} ]; }
+  ) containers;
+
+  storeMountMarker = "@GRAFT_STORE_MOUNTS@";
+
+  quadletTemplates = lib.mapAttrs (
+    name: ctr:
+    pkgs.writeText "graft-${ctr.name}-quadlet-template" (
+      quadletRenderer.renderQuadletFile {
+        inherit ctr;
+        env = containerEnvs.${name};
+        storeMountLines = storeMountMarker;
+      }
+    )
   ) containers;
 
   quadletFiles = lib.mapAttrs (
     name: ctr:
-    quadletRenderer.renderQuadletFile {
-      inherit ctr;
+    let
       env = containerEnvs.${name};
-    }
+      packageClosure = packageClosures.${name};
+      finalClosure = finalClosures.${name};
+      template = quadletTemplates.${name};
+    in
+    pkgs.runCommand "graft-${ctr.name}.container" { } ''
+      set -euo pipefail
+
+      expected_paths=$(mktemp)
+      actual_paths=$(mktemp)
+
+      {
+        cat ${packageClosure}/store-paths
+        printf '%s\n' ${lib.escapeShellArg "${env}"}
+      } | LC_ALL=C sort -u > "$expected_paths"
+      LC_ALL=C sort -u ${finalClosure}/store-paths > "$actual_paths"
+
+      ${pkgs.bash}/bin/bash ${./check-closure-equality.sh} \
+        "$expected_paths" \
+        "$actual_paths" \
+        ${lib.escapeShellArg optionName} \
+        ${lib.escapeShellArg ctr.name}
+
+      ${pkgs.bash}/bin/bash ${./render-closure-mounts.sh} \
+        "$actual_paths" \
+        ${lib.escapeShellArg "${env}"} \
+        ${template} \
+        "$out" \
+        ${lib.escapeShellArg optionName} \
+        ${lib.escapeShellArg ctr.name} \
+        ${lib.escapeShellArg storeMountMarker} \
+        ${./check-closure-limits.sh}
+    ''
   ) containers;
 in
 {
-  inherit containers quadletFiles;
+  inherit
+    containers
+    containerEnvs
+    finalClosures
+    quadletFiles
+    ;
 }

@@ -1,0 +1,8 @@
+version = 1
+name = "closure-user"
+
+[deploy]
+target = "user"
+
+[config.runtime]
+packages = ["graftClosureFixture"]

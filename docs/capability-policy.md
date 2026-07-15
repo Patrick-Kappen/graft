@@ -125,7 +125,7 @@ but it does not make the original escape hatch acceptable.
 | Capability or input path | Class | Availability | Decision |
 | --- | --- | --- | --- |
 | Current typed identity, package, command, lifecycle, startup, workload-dependency, and safe namespace intent | First-class | Current | Keep schema-backed, resolved, and mechanically rendered. Individual host crossings retain their documented boundaries. |
-| System versus user manager target selection | First-class | Current; explicit requirement approved for [#163] | This selects authority context, not guaranteed privilege: system and root-owned user managers are rootful. The approved design removes the implicit system target only when [#163] implements the migration. |
+| System versus user manager target selection | First-class | Current through [#163] | An explicit target is required. It selects authority context, not guaranteed privilege: system and root-owned user managers are rootful. |
 | Drop-all capabilities, no-new-privileges, and read-only rootfs | First-class | Current through [#163] | Concrete defaults apply to every explicit target; typed opt-outs remain dangerous intent. |
 | Typed writable tmpfs mounts | First-class | Current through [#164] | Bounded mode and size options combine with fixed safe flags and shared target-collision validation. Mounts may mask rootfs content and remain writable with read-only rootfs. |
 | Anonymous managed volumes | First-class | Current through [#164] | The declaration explicitly requests writable runtime-managed storage without selecting a host path or named resource. |

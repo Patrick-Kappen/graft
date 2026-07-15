@@ -13,8 +13,8 @@ on:
         default: false
 
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  group: ${{ github.event_name == 'pull_request' && format('ci-self-{0}-{1}', github.event.pull_request.head.repo.full_name, github.event.pull_request.head.ref) || (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) && format('ci-protected-{0}', github.run_id) || format('ci-{0}', github.ref) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/')) }}
 
 permissions:
   contents: read
@@ -212,6 +212,7 @@ jobs:
           nix build \
             .#checks.x86_64-linux.nixos-module-eval \
             .#checks.x86_64-linux.home-manager-module-eval \
+            .#checks.x86_64-linux.closure-scoped-store \
             .#checks.x86_64-linux.quadlet-activation \
             .#checks.x86_64-linux.quadlet-cdi \
             .#checks.x86_64-linux.quadlet-dependencies \

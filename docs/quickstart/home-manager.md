@@ -83,9 +83,16 @@ The relevant generated Quadlet output is:
 ContainerName=graft-example
 Rootfs=/nix/store/...-graft-graft-example-env:O
 Exec="bash" "-c" "echo graft-example-ready; exec /bin/graft-pause"
-Volume=/nix/store:/nix/store:ro
+Volume=/nix/store/...-graft-graft-example-env/nix/store:/nix/store:ro,bind,nodev,nosuid
+Volume=/nix/store/...-closure-member:/nix/store/...-closure-member:ro,bind,nodev,nosuid
 Environment="GRAFT_EXAMPLE=home-manager-user"
+ReadOnly=true
+DropCapability=all
+NoNewPrivileges=true
 ```
+
+The abbreviated second store line repeats once per bytewise-sorted realised
+closure member; unrelated host store paths are not mounted.
 
 To stop the workload:
 

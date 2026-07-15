@@ -8,9 +8,9 @@ explicit, and rejects mount layouts whose effective target depends on ordering.
 It does not expose raw Quadlet `Mount=`, Podman mount strings, direct host-device
 paths, or host-policy bypass flags.
 
-## Goals
+## Implemented goals
 
-The implementation must:
+The contract does the following:
 
 - distinguish host bind mounts from Podman-managed volumes;
 - make writable host access explicit and default host binds to read-only;
@@ -105,10 +105,9 @@ container cleanup behavior and is not a persistence guarantee.
 
 A literal name is an explicit dangerous resource reference. Podman reuses an
 existing volume of that name, so Graft cannot claim ownership, provenance, or
-empty initial state. Reusing the same name in multiple workloads under one
-Podman storage scope intentionally shares state; the resolver must make that
-relationship visible in set diagnostics. Scope follows the effective Podman
-account and storage configuration, not the Graft manager target alone. A
+empty initial state. Reusing the same name in multiple workloads under one Podman storage scope
+intentionally shares state. Scope follows the effective Podman account and
+storage configuration, not the Graft manager target alone. A
 non-root user normally has separate rootless storage, while a root-owned user
 manager can share rootful Podman storage and named volumes with the system
 manager. Custom Podman storage configuration can further change that boundary;
@@ -130,7 +129,7 @@ behavior of the pinned runtime rather than treating it as a Graft guarantee.
 
 ## Typed tmpfs
 
-The current string-list form migrates to typed entries:
+Tmpfs uses typed entries; legacy string lists receive migration guidance:
 
 ```toml
 [[config.filesystem.tmpfs]]
@@ -142,9 +141,9 @@ size = "512M"
 `target` is required, absolute, lexically normalised, and colon-free. `mode` is
 an optional string containing a canonical three- or four-digit octal mode no
 greater than `1777`, preventing setuid and setgid bits. `size` is an optional positive integer followed by at
-most one approved uppercase size suffix (`K`, `M`, `G`, or `T`). The
-implementation must pin the exact translation and verify it against the tested
-Podman version.
+most one approved uppercase size suffix (`K`, `M`, `G`, or `T`). The renderer
+pins the translation and the generator/runtime checks verify it against the
+tested Podman version.
 
 A tmpfs declaration is explicit writable in-memory storage even when the rootfs
 is read-only. Graft preserves Podman's safe default `noexec,nosuid,nodev` flags
@@ -196,7 +195,8 @@ The resolver rejects:
 
 - target `/`, which would replace the workload rootfs;
 - any target equal to, below, or above `/nix/store`, including `/nix`, preserving
-  Graft's fixed read-only store bind without nested mount ambiguity;
+  Graft's read-only closure scaffold and member mounts without nested mount
+  ambiguity;
 - any target equal to or below `/dev`, `/proc`, or `/sys`;
 - bind or managed-volume targets equal to or below `/run`, `/tmp`, or
   `/var/tmp`;
@@ -213,7 +213,7 @@ Podman's automatic mounts for `/dev`, `/dev/shm`, `/run`, `/tmp`, and
 Only an explicit typed tmpfs may target `/run`, `/tmp`, or `/var/tmp`, or paths
 below those trees, to set bounded mode or size intent. No explicit mount kind
 may target `/dev`, `/proc`, or `/sys`, or descendants of those paths. The
-implementation must test the final generated argv so the tmpfs exception does
+generator and runtime tests cover the final argv so the tmpfs exception does
 not create duplicate ambiguous mounts.
 
 ## Target authority
@@ -260,20 +260,20 @@ The resolver returns field-specific migration diagnostics:
 | `mode` contains `ro` or `rw` | Replace it with typed `readOnly`; other options remain unavailable. |
 | `tmpfs = ["/path"]` | Replace it with `[[config.filesystem.tmpfs]]` and `target = "/path"`. |
 
-The generated schema changes only when parser, resolver, resolved JSON, shared
-renderer, diagnostics, and tests land together. Until then, current alpha syntax
-remains current and the new forms remain design-only.
+The generated schema changed together with parser, resolver, resolved JSON,
+shared renderer, diagnostics, and tests. Legacy forms fail with migration
+guidance rather than being silently reinterpreted.
 
 ## Resolved and rendered contract
 
-Resolved JSON must carry separate `binds`, `volumes`, and `tmpfs` arrays with
-concrete effective booleans and validated options. It must not carry raw option
-strings. Declaration order is preserved within a kind; rendering uses one
-fixed kind order documented by the implementation.
+Resolved JSON carries separate `binds`, `volumes`, and `tmpfs` arrays with
+concrete effective booleans and validated options, never raw option strings.
+Declaration order is preserved within a kind; rendering uses the documented
+fixed kind order.
 Collision safety means cross-kind order cannot change path visibility.
 
 The shared Nix renderer remains mechanical and identical for NixOS and Home
-Manager. It must not inspect host paths, add policy defaults, or recover from
+Manager. It does not inspect host paths, add policy defaults, or recover from
 resolver errors. Future `graft lint` and `graft inspect` must derive effective
 read/write and host-crossing diagnostics from the same resolved types; warnings
 cannot authorize rejected input.
