@@ -221,7 +221,7 @@ runtime data.
 | --- | --- |
 | `inactive` | Return success with `no_change`. |
 | `failed` | If quiescent, return `no_change` and preserve failure evidence; otherwise submit stop and require a quiescent result. |
-| `activating` | Verify and cancel the selected service's compatible start job, submit conflict-preserving stop, and wait for a quiescent result; otherwise conflict. |
+| `activating` | Cancel a verified compatible start job then stop, or directly stop a recognized automatic-restart delay with no job; otherwise conflict. |
 | `active-running` | Submit stop and wait for `inactive`. |
 | `active-exited` | Submit stop and wait for `inactive`. |
 | `deactivating` | Join a compatible stop job or observe recognized service cleanup; otherwise return conflict. |
@@ -364,7 +364,8 @@ An accepted operation terminates as exactly one tagged response variant:
   `existing_manager_work`, and no invented submission time for `no_change`;
 - whether dependencies affected the result;
 - whether the manifest changed after submission; and
-- safe typed failure code and retry guidance.
+- safe typed failure code and retry guidance when outcome is `failed` or
+  `result_unknown`, absent when outcome is `succeeded`.
 
 `MutationTerminalError` contains operation and epoch identity, safe typed error
 code, phase, timestamp, and retry guidance. It deliberately has no disposition,
@@ -499,8 +500,9 @@ Mutation records are keyed by worker epoch, authenticated principal key, and
 UUIDv7. For local workers, the principal key contains the fixed worker context
 and accepted peer UID. Future remote callers use a separate stable authenticated
 principal identifier. The UUID is explicitly not authorization and cannot join
-or conflict with another principal's record. Every duplicate is reauthorized
-before returning any in-flight or retained result.
+or conflict with another principal's record. Every duplicate and every separate
+operation-result query is reauthorized against the current principal, workload,
+and action before returning any in-flight or retained result.
 
 Immutable mutation equality covers only action, structured workload selector,
 manifest generation, and origin worker epoch under the principal/UUID key.
@@ -559,16 +561,22 @@ it does not fix the shared operation outcome. It also does not replace
 `TimeoutStartSec`, `TimeoutStopSec`, or manager job timeouts from materialised
 intent.
 
-An operation ID becomes accepted and reserved only after a complete bounded
-request has been parsed, authenticated, passed the per-workload concurrency
-check, admitted to the principal-scoped mutation registry, and assigned its
-immutable payload. `operation_in_progress`, disconnect, or malformed frame
-before that point reserves no ID. After the current mutation finishes, that ID
-may be submitted again while its UUIDv7 timestamp remains acceptable. After acceptance but before backend
-submission, cancellation or deadline performs no mutation and stores the typed
-terminal error `cancelled_before_submission` or
-`deadline_before_submission`. The complete error is retained for the normal
-acceptance window, and the same principal/ID can never later submit work.
+An operation ID becomes accepted and reserved only at the final pre-submission
+commit point, after the complete bounded request has passed parsing,
+authentication, current authorization, required initial audit, current manifest
+and identity validation, operation preconditions, and per-workload concurrency.
+Any failure, `operation_in_progress`, disconnect, or malformed frame before that
+point reserves no ID. The same ID may be submitted later while its UUIDv7
+timestamp remains acceptable.
+
+After acceptance but before the backend call, cancellation or deadline performs
+no mutation and stores the typed terminal error
+`cancelled_before_submission` or `deadline_before_submission`. The complete
+error is retained for the normal acceptance window, and the same principal/ID
+can never later submit work. A backend call attempted after acceptance,
+including a synchronous manager rejection, terminates as
+`LifecycleTerminalResult` with `worker_submitted`, outcome `failed`, and failure
+phase `submission`.
 
 After submission, each duplicate/joined caller has independent interest. A deadline, cancellation, or disconnect removes only that caller and
 releases its delivery state. Normal shared observation continues while at least
