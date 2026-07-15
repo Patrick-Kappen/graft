@@ -717,24 +717,16 @@
 
                 readme_example = tomllib.loads(readme_examples[0])
                 fixture = tomllib.loads(fixture_path.read_text())
-                compared_paths = (
-                    ("version",),
-                    ("name",),
-                    ("deploy", "target"),
-                    ("config", "runtime", "packages"),
-                    ("config", "runtime", "command"),
-                )
-                for path in compared_paths:
-                    readme_value = readme_example
-                    fixture_value = fixture
-                    for component in path:
-                        readme_value = readme_value[component]
-                        fixture_value = fixture_value[component]
-                    if readme_value != fixture_value:
-                        raise SystemExit(
-                            "README example differs from the validated quickstart at "
-                            + ".".join(path)
-                        )
+                expected_example = {
+                    "version": fixture["version"],
+                    "name": fixture["name"],
+                    "deploy": {"target": fixture["deploy"]["target"]},
+                    "config": {"runtime": fixture["config"]["runtime"]},
+                }
+                if readme_example != expected_example:
+                    raise SystemExit(
+                        "README example must exactly match the public quickstart projection"
+                    )
 
                 website = website_path.read_text()
                 website_examples = re.findall(r"<pre><code>(.*?)</code></pre>", website, re.DOTALL)
@@ -743,17 +735,10 @@
 
                 website_toml = html.unescape(re.sub(r"<[^>]+>", "", website_examples[0]))
                 website_example = tomllib.loads(website_toml)
-                for path in compared_paths:
-                    website_value = website_example
-                    fixture_value = fixture
-                    for component in path:
-                        website_value = website_value[component]
-                        fixture_value = fixture_value[component]
-                    if website_value != fixture_value:
-                        raise SystemExit(
-                            "website example differs from the validated quickstart at "
-                            + ".".join(path)
-                        )
+                if website_example != expected_example:
+                    raise SystemExit(
+                        "website example must exactly match the public quickstart projection"
+                    )
 
                 hero_contract = (
                     f'<p><b>version</b> = <span>{fixture["version"]}</span></p>',

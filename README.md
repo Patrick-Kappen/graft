@@ -54,8 +54,9 @@ TOML intent
 ```
 
 After an explicit start, the example is an ordinary `graft-example.service` and
-logs `graft-example-ready`. The running container installs nothing: `bash` and
-Graft's built-in `graft-pause` come from the host's pinned Nix package set.
+logs `graft-example-ready`. The running container installs nothing: `bash`
+comes from the target's pinned `pkgs`, while `graft-pause` comes from the
+host-configured Graft package.
 
 ## Why Graft
 
