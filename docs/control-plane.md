@@ -330,9 +330,9 @@ Operational capability classification:
 | --- | --- | --- |
 | Own-user status, metrics, logs, and inspect | First-class, potentially sensitive observation | It is read-only but may expose application data, paths, resource behavior, and failures available to that account. |
 | Own-user `up`, `down`, and `restart` | First-class typed runtime mutation | It controls only an explicitly identified workload within the caller's existing user-manager authority. |
-| System observation | Host-policy controlled | Even read-only system metadata and logs may disclose cross-service or host information. |
+| System observation | Dangerous, host-policy controlled | Even read-only system metadata and logs may disclose cross-service or host information. |
 | System `up`, `down`, and `restart` | Dangerous privileged operation | It mutates rootful system services and requires explicit per-operation authorization rather than ambient TUI privilege. |
-| Remote controller mutation | Dangerous and deferred | It extends mutation authority across a network and requires enrollment, mutual authentication, replay protection, audit, and local revalidation. |
+| Remote controller mutation | Dangerous and planned | It extends mutation authority across a network and requires enrollment, mutual authentication, replay protection, audit, and local revalidation. |
 | TOML mutation or rebuild activation | Dangerous and deferred | It changes declarative intent or host generations and requires a separately reviewed authoring and deployment contract. |
 | Raw shell, Nix, systemd, D-Bus, Podman, Quadlet, path, or arbitrary RPC input | Forbidden | It bypasses typed policy and turns the worker into a generic privileged execution proxy. |
 
