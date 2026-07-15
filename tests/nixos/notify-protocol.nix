@@ -1,4 +1,8 @@
-{ pkgs, graftPackage }:
+{
+  pkgs,
+  graftPackage,
+  debugLogging ? false,
+}:
 
 let
   inherit (pkgs) lib;
@@ -45,7 +49,7 @@ let
 
 in
 {
-  name = "graft-rootless-notify-protocol";
+  name = "graft-rootless-notify-protocol${lib.optionalString debugLogging "-debug"}";
 
   nodes.machine = { ... }: {
     imports = [ ../../modules/nixos.nix ];
@@ -85,7 +89,6 @@ in
     };
 
     systemd = {
-      user.extraConfig = "LogLevel=debug";
       tmpfiles.rules = [
         "d /var/lib/graft-activation 0755 root root -"
         "d /var/lib/graft-workspace 0755 root root -"
@@ -100,6 +103,9 @@ in
         };
         script = "touch /var/lib/graft-activation/foreign-unit";
       };
+    }
+    // lib.optionalAttrs debugLogging {
+      user.extraConfig = "LogLevel=debug";
     };
   };
 
