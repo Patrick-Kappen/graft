@@ -119,7 +119,10 @@ Authorization principles:
 - an unqualified name present in multiple accessible scopes is ambiguous and
   fails closed.
 
-The exact CLI syntax and authorization actions remain in [#135] and [#240].
+Command names and action semantics are fixed by
+[Local lifecycle operations](lifecycle-operations.md). Concrete argument and
+presentation details belong to client implementation; authorization actions and
+host policy remain in [#242].
 
 ## Declarative discovery manifest
 
@@ -128,8 +131,10 @@ Podman containers and then reconstruct Graft intent. Nix materialisation will
 instead publish a read-only, generation-specific manifest derived from resolved
 workloads.
 
-The detailed schema remains for [#240] and [#242], but it needs enough identity
-and provenance to bind an operation safely, including:
+The detailed schema is fixed by the
+[Local worker and API contract](worker-api.md); [#242] supplies its concrete Nix
+publication path and policy. It contains enough identity and provenance to bind
+an operation safely, including:
 
 - workload name and explicit target/scope;
 - source TOML identity or digest without secret content;
@@ -252,8 +257,9 @@ failure categories must include:
 
 Read-only partial results may identify unavailable layers. Mutation must fail
 closed before acting when workload identity, scope, authorization, or intended
-operation is ambiguous. Idempotency and concurrency state machines remain for
-[#135] and [#240].
+operation is ambiguous. Idempotency and concurrency follow the
+[worker API](worker-api.md#mutation-identity-concurrency-and-interruption) and
+[local lifecycle contract](lifecycle-operations.md#concurrency).
 
 ## Optional controller
 
@@ -389,7 +395,6 @@ The first local control plane does not provide:
 8. Design and implement multi-host deployment through [#161], [#246], and
    [#174].
 
-[#135]: https://github.com/Patrick-Kappen/graft/issues/135
 [#136]: https://github.com/Patrick-Kappen/graft/issues/136
 [#137]: https://github.com/Patrick-Kappen/graft/issues/137
 [#161]: https://github.com/Patrick-Kappen/graft/issues/161
