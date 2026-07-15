@@ -283,6 +283,7 @@ nix build \
   .#checks.x86_64-linux.home-manager-module-eval \
   .#checks.x86_64-linux.closure-scoped-store \
   .#checks.x86_64-linux.rootfs-materialisation \
+  .#checks.x86_64-linux.quadlet-base \
   .#checks.x86_64-linux.quadlet-activation \
   .#checks.x86_64-linux.quadlet-dependencies \
   .#checks.x86_64-linux.quadlet-lifecycle \
@@ -325,7 +326,10 @@ CDI, rootfs materialisation, or shared security boundaries. Documentation deploy
 restricted to its configured protected publication ref.
 
 The module-eval and Quadlet generator checks use IFD, so build them explicitly.
-The dependency check verifies all supported relations, Graft source-unit
+The base generator check validates the plain and escaping fixtures for system
+and user deployment, verifies their generated services, and proves that a
+malformed sentinel fails the external parser. The dependency check verifies all
+supported relations, Graft source-unit
 translation, unchanged explicit external units, target parity, and
 `systemd-analyze verify`. The activation check verifies fixed system/user target
 links, lifecycle combinations, absent intent, dependency activation, and

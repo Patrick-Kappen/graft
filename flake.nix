@@ -1110,6 +1110,84 @@
             echo shared-network-ok > $out/www/index.html
           '';
 
+          quadlet-base =
+            let
+              sources = {
+                plain-system = pkgs.writeText "plain-system.container" nixosPlainRendered;
+                plain-user = pkgs.writeText "plain-user.container" homeManagerPlainRendered;
+                escape-system = pkgs.writeText "escape-system.container" nixosEscapeRendered;
+                escape-user = pkgs.writeText "escape-user.container" homeManagerEscapeRendered;
+              };
+            in
+            pkgs.runCommand "graft-quadlet-base" { } ''
+              mkdir source-system source-user generated-system generated-user malformed-source malformed-output $out
+              cp ${sources.plain-system} source-system/plain-system.container
+              cp ${sources.escape-system} source-system/escape-system.container
+              cp ${sources.plain-user} source-user/plain-user.container
+              cp ${sources.escape-user} source-user/escape-user.container
+
+              QUADLET_UNIT_DIRS="$PWD/source-system" \
+                ${pkgs.podman}/libexec/podman/quadlet \
+                generated-system generated-system generated-system \
+                2> system-generator-error
+              test ! -s system-generator-error
+
+              QUADLET_UNIT_DIRS="$PWD/source-user" \
+                ${pkgs.podman}/libexec/podman/quadlet -user \
+                generated-user generated-user generated-user \
+                2> user-generator-error
+              test ! -s user-generator-error
+
+              for scope in system user; do
+                plain="generated-$scope/plain-$scope.service"
+                escaped="generated-$scope/escape-$scope.service"
+                test -f "$plain"
+                test -f "$escaped"
+
+                grep -Fxq "ContainerName=nix-check-plain-$scope" "$plain"
+                grep -Fq -- "--name nix-check-plain-$scope" "$plain"
+                grep -Fq -- "--security-opt=no-new-privileges --cap-drop all --read-only" "$plain"
+                grep -Eq -- '--rootfs /nix/store/[^ ]+-env:O /bin/graft-pause$' "$plain"
+
+                grep -Fxq "ContainerName=escape-$scope" "$escaped"
+                grep -Fxq 'Environment="DOLLAR=cost $$5"' "$escaped"
+                grep -Fxq 'Environment="PERCENT=100%%"' "$escaped"
+                grep -Fxq "Restart=on-failure" "$escaped"
+                grep -Fxq "RestartSec=15s" "$escaped"
+                grep -Fq -- '--workdir /work%%space/$$HOME' "$escaped"
+                grep -Fq -- '--user 100%%0:100%%0' "$escaped"
+                grep -Fq -- '-v /tmp/graft-$$USER-%%n:/data$$HOME-%%h:ro,bind' "$escaped"
+                grep -Fq -- '--env-file "/etc/graft/my\x20config.env"' "$escaped"
+                grep -Fq -- '"cost\x20$$5" "foo\\.bar" "C:\\Temp" "say\x20\"hi\""' "$escaped"
+              done
+              grep -Fq -- '--publish 127.0.0.1:18%%080:80' generated-system/escape-system.service
+              grep -Fq -- '--publish 127.0.0.1:28%%080:80' generated-user/escape-user.service
+
+              mkdir -p runtime/systemd
+              XDG_RUNTIME_DIR="$PWD/runtime" \
+                SYSTEMD_UNIT_PATH="$PWD/generated-system:$PWD/generated-user:${pkgs.podman}/share/systemd/user:${pkgs.systemd}/example/systemd/user:${pkgs.systemd}/example/systemd/system" \
+                ${lib.getExe' pkgs.systemd "systemd-analyze"} --user verify \
+                generated-system/*.service generated-user/*.service
+
+              cat > malformed-source/malformed.container <<'EOF'
+              [Container]
+              Rootfs=/tmp/rootfs
+              UnsupportedSentinel=true
+              EOF
+              if QUADLET_UNIT_DIRS="$PWD/malformed-source" \
+                ${pkgs.podman}/libexec/podman/quadlet \
+                malformed-output malformed-output malformed-output \
+                2> malformed-generator-error; then
+                echo "malformed Quadlet source was accepted" >&2
+                exit 1
+              fi
+              grep -Fq "unsupported key 'UnsupportedSentinel'" malformed-generator-error
+              grep -Fq "processing encountered some errors" malformed-generator-error
+              test ! -e malformed-output/malformed.service
+
+              cp generated-system/*.service generated-user/*.service $out/
+            '';
+
           quadlet-lifecycle =
             let
               sources = {
