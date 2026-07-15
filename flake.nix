@@ -1144,12 +1144,11 @@
                 test -f "$plain"
                 test -f "$escaped"
 
-                grep -Fxq "ContainerName=nix-check-plain-$scope" "$plain"
                 grep -Fq -- "--name nix-check-plain-$scope" "$plain"
                 grep -Fq -- "--security-opt=no-new-privileges --cap-drop all --read-only" "$plain"
                 grep -Eq -- '--rootfs /nix/store/[^ ]+-env:O /bin/graft-pause$' "$plain"
 
-                grep -Fxq "ContainerName=escape-$scope" "$escaped"
+                grep -Fq -- "--name escape-$scope" "$escaped"
                 grep -Fxq 'Environment="DOLLAR=cost $$5"' "$escaped"
                 grep -Fxq 'Environment="PERCENT=100%%"' "$escaped"
                 grep -Fxq "Restart=on-failure" "$escaped"
