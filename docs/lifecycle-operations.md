@@ -101,7 +101,8 @@ This contract normalizes authoritative systemd state exhaustively:
 | `deactivating` with correlatable stop/cleanup evidence | `deactivating` |
 | `failed` | `failed` |
 | `reloading`, `refreshing`, or `maintenance` | `manager-busy` |
-| `active`, `activating`, or `deactivating` with an incompatible or unrecognized substate | `unsupported-manager-state` |
+| `activating` or `deactivating` without correlatable transition evidence | `manager-transition-conflict` |
+| `active` with an incompatible or unrecognized substate | `unsupported-manager-state` |
 | Any future unrecognized authoritative value | `unsupported-manager-state` |
 | Authoritative state cannot be obtained | `unknown` |
 
@@ -111,12 +112,13 @@ This contract normalizes authoritative systemd state exhaustively:
 operation-correlated manager job and invocation result rather than current
 active state alone.
 
-For every action, `manager-busy` returns conflict without submission because
-reload, refresh, and maintenance are outside this API. An
-`unsupported-manager-state` returns `unexpected_state` without submission.
-`unknown` remains reserved for unavailable authoritative observation and returns
-backend unavailable. These global rules apply before the action matrices, so no
-raw manager state is silently coerced.
+For every action, `manager-busy` and `manager-transition-conflict` return
+conflict without submission because reload, refresh, maintenance, and
+uncorrelatable transitions are outside this API. An `unsupported-manager-state`
+returns `unexpected_state` without submission. `unknown` remains reserved for
+unavailable authoritative observation and returns backend unavailable. These
+global rules apply before the action matrices, so no raw manager state is
+silently coerced.
 
 Detailed state fields and cross-layer status remain owned by the observability
 design in [#137]. This vocabulary fixes only what lifecycle completion needs.
@@ -492,10 +494,11 @@ A worker restart creates a new epoch and loses in-memory duplicate results. It
 does not stop workloads or manager jobs.
 
 A reconnect presenting an old operation epoch or expired UUIDv7 cannot submit
-lifecycle work. The operation-result query may return a retained terminal audit-derived reference
-only if an approved implementation can do so without treating audit as desired
-state; otherwise it returns `result_unknown`. The client then obtains a fresh
-status snapshot.
+lifecycle work. After worker restart has lost the operational cache, an
+old-epoch operation-result query always returns `result_unknown`; it never
+reconstructs a terminal lifecycle result from audit output. The client then
+obtains a fresh status snapshot. Audit remains evidence for operators, not an
+operation-result database.
 
 Observed state can establish whether a long-running workload is active, a setup
 is retained, or a unit is inactive. It cannot in general prove whether an old
