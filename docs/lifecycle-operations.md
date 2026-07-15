@@ -34,7 +34,24 @@ graft restart <workload>
 ```
 
 They map one-to-one to the typed worker actions `up`, `down`, and `restart`.
-Command spelling is a client concern; operation behavior is fixed here.
+Canonical explicit local scope selection is:
+
+```text
+graft up --scope system <workload>
+graft up --scope user <workload>
+graft down --scope system <workload>
+graft down --scope user <workload>
+graft restart --scope system <workload>
+graft restart --scope user <workload>
+```
+
+`--scope` accepts exactly `system` or `user`, may appear once, and selects the
+corresponding worker context. `user` means the caller's own user-worker context;
+for UID 0 it remains the separate rootful UID-0 user context. When omitted, the
+client may resolve across its authorized local scopes only if exactly one current
+manifest selector matches. Zero matches is unknown; multiple matches is
+ambiguous and requires `--scope`. A client never chooses another UID through
+this flag. Operation behavior remains fixed here regardless of presentation.
 
 The initial API has no `start`, `stop`, `kill`, `remove`, `delete`, `purge`,
 `force`, `reload`, `try-restart`, arbitrary signal, systemd job-mode, or Podman
@@ -536,9 +553,14 @@ and manifest publication. The worker holds it in submission mode from its final
 manifest and loaded-unit provenance recheck through manager acceptance or
 rejection. It does not hold the lock while waiting for terminal workload state.
 
-Under that lock, the worker rechecks generation, loaded source identity, and
-generated-service provenance before distinct linearization points. First,
-operation-ID acceptance pins the validated generation and identity. A
+Under that lock, the worker re-reads normalized manager state, selected-unit
+job identity, correlation evidence, manifest generation, loaded source identity,
+and generated-service provenance before applying any matrix row. Decisions made
+before lock acquisition are discarded. A mismatch or changed job fails before
+acceptance rather than allowing stale `no_change`, join, cancel, or submission.
+
+The worker then uses distinct linearization points. First, operation-ID
+acceptance pins the validated generation and identity. A
 `no_change` decision completes atomically at acceptance. Otherwise a common
 manager-work commitment point either attaches observation to a verified existing
 job/invocation or begins a backend submission. An operation-state lock
@@ -557,10 +579,27 @@ original attribution or terminal evidence, the pinned operation returns
 `result_unknown`; it never adopts the replacement workload. Lifecycle progress
 follows this rule rather than ending merely because the manifest changed.
 
-A privileged administrator bypassing the approved activation lock is outside
-Graft's serialization guarantee. The worker still detects resulting provenance
-loss and fails closed where possible; it never treats ambient reload as
-permission to retarget.
+Manager submission has a five-second response deadline. Before the backend call,
+the worker writes one bounded non-secret pending-submission interlock record
+under `/run` while holding the activation lock. A timeout triggers a further
+five-second manager reconciliation for the exact job, unit, invocation, and
+operation evidence. Proven acceptance or rejection clears the record and
+produces the corresponding result.
+
+If reconciliation remains ambiguous, the worker retains `result_unknown`, marks
+its lifecycle backend degraded, and leaves the interlock record in place before
+releasing the file lock. Nix activation must check that record under its
+exclusive lock and fail closed without artifact replacement, manager reload, or
+manifest publication. Further lifecycle mutation for that workload is rejected.
+The record is operational request safety state, not desired state; [#242] must
+define an explicit administrator recovery that proves no late manager action can
+retarget a replacement before clearing it. It is never cleared by timeout,
+worker restart, or cache eviction.
+
+A privileged administrator bypassing the approved activation lock or interlock
+record is outside Graft's serialization guarantee. The worker still detects
+resulting provenance loss and fails closed where possible; it never treats
+ambient reload as permission to retarget.
 
 Operation identifiers use the exact canonical lowercase hyphenated UUIDv7 wire
 encoding defined by the
@@ -648,10 +687,13 @@ does not stop workloads or manager jobs.
 
 A reconnect presenting an old operation epoch or expired UUIDv7 cannot submit
 lifecycle work. After worker restart has lost the operational cache, an
-old-epoch operation-result query always returns `result_unknown`; it never
-reconstructs a terminal lifecycle result from audit output. The client then
-obtains a fresh status snapshot. Audit remains evidence for operators, not an
-operation-result database.
+old-epoch operation-result query returns the separate tagged
+`OperationResultUnavailable` response with operation identity, old/current
+epochs, code `cache_lost`, timestamp, and state-refresh guidance. It is not a
+`LifecycleTerminalResult`, has no lifecycle disposition/outcome/initial/final
+state, and never reconstructs a terminal result from audit output. The client
+then obtains a fresh status snapshot. Audit remains evidence for operators, not
+an operation-result database.
 
 Observed state can establish whether a long-running workload is active, a setup
 is retained, or a unit is inactive. It cannot in general prove whether an old
