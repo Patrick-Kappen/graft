@@ -69,15 +69,20 @@ its fixed systemd manager:
 | Graft action | systemd operation | Fixed conflict behavior |
 | --- | --- | --- |
 | `up` | start the generated service | Preserve an incompatible queued job (`fail`). |
-| `down` | stop the generated service | Replace a conflicting job for the selected unit (`replace`). |
+| `down` | cancel a verified selected-service start job when needed, then stop | Preserve every remaining incompatible queued job (`fail`). |
 | `restart` | restart the generated service | Preserve an incompatible queued job (`fail`). |
 
 The adapter chooses the concrete D-Bus method and unit identity. Clients cannot
-select or override the job mode. The `down` exception intentionally lets an
-operator abort activation of the selected workload, including a finite job; it
-does not authorize arbitrary unit selection or wholesale manager-queue
-replacement. `up` and `restart` never cancel independently submitted manager
-work. Any other incompatible transaction returns a conflict.
+select or override the job mode. To abort activation, `down` first reads the
+selected service's current job identity, proves that the job belongs to exactly
+that service and is a compatible start, and cancels that verified job. It then
+submits the stop with conflict-preserving `fail` mode. A missing proof, changed
+job identity, cancellation race, or remaining incompatible transaction returns
+conflict. Graft never uses transaction-wide `replace`, which could replace jobs
+for dependency units pulled into the same transaction. Normal systemd effects
+from cancelling the verified selected-service job and its materialised graph are
+reported rather than described as selected-unit-only effects. `up` and
+`restart` never cancel independently submitted manager work.
 
 `restart` is one manager restart operation. It is not implemented in the client
 as `down` followed by `up`; two operations would permit unrelated work to
@@ -198,7 +203,7 @@ runtime data.
 | --- | --- |
 | `inactive` | Return success with `no_change`. |
 | `failed` | If quiescent, return `no_change` and preserve failure evidence; otherwise submit stop and require a quiescent result. |
-| `activating` | Submit stop with the fixed replacement behavior, cancelling activation of the selected service/job, and wait for a quiescent result. |
+| `activating` | Verify and cancel the selected service's compatible start job, submit conflict-preserving stop, and wait for a quiescent result; otherwise conflict. |
 | `active-running` | Submit stop and wait for `inactive`. |
 | `active-exited` | Submit stop and wait for `inactive`. |
 | `deactivating` | Join a compatible stop job or observe recognized service cleanup; otherwise return conflict. |
@@ -265,8 +270,14 @@ semantics, which start an inactive service as well as restarting an active one.
 
 A successful `restart` must prove a new invocation or finite execution relative
 to the state captured before submission. Merely observing the same expected
-active state is insufficient. `restart` is not safe for automatic replay after
-an interrupted or unknown result.
+active state is insufficient. It must also prove that the operation-correlated
+stop phase did not fail. Systemd may continue into a successful new invocation
+after `ExecStop=` failure; Graft reports outcome `failed`, failure phase `stop`,
+and the actual final active state in that case. Generator-owned ignored
+best-effort cleanup such as `ExecStopPost=-...` is not manager failure. The
+worker retains stop-job, service-result, and invocation evidence needed to keep
+failure phase separate from final state. `restart` is not safe for automatic
+replay after an interrupted or unknown result.
 
 ## Completion contract
 
@@ -276,9 +287,12 @@ condition:
 
 | Action and lifecycle | Successful terminal condition |
 | --- | --- |
-| `up` / `restart`, `long-running` | Correlated service is `active-running`. |
-| `up` / `restart`, `setup` | Correlated invocation completed successfully and unit is `active-exited`. |
-| `up` / `restart`, `job` | Correlated finite invocation completed successfully and unit is `inactive`. |
+| `up`, `long-running` | Correlated service is `active-running`. |
+| `up`, `setup` | Correlated invocation completed successfully and unit is `active-exited`. |
+| `up`, `job` | Correlated finite invocation completed successfully and unit is `inactive`. |
+| `restart`, `long-running` | Correlated stop phase succeeded and new service invocation is `active-running`. |
+| `restart`, `setup` | Correlated stop phase succeeded and new invocation completed successfully in `active-exited`. |
+| `restart`, `job` | Correlated stop phase succeeded and new finite invocation completed successfully in `inactive`. |
 | `down`, every lifecycle | Unit is `inactive`, or is quiescent `failed` and any submitted stop itself completed successfully. |
 | Any valid `no_change` | Initial state already satisfies the action without submission. |
 
@@ -309,7 +323,7 @@ Every terminal response contains bounded typed fields:
 - outcome: `succeeded`, `failed`, or `result_unknown`;
 - manager job identity when one was observed;
 - invocation identity when available;
-- final state and typed unit result;
+- final state, typed unit result, and operation failure phase when applicable;
 - finite-process exit code or signal when available and authorized;
 - request-start and completion timestamps;
 - submission timestamp when `worker_submitted`, optional observed timing for
@@ -488,13 +502,24 @@ for a result. It does not replace `TimeoutStartSec`, `TimeoutStopSec`, or manage
 job timeouts from materialised intent.
 
 Before backend submission, cancellation returns `cancelled` and performs no
-mutation. After submission:
+mutation. After submission, client deadline, cancellation, or disconnect starts
+a fixed 30-second server completion grace:
 
-- cancellation or disconnect stops delivery and releases bounded client state;
-- it does not cancel, reverse, or roll back the manager job;
-- the worker may continue bounded result observation for duplicate/audit state;
-- loss of attribution or terminal evidence yields `result_unknown`; and
+- client delivery state is released immediately;
+- the manager job is not cancelled, reversed, or rolled back;
+- the worker retains the per-workload lock and bounded attribution only through
+  the grace period;
+- a terminal result proven during grace becomes the retained duplicate/audit
+  result;
+- when grace expires without proof, the worker stores `result_unknown`, releases
+  the lock and backend observation, and never revises that retained result based
+  on later manager state; and
 - the client must inspect current state before considering another mutation.
+
+The 30-second grace is independent of an unset or unbounded workload
+`TimeoutStartSec`/`TimeoutStopSec`. A manager job may continue after Graft has
+published `result_unknown`; its later completion is ordinary observed state,
+not retroactive mutation completion.
 
 A caller must never automatically replay `restart` after `result_unknown`.
 Fresh `up` and `down` are allowed only after state refresh establishes that the
