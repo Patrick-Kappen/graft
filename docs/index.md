@@ -87,3 +87,4 @@ For private vulnerability reporting, use the repository's
 **Report a vulnerability**. Contributors should start with
 [Development](development.md) and the repository
 [contribution guide](https://github.com/Patrick-Kappen/graft/blob/main/CONTRIBUTING.md).
+Graft is built by [Patrick Kappen](https://patrick.kappen.io/).
