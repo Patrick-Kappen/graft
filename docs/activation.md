@@ -262,9 +262,11 @@ the respective user managers were active succeeded. Successful debug bootstraps
 showed one Podman-sender message containing `MAINPID=<conmon pid>` and `READY=1`,
 followed by systemd accepting conmon in the service cgroup. The failed debug
 bootstrap contained no corresponding notification-attribution record before
-`Result=protocol`. Debug instrumentation therefore changes frequency but does
-not eliminate the condition. The evidence confines the failure to a
-timing-sensitive user-manager bootstrap compatibility boundary tracked by
+`Result=protocol`. The paired run observed different failure counts between the
+variants, but run order and intermittent variance prevent attributing that
+difference to debug instrumentation. Both variants reproduce the condition.
+The evidence confines the failure to a timing-sensitive user-manager bootstrap
+compatibility boundary tracked by
 [#212](https://github.com/Patrick-Kappen/graft/issues/212) under the broader
 version matrix in [#129](https://github.com/Patrick-Kappen/graft/issues/129).
 
