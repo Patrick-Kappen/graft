@@ -13,6 +13,7 @@
 
 - [Configuration reference](reference.md)
 - [Workload lifecycle](lifecycle.md)
+- [Local lifecycle operations](lifecycle-operations.md)
 - [Startup activation](activation.md)
 - [Workload dependencies](dependencies.md)
 - [Container networking](networking.md)

@@ -288,9 +288,10 @@ check fails. Detailed shadow detection remains coordinated with [#171].
 
 ## Operation families
 
-This document fixes operation shapes and boundaries. Final lifecycle state
-semantics are owned by [#135]; final state, metric, log, and event fields are
-owned by [#137].
+This document fixes operation shapes and boundaries. The
+[Local lifecycle operations](lifecycle-operations.md) contract defines exact
+state transitions, completion, concurrency, and interruption semantics; final
+state, metric, log, and event fields are owned by [#137].
 
 ### Discovery and capabilities
 
@@ -451,8 +452,8 @@ once mutation across restart is impossible without persistent hidden state and
 is not promised. A disconnect, deadline, cancellation, or worker crash after
 backend submission may therefore return `result_unknown`. The client must query
 the current workload state and must not blindly replay a non-idempotent
-operation. The lifecycle design in [#135] defines which observed states make a
-new `up`, `down`, or `restart` safe.
+operation. The [local lifecycle contract](lifecycle-operations.md) defines
+which observed states make a new `up`, `down`, or `restart` safe.
 
 ## Streaming, cursors, and backpressure
 
@@ -694,7 +695,8 @@ operation.
 
 ## Open details delegated to linked designs
 
-- [#135]: exact `up`, `down`, and `restart` state machines and idempotent results;
+- [Local lifecycle operations](lifecycle-operations.md): exact `up`, `down`, and
+  `restart` state machines and idempotent results;
 - [#137]: snapshot fields, metric formulas, log filters, cursor recovery, and
   storage accounting semantics;
 - [#171]: complete search-path shadow and foreign-override detection;

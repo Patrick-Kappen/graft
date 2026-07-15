@@ -4,7 +4,9 @@
 > `.timer` generation remains tracked by
 > [#134](https://github.com/Patrick-Kappen/graft/issues/134). Explicit manager
 > startup policy is implemented separately through
-> [Workload startup activation](activation.md).
+> [Workload startup activation](activation.md). Future CLI, TUI, and worker
+> actions follow the [Local lifecycle operations](lifecycle-operations.md)
+> contract.
 
 Graft models every workload as a systemd-managed service while distinguishing
 three process lifecycles through typed workload intent. Users should not need to
