@@ -267,7 +267,8 @@ semantics, which start an inactive service as well as restarting an active one.
 - `active-running` → submit restart and require a different successful
   invocation reaching `active-running`;
 - `inactive` or `failed` → submit restart and require `active-running`;
-- `activating` or `deactivating` → conflict rather than replace manager work;
+- `activating` or `deactivating` with a verified compatible restart job → join
+  it as `existing_manager_work`; otherwise conflict;
 - `active-exited` → `unexpected_state`;
 - `unknown` → backend unavailable.
 
@@ -276,7 +277,8 @@ semantics, which start an inactive service as well as restarting an active one.
 - `active-exited` → submit restart and require a new successful invocation
   returning to `active-exited`;
 - `inactive` or `failed` → submit restart and require `active-exited`;
-- `activating` or `deactivating` → conflict;
+- `activating` or `deactivating` with a verified compatible restart job → join
+  it as `existing_manager_work`; otherwise conflict;
 - `active-running` → `unexpected_state`;
 - `unknown` → backend unavailable.
 
@@ -284,15 +286,19 @@ semantics, which start an inactive service as well as restarting an active one.
 
 - `inactive` or `failed` → submit restart and wait for one new successful finite
   execution;
-- `activating` or `deactivating` → conflict;
+- `activating` or `deactivating` with a verified compatible restart job → join
+  it as `existing_manager_work`; otherwise conflict;
 - active states inconsistent with job materialisation → `unexpected_state`;
 - `unknown` → backend unavailable.
 
 A successful `restart` must prove a new invocation or finite execution relative
 to the state captured before submission. Merely observing the same expected
-active state is insufficient. It must also prove that the operation-correlated
-stop phase did not fail. Systemd may continue into a successful new invocation
-after `ExecStop=` failure; Graft reports outcome `failed`, failure phase `stop`,
+active state is insufficient. If systemd executes an operation-correlated stop
+phase, the worker must prove that phase did not fail. Restart from `inactive` or
+quiescent `failed` may proceed directly to start with no stop phase; that absence
+is valid and does not invent stop evidence. Systemd may continue into a
+successful new invocation after `ExecStop=` failure; Graft reports outcome
+`failed`, failure phase `stop`,
 and the actual final active state in that case. Generator-owned ignored
 best-effort cleanup such as `ExecStopPost=-...` is not manager failure. The
 worker retains stop-job, service-result, and invocation evidence needed to keep
@@ -310,9 +316,9 @@ condition:
 | `up`, `long-running` | Correlated service is `active-running`. |
 | `up`, `setup` | Correlated invocation completed successfully and unit is `active-exited`. |
 | `up`, `job` | Correlated finite invocation completed successfully and unit is `inactive`. |
-| `restart`, `long-running` | Correlated stop phase succeeded and new service invocation is `active-running`. |
-| `restart`, `setup` | Correlated stop phase succeeded and new invocation completed successfully in `active-exited`. |
-| `restart`, `job` | Correlated stop phase succeeded and new finite invocation completed successfully in `inactive`. |
+| `restart`, `long-running` | Any executed stop phase succeeded, and new service invocation is `active-running`. |
+| `restart`, `setup` | Any executed stop phase succeeded, and new invocation completed successfully in `active-exited`. |
+| `restart`, `job` | Any executed stop phase succeeded, and new finite invocation completed successfully in `inactive`. |
 | `down`, every lifecycle | Unit is `inactive`, or is quiescent `failed` and any submitted stop itself completed successfully. |
 | Any valid `no_change` | Initial state already satisfies the action without submission and no queued job can reverse it. |
 
@@ -482,6 +488,12 @@ and accepted peer UID. Future remote callers use a separate stable authenticated
 principal identifier. The UUID is explicitly not authorization and cannot join
 or conflict with another principal's record. Every duplicate is reauthorized
 before returning any in-flight or retained result.
+
+Immutable mutation equality covers only action, structured workload selector,
+manifest generation, and origin worker epoch under the principal/UUID key.
+Caller-specific delivery state—connection and request IDs, deadline, progress
+preference, and response formatting—is excluded. A reconnect may therefore join
+the same mutation with a new deadline; changing any mutation field conflicts.
 
 Within one worker epoch and principal key:
 
