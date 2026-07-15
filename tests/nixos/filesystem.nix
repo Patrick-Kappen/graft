@@ -13,7 +13,7 @@ let
       xdg.configFile = lib.mkOption {
         type = lib.types.attrsOf (
           lib.types.submodule {
-            options.text = lib.mkOption { type = lib.types.str; };
+            options.source = lib.mkOption { type = lib.types.path; };
           }
         );
         default = { };
@@ -36,7 +36,7 @@ let
     ];
   };
 
-  userSource = userEval.config.xdg.configFile."containers/systemd/filesystem-user.container".text;
+  userSource = userEval.config.xdg.configFile."containers/systemd/filesystem-user.container".source;
 in
 {
   name = "graft-filesystem-runtime";
@@ -63,7 +63,7 @@ in
       linger = true;
     };
 
-    environment.etc."containers/systemd/users/1000/filesystem-user.container".text = userSource;
+    environment.etc."containers/systemd/users/1000/filesystem-user.container".source = userSource;
 
     systemd.tmpfiles.rules = [
       "d /srv/graft-filesystem 0755 root root -"

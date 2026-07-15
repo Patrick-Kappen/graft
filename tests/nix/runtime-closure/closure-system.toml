@@ -1,0 +1,26 @@
+version = 1
+name = "closure-system"
+
+[deploy]
+target = "system"
+
+[config.runtime]
+packages = ["bash", "coreutils", "findutils", "gnugrep"]
+command = [
+  "bash",
+  "-c",
+  "set -eu; test -x /bin/true; test ! -e \"$1\"; touch /rootfs-write; if touch /nix/store/unexpected; then exit 20; fi; echo ready > /result/ready; exec /bin/graft-pause",
+  "closure-check",
+  "/nix/store/00000000000000000000000000000000-unrelated",
+]
+
+[config.filesystem]
+readOnly = false
+
+[[config.filesystem.binds]]
+source = "/var/lib/graft-closure/system"
+target = "/result"
+readOnly = false
+
+[config.security]
+addCapabilities = ["CAP_DAC_OVERRIDE"]

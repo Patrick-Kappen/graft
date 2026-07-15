@@ -16,7 +16,7 @@ let
       xdg.configFile = lib.mkOption {
         type = lib.types.attrsOf (
           lib.types.submodule {
-            options.text = lib.mkOption { type = lib.types.str; };
+            options.source = lib.mkOption { type = lib.types.path; };
           }
         );
         default = { };
@@ -40,8 +40,8 @@ let
     ];
   };
 
-  lingerUser = userEval.config.xdg.configFile."containers/systemd/linger-user.container".text;
-  loginUser = userEval.config.xdg.configFile."containers/systemd/login-user.container".text;
+  lingerUser = userEval.config.xdg.configFile."containers/systemd/linger-user.container".source;
+  loginUser = userEval.config.xdg.configFile."containers/systemd/login-user.container".source;
 
 in
 {
@@ -80,8 +80,8 @@ in
 
     environment.systemPackages = [ pkgs.util-linux ];
     environment.etc = {
-      "containers/systemd/users/1000/linger-user.container".text = lingerUser;
-      "containers/systemd/users/1001/login-user.container".text = loginUser;
+      "containers/systemd/users/1000/linger-user.container".source = lingerUser;
+      "containers/systemd/users/1001/login-user.container".source = loginUser;
     };
 
     systemd.tmpfiles.rules = [

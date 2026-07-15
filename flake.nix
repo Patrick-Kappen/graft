@@ -65,6 +65,11 @@
               inherit pkgs graftPackage;
             }
           );
+          closure-runtime-test = pkgs.testers.runNixOSTest (
+            import ./tests/nixos/closure.nix {
+              inherit pkgs graftPackage;
+            }
+          );
         }
       );
 
@@ -73,6 +78,17 @@
         let
           pkgs = nixpkgs.legacyPackages.${system};
           inherit (pkgs) lib;
+
+          closureRegularFile = pkgs.writeText "graft-closure-regular-file" "regular-file\n";
+          closureFixturePackage = pkgs.runCommand "graft-closure-fixture" { } ''
+            mkdir -p $out/share
+            ln -s ${closureRegularFile} $out/share/regular-file
+          '';
+          closureTestPkgs = pkgs.extend (
+            _: _: {
+              graftClosureFixture = closureFixturePackage;
+            }
+          );
 
           moduleTestOptions = { lib, ... }: {
             options = {
@@ -88,18 +104,36 @@
 
               environment.etc = lib.mkOption {
                 type = lib.types.attrsOf (
-                  lib.types.submodule {
-                    options.text = lib.mkOption { type = lib.types.str; };
-                  }
+                  lib.types.submodule (
+                    { config, ... }:
+                    {
+                      options = {
+                        source = lib.mkOption { type = lib.types.path; };
+                        text = lib.mkOption {
+                          type = lib.types.str;
+                          default = builtins.readFile config.source;
+                        };
+                      };
+                    }
+                  )
                 );
                 default = { };
               };
 
               xdg.configFile = lib.mkOption {
                 type = lib.types.attrsOf (
-                  lib.types.submodule {
-                    options.text = lib.mkOption { type = lib.types.str; };
-                  }
+                  lib.types.submodule (
+                    { config, ... }:
+                    {
+                      options = {
+                        source = lib.mkOption { type = lib.types.path; };
+                        text = lib.mkOption {
+                          type = lib.types.str;
+                          default = builtins.readFile config.source;
+                        };
+                      };
+                    }
+                  )
                 );
                 default = { };
               };
@@ -238,6 +272,41 @@
             ];
           };
 
+          closureNixosEval = lib.evalModules {
+            specialArgs.pkgs = closureTestPkgs;
+            modules = [
+              moduleTestOptions
+              self.nixosModules.graft
+              {
+                services.graft = {
+                  enable = true;
+                  configRoot = ./tests/nix/closure;
+                };
+              }
+            ];
+          };
+
+          closureHomeManagerEval = lib.evalModules {
+            specialArgs.pkgs = closureTestPkgs;
+            modules = [
+              moduleTestOptions
+              self.homeManagerModules.graft
+              {
+                programs.graft = {
+                  enable = true;
+                  configRoot = ./tests/nix/closure;
+                };
+              }
+            ];
+          };
+
+          closureNixosSource =
+            closureNixosEval.config.environment.etc."containers/systemd/closure-system.container".source;
+          closureHomeManagerSource =
+            closureHomeManagerEval.config.xdg.configFile."containers/systemd/closure-user.container".source;
+          closureNixosSourceClosure = pkgs.closureInfo { rootPaths = [ closureNixosSource ]; };
+          closureHomeManagerSourceClosure = pkgs.closureInfo { rootPaths = [ closureHomeManagerSource ]; };
+
           nixosRendered = nixosEval.config.environment.etc."containers/systemd/system.container".text;
           nixosPlainRendered =
             nixosEval.config.environment.etc."containers/systemd/plain-system.container".text;
@@ -296,7 +365,8 @@
           expectedQuickstartInfixes = [
             "ContainerName=graft-example"
             ''Exec="bash" "-c" "echo graft-example-ready; exec /bin/graft-pause"''
-            "Volume=/nix/store:/nix/store:ro"
+            "/nix/store:/nix/store:ro,bind,nodev,nosuid"
+            ":ro,bind,nodev,nosuid"
           ];
           expectedEnvironmentLines = lib.concatStringsSep "\n" [
             ''Environment="EMPTY="''
@@ -610,6 +680,53 @@
             );
             assert !(lib.hasInfix "WorkingDir=" quickstartHomeManagerRendered);
             pkgs.writeText "graft-home-manager-module-eval" homeManagerRendered;
+
+          closure-scoped-store =
+            pkgs.runCommand "graft-closure-scoped-store"
+              {
+                nativeBuildInputs = [ pkgs.coreutils ];
+              }
+              ''
+                set -euo pipefail
+                mkdir "$out"
+
+                check_source() {
+                  source_file=$1
+                  source_closure=$2
+                  expected_name=$3
+
+                  grep -Fx "ContainerName=$expected_name" "$source_file"
+                  ! grep -Fx 'Volume=/nix/store:/nix/store:ro' "$source_file"
+
+                  volume_lines=$(mktemp)
+                  grep '^Volume=' "$source_file" > "$volume_lines"
+                  first_volume=$(head -n 1 "$volume_lines")
+                  case "$first_volume" in
+                    Volume=*/nix/store:/nix/store:ro,bind,nodev,nosuid) ;;
+                    *) echo "missing first read-only store scaffold in $source_file" >&2; exit 1 ;;
+                  esac
+
+                  tail -n +2 "$volume_lines" | cut -d: -f1 | sed 's/^Volume=//' | LC_ALL=C sort -c
+                  member_count=$(($(wc -l < "$volume_lines") - 1))
+                  test "$member_count" -gt 0
+                  test "$member_count" -le 512
+
+                  regular_line="Volume=${closureRegularFile}:${closureRegularFile}:ro,bind,nodev,nosuid"
+                  grep -Fx "$regular_line" "$source_file"
+                  grep -Fx ${lib.escapeShellArg "${closureRegularFile}"} "$source_closure/store-paths"
+
+                  scaffold_path="''${first_volume#Volume=}"
+                  scaffold_path="''${scaffold_path%:/nix/store:ro,bind,nodev,nosuid}"
+                  rootfs_path="''${scaffold_path%/nix/store}"
+                  test -d "$scaffold_path/$(basename "$rootfs_path")"
+                  test -f "$scaffold_path/$(basename ${lib.escapeShellArg "${closureRegularFile}"})"
+
+                  cp "$source_file" "$out/$expected_name.container"
+                }
+
+                check_source ${closureNixosSource} ${closureNixosSourceClosure} closure-system
+                check_source ${closureHomeManagerSource} ${closureHomeManagerSourceClosure} closure-user
+              '';
 
           documentation-drift =
             pkgs.runCommand "graft-documentation-drift"

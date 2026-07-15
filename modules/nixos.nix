@@ -49,7 +49,7 @@ in
     environment.etc = lib.mapAttrs' (
       name: _:
       lib.nameValuePair "containers/systemd/${lib.removeSuffix ".toml" name}.container" {
-        text = materialised.quadletFiles.${name};
+        source = materialised.quadletFiles.${name};
       }
     ) materialised.containers;
 
