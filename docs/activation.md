@@ -44,10 +44,10 @@ The resolver maps `startup` to one fixed target for each effective deploy target
 | `system` | normal system boot reaches the multi-user environment | `[Install]` with `WantedBy=multi-user.target` |
 | `user` | the user's service manager reaches its default target | `[Install]` with `WantedBy=default.target` |
 
-Omitted `deploy.target` keeps the existing `system` default and therefore maps
-to `multi-user.target`. Users cannot supply a target name. The resolved JSON
-carries the selected install relationship so NixOS and Home Manager only render
-it mechanically.
+`deploy.target` is required; omission fails before activation is resolved.
+Users cannot supply an arbitrary target name. The resolved JSON carries the
+selected install relationship so NixOS and Home Manager only render it
+mechanically.
 
 Normalized output for a system workload is:
 

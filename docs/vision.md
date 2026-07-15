@@ -71,7 +71,7 @@ The implementation priority is to make this foundation safe and complete:
 - fail-closed configuration and tested executable boundaries;
 - typed long-running service, finite-job, timer, and lifecycle behavior;
 - local `up`, `down`, status, logs, inspect, lint, and doctor contracts;
-- secure rootless server operation, secrets, mounts, networking, and limits;
+- secure rootless server identities, secrets, advanced networking, and limits;
 - temporary instances with ownership, cleanup, prebuilds, and fast starts;
 - deterministic multi-source configuration, explicit multi-host deployment, and
   reviewable diff/promote workflows.

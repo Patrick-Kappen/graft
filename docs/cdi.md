@@ -99,7 +99,6 @@ The pinned test environment currently uses Podman/Quadlet 5.8.2 with CDI library
 1.0.1. These are tested versions rather than a formal minimum-version promise;
 see [Capability status](capabilities.md#tested-upstream-context).
 
-Broader mount rules are approved in the
-[filesystem policy](filesystem-policy.md) for implementation through
-[#164](https://github.com/Patrick-Kappen/graft/issues/164). Direct host-device
-paths remain deferred until a host-aware attestation contract exists.
+Typed bind, managed-volume, tmpfs, and collision rules are implemented through
+the [filesystem policy](filesystem-policy.md). Direct host-device paths remain
+deferred until a host-aware attestation contract exists.
