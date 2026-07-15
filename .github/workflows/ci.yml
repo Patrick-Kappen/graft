@@ -259,8 +259,19 @@ jobs:
       - name: Setup Nix
         uses: ./.github/actions/setup-nix
 
-      - name: Rootless notify protocol runtime test
-        run: nix build .#packages.x86_64-linux.notify-protocol-runtime-test --no-link --print-build-logs
+      - name: Rootless notify protocol runtime tests
+        run: |
+          set +e
+          status=0
+          nix build \
+            .#packages.x86_64-linux.notify-protocol-runtime-test \
+            --no-link \
+            --print-build-logs || status=$?
+          nix build \
+            .#packages.x86_64-linux.notify-protocol-debug-runtime-test \
+            --no-link \
+            --print-build-logs || status=$?
+          exit "$status"
 
   cdi_runtime:
     name: cdi-runtime

@@ -55,6 +55,12 @@
               inherit pkgs graftPackage;
             }
           );
+          notify-protocol-debug-runtime-test = pkgs.testers.runNixOSTest (
+            import ./tests/nixos/notify-protocol.nix {
+              inherit pkgs graftPackage;
+              debugLogging = true;
+            }
+          );
           cdi-runtime-test = pkgs.testers.runNixOSTest (
             import ./tests/nixos/cdi.nix {
               inherit graftPackage;
