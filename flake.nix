@@ -623,6 +623,7 @@
                   "${./README.md}" \
                   "${./website/index.html}" \
                   "${./examples/quickstart/nixos/containers/graft-example.toml}" <<'PY'
+                import html
                 import json
                 import re
                 import sys
@@ -736,20 +737,38 @@
                         )
 
                 website = website_path.read_text()
-                website_contract = (
+                website_examples = re.findall(r"<pre><code>(.*?)</code></pre>", website, re.DOTALL)
+                if len(website_examples) != 1:
+                    raise SystemExit("website must contain exactly one complete TOML example")
+
+                website_toml = html.unescape(re.sub(r"<[^>]+>", "", website_examples[0]))
+                website_example = tomllib.loads(website_toml)
+                for path in compared_paths:
+                    website_value = website_example
+                    fixture_value = fixture
+                    for component in path:
+                        website_value = website_value[component]
+                        fixture_value = fixture_value[component]
+                    if website_value != fixture_value:
+                        raise SystemExit(
+                            "website example differs from the validated quickstart at "
+                            + ".".join(path)
+                        )
+
+                hero_contract = (
+                    f'<p><b>version</b> = <span>{fixture["version"]}</span></p>',
+                    f'<p><b>name</b> = <span>{json.dumps(fixture["name"])}</span></p>',
                     '<p class="terminal-section">[deploy]</p>',
-                    '<p><b>target</b> = <span>"system"</span></p>',
-                    '<p><b>packages</b> = <span>["bash"]</span></p>',
-                    '<span class="code-section">[deploy]</span>',
-                    '<span class="code-key">target</span> = <span class="code-string">"system"</span>',
+                    f'<p><b>target</b> = <span>{json.dumps(fixture["deploy"]["target"])}</span></p>',
+                    f'<p><b>packages</b> = <span>{json.dumps(fixture["config"]["runtime"]["packages"], separators=(",", ":"))}</span></p>',
                 )
-                missing_website_contract = [
-                    fragment for fragment in website_contract if fragment not in website
+                missing_hero_contract = [
+                    fragment for fragment in hero_contract if fragment not in website
                 ]
-                if missing_website_contract:
+                if missing_hero_contract:
                     raise SystemExit(
-                        "website examples lost required validated intent: "
-                        + ", ".join(missing_website_contract)
+                        "website hero differs from validated quickstart intent: "
+                        + ", ".join(missing_hero_contract)
                     )
                 PY
                 touch $out

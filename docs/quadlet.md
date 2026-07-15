@@ -66,8 +66,13 @@ Volume=graft-data:/data:rw
 Volume=/cache
 AddDevice=vendor.example/class=device
 AddCapability=CAP_NET_BIND_SERVICE
-Network=none
 PublishPort=127.0.0.1:8080:8080
+```
+
+A network-isolated workload instead renders:
+
+```ini
+Network=none
 ```
 
 Relevant ordering is deterministic:

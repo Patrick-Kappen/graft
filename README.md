@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Patrick-Kappen/graft/actions/workflows/ci.yml"><img src="https://github.com/Patrick-Kappen/graft/actions/workflows/ci.yml/badge.svg" alt="Manual quality checks"></a>
+  <a href="https://github.com/Patrick-Kappen/graft/actions/workflows/ci.yml"><img src="https://github.com/Patrick-Kappen/graft/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
   <a href="https://app.codecov.io/gh/Patrick-Kappen/graft"><img src="https://codecov.io/gh/Patrick-Kappen/graft/branch/main/graph/badge.svg" alt="Code coverage"></a>
   <a href="https://graft.kappen.io/docs/"><img src="https://img.shields.io/badge/docs-manual-blue" alt="Published manual"></a>
   <a href="https://github.com/Patrick-Kappen/graft/releases"><img src="https://img.shields.io/github/v/release/Patrick-Kappen/graft?include_prereleases&amp;label=release" alt="Latest release"></a>
@@ -124,4 +124,4 @@ product boundary.
 - [Roadmap](docs/roadmap.md) and [long-term vision](docs/vision.md)
 - [Security policy](SECURITY.md) and [private reporting](https://github.com/Patrick-Kappen/graft/security)
 - [Contribution guide](CONTRIBUTING.md) and [development checks](docs/development.md)
-- [Apache-2.0 license](LICENSE)
+- [Patrick Kappen](https://patrick.kappen.io/) · [Apache-2.0 license](LICENSE)
