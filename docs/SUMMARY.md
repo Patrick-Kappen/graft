@@ -25,6 +25,7 @@
 - [Overview](overview.md)
 - [Architecture and responsibilities](design.md)
 - [Control-plane architecture](control-plane.md)
+- [Local worker and API contract](worker-api.md)
 - [Generated Quadlet output](quadlet.md)
 
 # Security and trust

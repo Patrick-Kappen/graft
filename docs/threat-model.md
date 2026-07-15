@@ -135,8 +135,10 @@ host resources and other workloads
 
 The future [control-plane architecture](control-plane.md) adds Nix-managed
 system and per-account user workers outside the deterministic materialisation
-pipeline. Local CLI and TUI clients connect over typed Unix-socket APIs; an
-optional controller may later connect through an authenticated remote protocol.
+pipeline. The [local worker and API contract](worker-api.md) defines their
+manifest-bound, length-framed, typed Unix-socket boundary. Local CLI and TUI
+clients use that API; an optional controller may later connect through a
+separate authenticated remote protocol.
 The worker adapts approved operations to the materialisation manifest, systemd
 D-Bus, journald, Podman, cgroups, and bounded storage accounting.
 
