@@ -24,6 +24,7 @@
 
 - [Overview](overview.md)
 - [Architecture and responsibilities](design.md)
+- [Control-plane architecture](control-plane.md)
 - [Generated Quadlet output](quadlet.md)
 
 # Security and trust

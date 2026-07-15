@@ -132,6 +132,17 @@ Resolution must remain deterministic and side-effect free. Future host-aware
 commands such as diagnostics, status, logs, `graft up`, and `graft down` must
 stay outside the build-time resolver path.
 
+## Future control plane
+
+The approved [Control-plane architecture](control-plane.md) adds a host-native,
+Nix-managed worker as a runtime adapter outside this materialisation pipeline.
+Local CLI and TUI clients will use its typed API for already materialised
+workloads; an optional controller may later use an authenticated form of the
+same contract. The worker does not resolve intent, materialise rootfs content,
+reconcile desired state, or replace systemd and Podman authority. TOML and Nix
+remain declarative truth, and local control remains available without a
+controller.
+
 ## Contract boundaries
 
 The current implementation intentionally forbids raw Podman arguments, raw

@@ -121,10 +121,13 @@ first remote lifecycle design remains
 
 ### Shared control surfaces
 
-The CLI is the first control surface. A future TUI or authenticated web
-controller may consume the same inspectable control contract for plans, status,
-logs, and approved operations. Such a controller is optional: it must not be a
-required daemon on every host or a second scheduler that competes with systemd.
+The approved [Control-plane architecture](control-plane.md) installs CLI, TUI,
+and worker binaries on each managed machine. CLI and TUI use a typed local
+worker API for lifecycle, status, logs, metrics, and inspection. A future
+authenticated controller may consume the same semantic contract across hosts.
+The controller is optional, local operation remains independent of it, and
+neither worker nor controller becomes a scheduler competing with systemd or an
+alternative source of workload truth.
 
 ## Invariants
 
@@ -138,9 +141,10 @@ Future work must keep these boundaries intact:
   a repository cannot silently enable privileged host behavior.
 - **Layer ownership:** the CLI resolves policy and defaults; Nix materialises;
   Quadlet generates units; systemd owns lifecycle; Podman runs containers.
-- **No mandatory Graft daemon:** Graft does not require a per-host daemon or
-  duplicate scheduler. Optional clients or controllers use the same explicit
-  contract.
+- **No mandatory central controller:** Nix installs a host-native worker for
+  typed local operations, but no central service is required for workloads or
+  local CLI/TUI use. Worker and controller never duplicate systemd scheduling or
+  TOML/Nix authority.
 - **Immutable artifacts:** intentional changes return to reviewed declarative
   sources and rebuild into new artifacts. Graft must not copy arbitrary runtime
   binaries or package-manager output into the Nix store.
@@ -161,8 +165,9 @@ Some current phrases describe the implemented backend, not permanent limits:
   to be a service.
 - **No `graft shell` command** remains the current command decision. It does not
   decide the later interactive-workspace access contract.
-- **No required daemon** does not rule out an optional authenticated controller
-  for a future web or TUI experience.
+- **No mandatory central controller** does not rule out the Nix-managed local
+  worker or an optional authenticated controller; neither owns declarative
+  workload state.
 
 ## Boundaries of this vision
 
