@@ -482,11 +482,14 @@ operation returns `result_unknown`; it does not adopt the replacement workload.
 Lifecycle progress for the submitted operation follows this rule rather than
 ending merely because the manifest changed.
 
-Operation identifiers are canonical UUIDv7 values. Their embedded timestamp may
-be at most one minute ahead of server receive time and at most ten minutes old.
-The server publishes its current time in `ServerHello` so clients can detect
-local skew before mutation. Every accepted identifier retains its immutable request while in flight and its
-complete bounded terminal result until both the operation is terminal and the
+Operation identifiers use the exact canonical lowercase hyphenated UUIDv7 wire
+encoding defined by the
+[worker mutation identity contract](worker-api.md#mutation-identity-concurrency-and-interruption).
+Their embedded timestamp may be at most one minute ahead of server receive time
+and at most ten minutes old. The server publishes UTC Unix epoch milliseconds in
+`ServerHello` so clients can detect local skew before mutation. Every accepted
+identifier retains its immutable request while in flight and its complete
+bounded terminal result until both the operation is terminal and the
 complete ten-minute acceptance window has passed. A resultless tombstone cannot
 replace that result. A known identical in-flight or terminal request may still
 join after its timestamp ages out and receives the same result; an unknown

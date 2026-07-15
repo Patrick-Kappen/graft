@@ -109,7 +109,7 @@ These are protocol maxima, not target values to allocate eagerly:
 | Buffered response bytes per principal / worker | 2 MiB / 16 MiB |
 | Retained mutation records per principal / worker | 256 / 1,024 |
 | Encoded retained lifecycle result | 32 KiB |
-| Mutation identifier acceptance window | 10 minutes |
+| Mutation UUIDv7 timestamp window | 10 minutes before through 1 minute after server receive time |
 | Unacknowledged stream items per stream | 64 |
 | Workloads in one list page | 256 |
 | Historical log records requested per page | 1,000 |
@@ -160,7 +160,8 @@ operation is accepted before a successful handshake.
 - supported operation capabilities;
 - effective limits and deadline bounds;
 - current manifest generation and availability state;
-- current worker epoch and server wall-clock time; and
+- current worker epoch and server wall-clock time as UTC Unix epoch
+  milliseconds encoded as a JSON integer; and
 - one server-generated connection identifier for audit correlation.
 
 Major versions must match exactly. The selected minor version is the highest
@@ -440,10 +441,17 @@ rollback, stop, or an opposite lifecycle action.
 ## Mutation identity, concurrency, and interruption
 
 Every lifecycle request carries a client-generated canonical UUIDv7 operation
-identifier plus the worker epoch in which it originated. The embedded timestamp
-must be no more than one minute ahead of server receive time and no more than ten
-minutes old. They provide correlation, duplicate control, expiry enforcement,
-and stale-epoch rejection, not authorization.
+identifier plus the worker epoch in which it originated. Its wire value is
+exactly 36 ASCII characters in lowercase hyphenated RFC 9562 form:
+`xxxxxxxx-xxxx-7xxx-[89ab]xxx-xxxxxxxxxxxx`. Uppercase, braces, omitted hyphens,
+URN prefixes, non-version-7 values, non-RFC variants, and every other alternate
+UUID representation are rejected rather than normalized. Dedupe keys use the
+validated 128-bit UUID value.
+
+The embedded UUIDv7 timestamp must be no more than one minute ahead of server
+receive time and no more than ten minutes old, compared as Unix epoch
+milliseconds. These fields provide correlation, duplicate control, expiry
+enforcement, and stale-epoch rejection, not authorization.
 
 Within one worker epoch:
 
