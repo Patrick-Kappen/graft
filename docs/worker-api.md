@@ -417,7 +417,8 @@ parse and bound
   → emit denial audit and return, or emit authorized-attempt audit
   → load and validate current manifest
   → bind workload/backend identity
-  → validate capability and preconditions
+  → validate capability, preconditions, and concurrency
+  → accept and reserve mutation identity
   → submit typed backend operation
   → emit submission audit
   → observe terminal or accepted state
@@ -462,8 +463,9 @@ Mutation records are keyed by worker epoch, authenticated principal key, and
 validated UUID. For local workers, that principal key contains the fixed worker
 context and accepted peer UID; a future remote transport supplies its own stable
 authenticated principal ID. UUID reuse by another principal neither joins nor
-conflicts with the first record. Every duplicate request is reauthorized before
-any retained or in-flight result is disclosed.
+conflicts with the first record. Every duplicate request and separate
+operation-result query is reauthorized against the current principal, workload,
+and action before any retained or in-flight result is disclosed.
 
 Immutable payload equality covers action, structured workload selector,
 manifest generation, and origin worker epoch. Per-caller connection/request
@@ -473,10 +475,11 @@ field conflicts.
 
 Within one worker epoch and principal key:
 
-- after a complete request is parsed, authenticated, passes the per-workload
-  concurrency check, is admitted, and receives its immutable payload, the first
-  accepted operation identifier owns that payload;
-- `operation_in_progress`, disconnect, or parse failure before acceptance
+- the first accepted operation identifier owns its immutable payload only at the
+  final pre-submission commit point, after parse, authentication, current
+  authorization, required initial audit, current manifest/identity validation,
+  operation preconditions, and per-workload concurrency all succeed;
+- any pre-commit failure, `operation_in_progress`, disconnect, or parse failure
   reserves no identifier, so the ID may be submitted later while timestamp-valid;
 - cancellation or deadline after acceptance but before backend submission
   retains a tagged `MutationTerminalError` with
@@ -486,6 +489,9 @@ Within one worker epoch and principal key:
   timestamp, and retry guidance but no lifecycle disposition or outcome;
 - `LifecycleTerminalResult` is the distinct tagged variant for `no_change`,
   joined, or submitted manager work and owns lifecycle disposition/outcome;
+- a backend call attempted after acceptance, including synchronous rejection,
+  returns `LifecycleTerminalResult` with `worker_submitted`, `failed`, and
+  failure phase `submission`;
 - reuse with the identical payload observes the same in-flight or completed
   result while retained;
 - reuse with a different payload fails as a conflict;
