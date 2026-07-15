@@ -746,7 +746,7 @@
                     *) echo "missing first read-only store scaffold in $source_file" >&2; exit 1 ;;
                   esac
 
-                  tail -n +2 "$volume_lines" | cut -d: -f1 | sed 's/^Volume=//' | LC_ALL=C sort -c
+                  tail -n +2 "$volume_lines" | cut -d: -f1 | sed 's/^Volume=//' | LC_ALL=C sort -cu
                   member_count=$(($(wc -l < "$volume_lines") - 1))
                   test "$member_count" -gt 0
                   test "$member_count" -le 512
@@ -776,6 +776,17 @@
                   exit 1
                 fi
                 grep -F "top-level closure symlink '${closureSymlink}' is unsupported" symlink-error
+
+                printf '/nix/store/expected\n' > expected-paths
+                printf '/nix/store/expected\n/nix/store/unexpected\n' > mismatched-paths
+                if ${pkgs.bash}/bin/bash ${./modules/lib/check-closure-equality.sh} \
+                  expected-paths mismatched-paths services.graft mismatch-test \
+                  2> mismatch-error; then
+                  echo "mismatched final closure was accepted" >&2
+                  exit 1
+                fi
+                grep -F "final closure mismatch for container 'mismatch-test'" mismatch-error
+                grep -F '+/nix/store/unexpected' mismatch-error
 
                 seq 512 | sed 's#^#/nix/store/member-#' > exact-members
                 truncate -s 131072 exact-fragment

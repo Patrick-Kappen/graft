@@ -128,5 +128,13 @@ in
         machine.succeed("systemctl daemon-reload")
         machine.fail("systemctl start closure-missing.service")
         machine.succeed("test $(systemctl show closure-missing.service -P Result) = exit-code")
+
+        machine.succeed("install -d -o graftclosure -g users /run/user/1000/containers/systemd")
+        machine.succeed(f"{user_env} cp {user_source} /run/user/1000/containers/systemd/closure-missing-user.container")
+        machine.succeed(f"{user_env} sed -i 's/ContainerName=closure-user/ContainerName=closure-missing-user/' /run/user/1000/containers/systemd/closure-missing-user.container")
+        machine.succeed(f"{user_env} sed -i '0,/^Volume=\\/nix\\/store\\//s#^Volume=/nix/store/[^:]*#Volume=/nix/store/00000000000000000000000000000000-missing#' /run/user/1000/containers/systemd/closure-missing-user.container")
+        machine.succeed(f"{user_systemctl} daemon-reload")
+        machine.fail(f"{user_systemctl} start closure-missing-user.service")
+        machine.succeed(f"test $({user_systemctl} show closure-missing-user.service -P Result) = exit-code")
   '';
 }

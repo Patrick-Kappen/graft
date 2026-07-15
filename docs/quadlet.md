@@ -29,7 +29,7 @@ A minimal workload with the secure defaults and no explicit command renders:
 ContainerName=graft-example
 Rootfs=/nix/store/...-graft-graft-example-env:O
 Exec="/bin/graft-pause"
-Volume=/nix/store/...-rootfs/nix/store:/nix/store:ro,bind,nodev,nosuid
+Volume=/nix/store/...-graft-graft-example-env/nix/store:/nix/store:ro,bind,nodev,nosuid
 Volume=/nix/store/...-member:/nix/store/...-member:ro,bind,nodev,nosuid
 ReadOnly=true
 DropCapability=all

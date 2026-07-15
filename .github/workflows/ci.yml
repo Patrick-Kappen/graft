@@ -212,6 +212,7 @@ jobs:
           nix build \
             .#checks.x86_64-linux.nixos-module-eval \
             .#checks.x86_64-linux.home-manager-module-eval \
+            .#checks.x86_64-linux.closure-scoped-store \
             .#checks.x86_64-linux.quadlet-activation \
             .#checks.x86_64-linux.quadlet-cdi \
             .#checks.x86_64-linux.quadlet-dependencies \

@@ -172,11 +172,11 @@ let
       } | LC_ALL=C sort -u > "$expected_paths"
       LC_ALL=C sort -u ${finalClosure}/store-paths > "$actual_paths"
 
-      if ! cmp -s "$expected_paths" "$actual_paths"; then
-        echo "${optionName}: final closure mismatch for container '${ctr.name}'" >&2
-        diff -u "$expected_paths" "$actual_paths" >&2 || true
-        exit 1
-      fi
+      ${pkgs.bash}/bin/bash ${./check-closure-equality.sh} \
+        "$expected_paths" \
+        "$actual_paths" \
+        ${lib.escapeShellArg optionName} \
+        ${lib.escapeShellArg ctr.name}
 
       ${pkgs.bash}/bin/bash ${./render-closure-mounts.sh} \
         "$actual_paths" \

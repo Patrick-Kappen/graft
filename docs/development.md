@@ -281,6 +281,7 @@ nix develop .#ci -c deadnix --fail .
 nix build \
   .#checks.x86_64-linux.nixos-module-eval \
   .#checks.x86_64-linux.home-manager-module-eval \
+  .#checks.x86_64-linux.closure-scoped-store \
   .#checks.x86_64-linux.quadlet-activation \
   .#checks.x86_64-linux.quadlet-dependencies \
   .#checks.x86_64-linux.quadlet-lifecycle \
