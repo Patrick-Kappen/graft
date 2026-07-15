@@ -421,9 +421,9 @@ parse and bound
   → validate capability, preconditions, and concurrency
   → acquire activation/submission lock
   → recheck generation and loaded-unit provenance
-  → accept and pin mutation identity
-  → serialize final-caller departure against submission start
-  → begin typed backend submission
+  → accept and pin mutation identity (`no_change` may complete here)
+  → serialize final-caller departure against manager-work commitment
+  → attach to verified existing work or begin typed backend submission
   → release activation/submission lock after acceptance/rejection
   → emit submission audit
   → observe terminal or accepted state
@@ -441,8 +441,9 @@ Client deadlines bound how long the worker waits and how long ordinary response
 state is retained. Mutation duplicate records and their bounded terminal results
 are the explicit exception: they follow the deadline-independent
 acceptance-window retention below. Joined callers hold independent interest;
-a departing caller ends only its own delivery. After submitted lifecycle work
-loses its final interested caller, the worker observes it for at most the fixed
+a departing caller ends only its own delivery. After committed submitted or
+joined lifecycle work loses its final interested caller, the worker observes it
+for at most the fixed
 30-second completion grace. A valid duplicate join cancels an active grace and
 a fresh grace starts after the next final departure. Neither joins nor grace may
 extend observation beyond ten minutes after server acceptance. At grace or
@@ -488,11 +489,12 @@ Within one worker epoch and principal key:
   operation preconditions, and per-workload concurrency all succeed;
 - any pre-commit failure, `operation_in_progress`, disconnect, or parse failure
   reserves no identifier, so the ID may be submitted later while timestamp-valid;
-- after acceptance but before backend submission, each joined caller has
+- after acceptance but before manager-work commitment, each caller has
   independent interest; only final-caller deadline, cancellation, or disconnect
-  suppresses submission and retains `deadline_before_submission`,
-  `cancelled_before_submission`, or `disconnected_before_submission` for the
-  full acceptance window, and that identifier cannot later mutate;
+  suppresses both existing-work attachment and submission and retains
+  `deadline_before_commitment`, `cancelled_before_commitment`, or
+  `disconnected_before_commitment` for the full acceptance window, and that
+  identifier cannot later mutate;
 - a `MutationTerminalError` contains operation/epoch identity, action, workload
   selector, code, phase, timestamp, and retry guidance but no lifecycle
   disposition, outcome, manager job, invocation, or final workload state;
@@ -505,7 +507,12 @@ Within one worker epoch and principal key:
 - only pre-acceptance mismatches return `stale_manifest` or provenance failure,
   while post-submission publication is recorded as an in-operation change and
   cannot retarget;
-- a backend call attempted after acceptance, including synchronous rejection,
+- `no_change` completes at acceptance; otherwise a common commitment point
+  attaches verified existing manager work or begins backend submission, with
+  final departure serialized against that point;
+- post-commitment grace and absolute cutoff apply equally to joined and submitted
+  work;
+- a backend call attempted after commitment, including synchronous rejection,
   returns `LifecycleTerminalResult` with `worker_submitted`, `failed`, and
   failure phase `submission`;
 - reuse with the identical payload observes the same in-flight or completed

@@ -370,8 +370,9 @@ An accepted operation terminates as exactly one tagged response variant:
 `MutationTerminalError` contains operation and epoch identity, requested action,
 workload selector, safe typed error code, phase, timestamp, and retry guidance.
 It deliberately has no disposition, outcome, manager job, invocation, final
-workload state, or submission timestamp. The initial codes are `cancelled_before_submission`,
-`deadline_before_submission`, and `disconnected_before_submission`.
+workload state, or submission timestamp. The initial codes are
+`cancelled_before_commitment`, `deadline_before_commitment`, and
+`disconnected_before_commitment`.
 
 The response contains no raw D-Bus values, journal records, unit properties,
 Podman output, command lines, environment values, or arbitrary backend text.
@@ -536,14 +537,17 @@ manifest and loaded-unit provenance recheck through manager acceptance or
 rejection. It does not hold the lock while waiting for terminal workload state.
 
 Under that lock, the worker rechecks generation, loaded source identity, and
-generated-service provenance before two distinct linearization points. First,
-operation-ID acceptance pins the validated generation and identity. Second,
-backend-submission start commits to calling the manager. An operation-state lock
-serializes final-caller departure against submission start: if final departure
-wins, the worker commits the matching `*_before_submission` terminal error and
-never calls the backend; if submission start wins, later departures cannot
-suppress or reverse the call. This accepted interval makes pre-submission
-cancellation reachable without opening a manifest/reload race.
+generated-service provenance before distinct linearization points. First,
+operation-ID acceptance pins the validated generation and identity. A
+`no_change` decision completes atomically at acceptance. Otherwise a common
+manager-work commitment point either attaches observation to a verified existing
+job/invocation or begins a backend submission. An operation-state lock
+serializes final-caller departure against that commitment: if final departure
+wins, the worker commits the matching `*_before_commitment` terminal error and
+neither attaches nor calls the backend; if commitment wins, later departures
+cannot detach shared observation or suppress/reverse submission. This accepted
+interval makes pre-commitment cancellation reachable without opening a
+manifest/reload race.
 
 A provenance mismatch before acceptance fails `stale_manifest` or the specific
 provenance error without accepting the ID or mutating the manager. Publication
@@ -589,23 +593,24 @@ Any failure, `operation_in_progress`, disconnect, or malformed frame before that
 point reserves no ID. The same ID may be submitted later while its UUIDv7
 timestamp remains acceptable.
 
-After acceptance but before the backend call, each duplicate/joined caller has
+After acceptance but before manager-work commitment, each duplicate caller has
 independent interest. Deadline, explicit cancellation, or disconnect removes
-only that caller. Submission continues while any caller remains. If the final
-caller departs before the backend call linearizes, the worker suppresses
-submission and retains `deadline_before_submission`,
-`cancelled_before_submission`, or `disconnected_before_submission` according to
-that final departure. Once this terminal error is committed, later duplicates
-receive it and cannot revive submission.
+only that caller. Commitment proceeds while any caller remains. If the final
+caller departs first, the worker neither attaches to existing manager work nor
+calls the backend and retains `deadline_before_commitment`,
+`cancelled_before_commitment`, or `disconnected_before_commitment` according to
+that final departure. Once committed, later duplicates receive this terminal
+error and cannot revive work.
 
-A backend call attempted after acceptance, including a synchronous manager
+A backend call attempted after commitment, including a synchronous manager
 rejection, terminates as `LifecycleTerminalResult` with `worker_submitted`,
 outcome `failed`, and failure phase `submission`.
 
-After submission, caller departures remain independent and release only their
-delivery state. Normal shared observation continues while at least one caller
-remains interested. The fixed 30-second server completion grace starts only when
-the final joined caller loses interest:
+After commitment to either `worker_submitted` or `existing_manager_work`, caller
+departures remain independent and release only their delivery state. Normal
+shared observation continues while at least one caller remains interested. The
+fixed 30-second server completion grace starts only when the final joined caller
+loses interest:
 
 - the manager job is not cancelled, reversed, or rolled back;
 - the worker retains the per-workload lock and bounded attribution only through
