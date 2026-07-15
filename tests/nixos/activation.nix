@@ -17,7 +17,7 @@ let
       xdg.configFile = lib.mkOption {
         type = lib.types.attrsOf (
           lib.types.submodule {
-            options.text = lib.mkOption { type = lib.types.str; };
+            options.source = lib.mkOption { type = lib.types.path; };
           }
         );
         default = { };
@@ -58,13 +58,13 @@ let
   };
 
   enabledLingerUser =
-    enabledUserEval.config.xdg.configFile."containers/systemd/linger-user.container".text;
+    enabledUserEval.config.xdg.configFile."containers/systemd/linger-user.container".source;
   enabledLoginUser =
-    enabledUserEval.config.xdg.configFile."containers/systemd/login-user.container".text;
+    enabledUserEval.config.xdg.configFile."containers/systemd/login-user.container".source;
   disabledLingerUser =
-    disabledUserEval.config.xdg.configFile."containers/systemd/linger-user.container".text;
+    disabledUserEval.config.xdg.configFile."containers/systemd/linger-user.container".source;
   disabledLoginUser =
-    disabledUserEval.config.xdg.configFile."containers/systemd/login-user.container".text;
+    disabledUserEval.config.xdg.configFile."containers/systemd/login-user.container".source;
 
 in
 {
@@ -109,8 +109,8 @@ in
       ];
 
       environment.etc = {
-        "containers/systemd/users/1000/linger-user.container".text = enabledLingerUser;
-        "containers/systemd/users/1001/login-user.container".text = enabledLoginUser;
+        "containers/systemd/users/1000/linger-user.container".source = enabledLingerUser;
+        "containers/systemd/users/1001/login-user.container".source = enabledLoginUser;
       };
 
       systemd.tmpfiles.rules = [
@@ -131,8 +131,8 @@ in
       specialisation.withoutActivation.configuration = {
         services.graft.configRoots = lib.mkForce [ disabledRoot ];
         environment.etc = {
-          "containers/systemd/users/1000/linger-user.container".text = lib.mkForce disabledLingerUser;
-          "containers/systemd/users/1001/login-user.container".text = lib.mkForce disabledLoginUser;
+          "containers/systemd/users/1000/linger-user.container".source = lib.mkForce disabledLingerUser;
+          "containers/systemd/users/1001/login-user.container".source = lib.mkForce disabledLoginUser;
         };
       };
     };

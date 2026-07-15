@@ -9,7 +9,11 @@ let
   quoteSystemdExecArg = value: "\"${escapeSystemdQuotedExecArg value}\"";
 
   renderQuadletFile =
-    { ctr, env }:
+    {
+      ctr,
+      env,
+      storeMountLines,
+    }:
     let
       cmd = lib.concatStringsSep " " (map quoteSystemdExecArg ctr.runtime.command);
       dependencies = ctr.dependencies or { };
@@ -140,7 +144,7 @@ let
       ContainerName=${escapeSystemdExecArg ctr.name}
       Rootfs=${escapeSystemdExecArg env}:O
       Exec=${cmd}
-      Volume=/nix/store:/nix/store:ro
+      ${storeMountLines}
     ''
     + lib.optionalString (hostname != null) ''
       HostName=${escapeSystemdExecArg hostname}
