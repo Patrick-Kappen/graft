@@ -36,9 +36,10 @@ normal local user
   user worker       system worker
   own user scope    system scope
         │                 │
-  user systemd       system systemd
-  account Podman     rootful Podman
-        └────────┬────────┘
+  user systemd                 system systemd
+  non-root → rootless Podman   rootful Podman
+  UID 0 → rootful Podman
+        └──────────────┬──────────────┘
                  │
        journald / cgroups / storage
 ```
