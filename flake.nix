@@ -80,9 +80,44 @@
           inherit (pkgs) lib;
 
           closureRegularFile = pkgs.writeText "graft-closure-regular-file" "regular-file\n";
+          closureSymlink = pkgs.runCommand "graft-closure-symlink" { } ''
+            ln -s ${closureRegularFile} $out
+          '';
           closureFixturePackage = pkgs.runCommand "graft-closure-fixture" { } ''
             mkdir -p $out/share
             ln -s ${closureRegularFile} $out/share/regular-file
+          '';
+          largeClosureMembers = lib.genList (
+            index: builtins.toFile "graft-closure-member-${lib.fixedWidthString 3 "0" (toString index)}" ""
+          ) 511;
+          largeClosureRootfs = pkgs.runCommand "graft-large-closure-rootfs" { } ''
+            mkdir -p $out/nix/store
+            ${lib.concatMapStringsSep "\n" (member: ''
+              touch "$out/nix/store/${builtins.baseNameOf member}"
+              printf '%s\n' ${lib.escapeShellArg "${member}"} >> "$out/member-references"
+            '') largeClosureMembers}
+            mkdir "$out/nix/store/$(basename "$out")"
+          '';
+          largeClosureInfo = pkgs.closureInfo { rootPaths = [ largeClosureRootfs ]; };
+          largeClosureTemplate = pkgs.writeText "graft-large-closure-template.container" ''
+            [Container]
+            ContainerName=closure-large
+            Rootfs=${largeClosureRootfs}:O
+            @GRAFT_STORE_MOUNTS@
+            Exec="/bin/true"
+            ReadOnly=true
+          '';
+          largeClosureSource = pkgs.runCommand "graft-large-closure.container" { } ''
+            LC_ALL=C sort -u ${largeClosureInfo}/store-paths > actual-paths
+            ${pkgs.bash}/bin/bash ${./modules/lib/render-closure-mounts.sh} \
+              actual-paths \
+              ${largeClosureRootfs} \
+              ${largeClosureTemplate} \
+              "$out" \
+              services.graft \
+              closure-large \
+              @GRAFT_STORE_MOUNTS@ \
+              ${./modules/lib/check-closure-limits.sh}
           '';
           closureTestPkgs = pkgs.extend (
             _: _: {
@@ -684,7 +719,12 @@
           closure-scoped-store =
             pkgs.runCommand "graft-closure-scoped-store"
               {
-                nativeBuildInputs = [ pkgs.coreutils ];
+                nativeBuildInputs = [
+                  pkgs.coreutils
+                  pkgs.gnugrep
+                  pkgs.podman
+                  pkgs.systemd
+                ];
               }
               ''
                 set -euo pipefail
@@ -726,6 +766,71 @@
 
                 check_source ${closureNixosSource} ${closureNixosSourceClosure} closure-system
                 check_source ${closureHomeManagerSource} ${closureHomeManagerSourceClosure} closure-user
+
+                mkdir -p symlink-rootfs/nix/store
+                printf '%s\n' ${closureSymlink} > symlink-paths
+                if ${pkgs.bash}/bin/bash ${./modules/lib/prepare-closure-targets.sh} \
+                  symlink-paths symlink-rootfs services.graft symlink-test \
+                  2> symlink-error; then
+                  echo "top-level closure symlink was accepted" >&2
+                  exit 1
+                fi
+                grep -F "top-level closure symlink '${closureSymlink}' is unsupported" symlink-error
+
+                seq 512 | sed 's#^#/nix/store/member-#' > exact-members
+                truncate -s 131072 exact-fragment
+                ${pkgs.bash}/bin/bash ${./modules/lib/check-closure-limits.sh} \
+                  exact-members exact-fragment services.graft exact-limit
+
+                cp exact-members too-many-members
+                printf '/nix/store/member-513\n' >> too-many-members
+                if ${pkgs.bash}/bin/bash ${./modules/lib/check-closure-limits.sh} \
+                  too-many-members exact-fragment services.graft too-many \
+                  2> member-limit-error; then
+                  echo "513-member closure was accepted" >&2
+                  exit 1
+                fi
+                grep -F "has 513 members; limit is 512" member-limit-error
+
+                truncate -s 131073 oversized-fragment
+                if ${pkgs.bash}/bin/bash ${./modules/lib/check-closure-limits.sh} \
+                  exact-members oversized-fragment services.graft oversized \
+                  2> fragment-limit-error; then
+                  echo "131073-byte closure fragment was accepted" >&2
+                  exit 1
+                fi
+                grep -F "is 131073 bytes; limit is 131072" fragment-limit-error
+
+                test "$(wc -l < ${largeClosureInfo}/store-paths)" -eq 512
+                test "$(grep -c '^Volume=' ${largeClosureSource})" -eq 513
+
+                mkdir source-system source-user generated-system generated-user
+                cp ${closureNixosSource} source-system/closure-system.container
+                cp ${largeClosureSource} source-system/closure-large.container
+                cp ${closureHomeManagerSource} source-user/closure-user.container
+
+                QUADLET_UNIT_DIRS="$PWD/source-system" \
+                  ${pkgs.podman}/libexec/podman/quadlet \
+                  generated-system generated-system generated-system
+                QUADLET_UNIT_DIRS="$PWD/source-user" \
+                  ${pkgs.podman}/libexec/podman/quadlet -user \
+                  generated-user generated-user generated-user
+
+                grep -Fq -- ${lib.escapeShellArg "-v ${closureRegularFile}:${closureRegularFile}:ro,bind,nodev,nosuid"} \
+                  generated-system/closure-system.service
+                grep -Fq -- ${lib.escapeShellArg "-v ${closureRegularFile}:${closureRegularFile}:ro,bind,nodev,nosuid"} \
+                  generated-user/closure-user.service
+                test "$(wc -c < generated-system/closure-large.service)" -lt 524288
+                large_exec_size=$(grep '^ExecStart=' generated-system/closure-large.service | wc -c)
+                test "$large_exec_size" -lt 196608
+
+                mkdir -p runtime/systemd
+                XDG_RUNTIME_DIR="$PWD/runtime" \
+                  SYSTEMD_UNIT_PATH="$PWD/generated-system:$PWD/generated-user:${pkgs.podman}/share/systemd/user:${pkgs.systemd}/example/systemd/user:${pkgs.systemd}/example/systemd/system" \
+                  ${lib.getExe' pkgs.systemd "systemd-analyze"} --user verify \
+                  generated-system/*.service generated-user/*.service
+
+                cp generated-system/*.service generated-user/*.service "$out/"
               '';
 
           documentation-drift =
