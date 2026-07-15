@@ -24,7 +24,7 @@ Correctness and logic
     • Verify loops terminate and recursion has a base case
 Errors and reliability
     • Flag swallowed exceptions and empty catch blocks
-    • Require specific exception types, not broad catch-alls
+    • Require specific exception types, not broad exception handling
     • Verify resources (files, connections, locks) are released on all paths, including error paths
     • Check that failing external calls (HTTP, database, queue) have timeouts and are handled
     • Flag error messages that leak internals (stack traces, queries) to end users
