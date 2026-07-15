@@ -123,7 +123,8 @@ command = ["bash", "-c", "exec /bin/graft-pause"]
 require an explicitly trusted host overlay or package-set extension; TOML never
 evaluates arbitrary repository Nix. Package files must not collide; shared
 directories may merge, but neither declaration order nor `graft-pause` provides
-a collision winner. Package `/etc` content is copied fail-fast and cannot replace
+a collision winner: Graft normalises package priorities before composition.
+Package `/etc` content is copied fail-fast and cannot replace
 Graft-owned `/etc/mtab`, `/etc/hostname`, `/etc/hosts`, or `/etc/resolv.conf`.
 
 The materialiser derives the realised rootfs closure, creates type-matched store

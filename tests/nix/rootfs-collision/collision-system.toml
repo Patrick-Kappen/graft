@@ -1,0 +1,8 @@
+version = 1
+name = "collision-system"
+
+[deploy]
+target = "system"
+
+[config.runtime]
+packages = ["graftCollisionFirst", "graftCollisionSecond"]

@@ -85,7 +85,9 @@ let
     _: ctr:
     pkgs.buildEnv {
       name = "graft-${ctr.name}-inner";
-      paths = map (packageFor ctr.name) ctr.runtime.packages;
+      paths = map (
+        package: lib.meta.setPrio lib.meta.defaultPriority (packageFor ctr.name package)
+      ) ctr.runtime.packages;
       ignoreCollisions = false;
     }
   ) containers;
@@ -195,6 +197,7 @@ in
 {
   inherit
     containers
+    containerInners
     containerEnvs
     finalClosures
     quadletFiles
