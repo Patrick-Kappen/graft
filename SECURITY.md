@@ -3,8 +3,8 @@
 ## Project status
 
 Graft is early-alpha software. Its current releases prove the rootfs-store
-materialisation path and document its current threat model; they do not yet
-provide secure defaults or a production support policy.
+materialisation path and apply documented secure workload defaults, but they do
+not provide a production support policy or VM-equivalent isolation.
 
 Security fixes are handled on a best-effort basis against `main` and the latest
 pre-release. Older pre-releases are not guaranteed to receive backports. No
@@ -65,9 +65,11 @@ Repository intent must remain constrained by trusted host and security policy.
 The current assumptions, invariants, and accepted residual risks are defined in
 [Threat model and trust boundaries](docs/threat-model.md). First-class,
 dangerous, and forbidden authority is defined in the
-[Capability policy](docs/capability-policy.md). Secure defaults remain active
-work in the [security roadmap](docs/roadmap.md#security-hardening). Do not infer
-unimplemented isolation guarantees from future roadmap or vision text.
+[Capability policy](docs/capability-policy.md). The current read-only-rootfs,
+drop-all, and no-new-privileges baseline is documented in
+[Container hardening](docs/hardening.md); further isolation work remains in the
+[security roadmap](docs/roadmap.md#security-hardening). Do not infer
+unimplemented guarantees from future roadmap or vision text.
 
 ## Disclosure and response expectations
 

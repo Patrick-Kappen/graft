@@ -86,7 +86,6 @@ For broad syntaxes, prefer line-safe passthrough:
 Current examples:
 
 - `PublishPort=` values
-- `Volume=` strings assembled from TOML parts
 - systemd service timing values such as `RestartSec=`
 
 If an implementation repeatedly says "out of scope", "not yet", or "no parser
