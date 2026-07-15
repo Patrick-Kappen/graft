@@ -427,11 +427,11 @@ or saturated sink therefore fails system mutation closed. Any observation that
 host policy requires to be audited follows the same rule.
 
 Client deadlines bound how long the worker waits and how long ordinary response
-state is retained. Mutation duplicate records and tombstones are the explicit
-exception: they follow the deadline-independent acceptance-window retention
-below. Deadlines do not rewrite systemd's workload timeout. Once systemd accepts
-a job, client cancellation or disconnect does not imply rollback, stop, or an
-opposite lifecycle action.
+state is retained. Mutation duplicate records and their bounded terminal results
+are the explicit exception: they follow the deadline-independent
+acceptance-window retention below. Deadlines do not rewrite systemd's workload
+timeout. Once systemd accepts a job, client cancellation or disconnect does not
+imply rollback, stop, or an opposite lifecycle action.
 
 ## Mutation identity, concurrency, and interruption
 
@@ -453,9 +453,9 @@ Within one worker epoch:
 - at most one lifecycle mutation may be in flight per workload;
 - concurrent read operations remain permitted within connection and backend
   limits; and
-- an accepted identifier's request remains while in flight, and its bounded
-  result or tombstone remains until both terminal completion and its complete
-  ten-minute acceptance window have passed; and
+- an accepted identifier's request remains while in flight, and its complete
+  bounded terminal result remains until both terminal completion and its
+  complete ten-minute acceptance window have passed; and
 - retained mutation records are capped at 256 per principal and 1,024 per
   worker, with overload rejection instead of early eviction.
 
@@ -491,7 +491,10 @@ an approved recovery position, never silent omission.
 Cancellation ends client interest and releases buffers. It does not reverse an
 accepted lifecycle operation. Every stream ends with one typed reason such as
 `completed`, `cancelled`, `deadline`, `cursor_expired`, `slow_consumer`,
-`manifest_changed`, `backend_unavailable`, or `worker_shutdown`.
+`manifest_changed`, `backend_unavailable`, or `worker_shutdown`. A read-only
+stream may end at `manifest_changed`; a lifecycle operation already submitted
+remains pinned to its original generation and follows the
+[local lifecycle contract](lifecycle-operations.md#concurrency).
 
 ## Typed errors
 

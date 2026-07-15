@@ -314,7 +314,8 @@ Every terminal response contains bounded typed fields:
 - request-start and completion timestamps;
 - submission timestamp when `worker_submitted`, optional observed timing for
   `existing_manager_work`, and no invented submission time for `no_change`;
-- whether dependencies affected the result; and
+- whether dependencies affected the result;
+- whether the manifest changed after submission; and
 - safe typed failure code and retry guidance.
 
 The response contains no raw D-Bus values, journal records, unit properties,
@@ -456,15 +457,27 @@ Within one worker epoch:
 The lock covers validation through terminal/result-unknown publication. It is
 bounded operational memory, not persistent desired state.
 
+A manifest publication during an in-flight operation never retargets that
+operation. Before backend submission, a generation change fails validation as
+`stale_manifest`. After submission, the worker remains pinned to the original
+generation, generated service, manager job, and invocation evidence. The result
+records `manifest_changed_during_operation = true`, while subsequent requests
+must use the new generation. If manager reload or replacement destroys the
+ability to prove the original attribution or terminal outcome, the pinned
+operation returns `result_unknown`; it does not adopt the replacement workload.
+Lifecycle progress for the submitted operation follows this rule rather than
+ending merely because the manifest changed.
+
 Operation identifiers are canonical UUIDv7 values. Their embedded timestamp may
 be at most one minute ahead of server receive time and at most ten minutes old.
 The server publishes its current time in `ServerHello` so clients can detect
 local skew before mutation. Every accepted identifier retains its immutable request while in flight and its
-terminal result or a tombstone until both the operation is terminal and the
-complete ten-minute acceptance window has passed. A known identical in-flight
-request may still join after its timestamp ages out; an unknown expired ID
-cannot start work. Entries are never evicted early and reused as fresh. Retained
-results are capped at 32 KiB each and admission is bounded to
+complete bounded terminal result until both the operation is terminal and the
+complete ten-minute acceptance window has passed. A resultless tombstone cannot
+replace that result. A known identical in-flight or terminal request may still
+join after its timestamp ages out and receives the same result; an unknown
+expired ID cannot start work. Entries are never evicted early and reused as
+fresh. Retained results are capped at 32 KiB each and admission is bounded to
 256 records per principal and 1,024 per worker. Exhaustion rejects new mutations
 with `overloaded` rather than weakening duplicate protection.
 

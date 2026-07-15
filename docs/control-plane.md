@@ -382,8 +382,8 @@ The first local control plane does not provide:
 3. Specify observability semantics in [#137], composing with the approved
    [local lifecycle contract](lifecycle-operations.md).
 4. Specify Nix installation, socket, service, and ownership policy in [#242].
-5. Implement the worker, lifecycle operations, and CLI integration in [#241]
-   and [#136].
+5. Implement the worker and initial `up`/`down` CLI slice in [#241] and [#136];
+   track `restart` implementation in its own follow-up slice.
 6. Design and implement the TUI in [#243] and [#244].
 7. Design the authenticated controller protocol in [#245].
 8. Design and implement multi-host deployment through [#161], [#246], and
