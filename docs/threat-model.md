@@ -436,6 +436,7 @@ Suspected violations of these boundaries must follow the private
 [security reporting policy][security-policy], not a public issue.
 
 [#107]: https://github.com/Patrick-Kappen/graft/issues/107
+[#108]: https://github.com/Patrick-Kappen/graft/issues/108
 [#139]: https://github.com/Patrick-Kappen/graft/issues/139
 [#143]: https://github.com/Patrick-Kappen/graft/issues/143
 [#145]: https://github.com/Patrick-Kappen/graft/issues/145

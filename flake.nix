@@ -763,6 +763,17 @@
             ${pkgs.bash}/bin/bash ${./modules/lib/materialise-rootfs-etc.sh} \
               inner-empty rootfs-empty services.graft no-etc
 
+            mkdir rootfs-missing-mtab
+            prepare_rootfs rootfs-missing-mtab
+            rm rootfs-missing-mtab/etc/mtab
+            if ${pkgs.bash}/bin/bash ${./modules/lib/materialise-rootfs-etc.sh} \
+              inner-empty rootfs-missing-mtab services.graft missing-mtab \
+              2> missing-mtab-error; then
+              echo "missing Graft-owned '/etc/mtab' was accepted" >&2
+              exit 1
+            fi
+            grep -Fq "Graft-owned '/etc/mtab' is invalid" missing-mtab-error
+
             mkdir -p inner-valid/etc/graft-test
             echo materialised > inner-valid/etc/graft-test/config
             mkdir rootfs-valid
