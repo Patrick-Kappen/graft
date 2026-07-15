@@ -311,10 +311,11 @@ Every terminal response contains bounded typed fields:
 - invocation identity when available;
 - final state and typed unit result;
 - finite-process exit code or signal when available and authorized;
-- start, submission, and completion timestamps;
-- whether dependencies affected the result;
-- safe typed failure code and retry guidance; and
-- result certainty: `terminal` or `result_unknown`.
+- request-start and completion timestamps;
+- submission timestamp when `worker_submitted`, optional observed timing for
+  `existing_manager_work`, and no invented submission time for `no_change`;
+- whether dependencies affected the result; and
+- safe typed failure code and retry guidance.
 
 The response contains no raw D-Bus values, journal records, unit properties,
 Podman output, command lines, environment values, or arbitrary backend text.
@@ -524,7 +525,7 @@ Initial lifecycle command exit statuses are:
 | 5 | Conflict or another operation is in progress. |
 | 6 | Worker, manager, runtime, audit sink, or required backend unavailable. |
 | 7 | Workload activation, execution, dependency, timeout, or stop failed terminally. |
-| 8 | Client deadline, interruption, cancellation after uncertainty, or `result_unknown`. |
+| 8 | Cancellation, client deadline, interruption, or `result_unknown`. |
 | 9 | Protocol or API version incompatibility. |
 
 Typed error/result codes are authoritative. Exit statuses are stable shell-level
@@ -617,7 +618,9 @@ or persistent operation state.
 
 ## Linked work
 
-- [#136] implements this lifecycle contract after worker prerequisites;
+- [#136] implements the initial `up` and `down` client/runtime slice after
+  worker prerequisites; `restart` implementation requires a separate follow-up
+  slice before implementation begins;
 - [#137] defines detailed status, result evidence, logs, metrics, and events;
 - [#146] owns health, readiness, watchdog, and graceful behavior;
 - [#171] owns complete unit shadow/override detection;
