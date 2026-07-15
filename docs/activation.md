@@ -253,13 +253,18 @@ manager with the initial linger bootstrap and eight subsequent full bootstraps
 inside one VM. Each successful start requires conmon to be the main PID in the
 workload service cgroup and records systemd's `MAINPID` and `READY=1`
 attribution. Five debug-enabled local derivation executions produced 45
-successful bootstrap starts and 50 successful active-manager starts. A paired
-advisory CI dispatch then reproduced `Result=protocol` in the uninstrumented
-activation VM while the debug-enabled focused VM completed all 9 bootstrap and
-10 active-manager starts. A subsequent uninstrumented focused local run also
-completed all 19 starts. The contrast shows that fixture load or instrumentation
-can affect the race frequency; it does not invalidate the failure. The evidence
-narrows it to a low-frequency bootstrap compatibility boundary tracked by
+successful bootstrap starts and 50 successful active-manager starts. An
+uninstrumented focused local run also completed all 19 starts. In the final
+paired advisory CI run, however, the normal activation VM failed during its
+initial linger bootstrap; the focused uninstrumented VM failed 5 of 9 bootstrap
+starts, and the debug-enabled VM failed 1 of 9. All 20 starts performed after
+the respective user managers were active succeeded. Successful debug bootstraps
+showed one Podman-sender message containing `MAINPID=<conmon pid>` and `READY=1`,
+followed by systemd accepting conmon in the service cgroup. The failed debug
+bootstrap contained no corresponding notification-attribution record before
+`Result=protocol`. Debug instrumentation therefore changes frequency but does
+not eliminate the condition. The evidence confines the failure to a
+timing-sensitive user-manager bootstrap compatibility boundary tracked by
 [#212](https://github.com/Patrick-Kappen/graft/issues/212) under the broader
 version matrix in [#129](https://github.com/Patrick-Kappen/graft/issues/129).
 
