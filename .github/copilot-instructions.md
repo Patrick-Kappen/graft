@@ -43,4 +43,3 @@ Review style
     • Ask a clarifying question when code intent is unclear instead of guessing
 Maintaining these instructions
     • If you find a significant issue of a type not covered by these instructions, or the same issue class in 3+ places in one review, note it in the overall review and recommend exact wording for a follow-up update to this file.
-
