@@ -85,9 +85,10 @@ uses the user manager rather than the system manager. Design and test matrices
 must therefore keep system/rootful, non-root user/rootless, and root-owned
 user/rootful contexts separate.
 
-Exact process counts, socket paths, service identities, and any privileged
-cross-scope administrative operation belong to the worker and Nix designs in
-[#240] and [#242].
+The [Local worker and API contract](worker-api.md) fixes the process authority,
+manifest, transport, framing, authorization, limits, recovery, and adapter
+boundaries. Concrete socket paths, service identities, hardening, and any
+privileged cross-scope administrative operation remain in [#242].
 
 ## One local client experience
 
@@ -168,11 +169,11 @@ The first operation groups are:
 - events: lifecycle and availability changes with ordering metadata;
 - capabilities: component/API versions and supported operation sets.
 
-The umbrella architecture does not choose wire framing, serialization, RPC
-library, or final command syntax. Those choices belong to [#240], [#135], and
-[#137]. Whatever encoding is chosen must reject unknown mutation intent,
-validate bounds, version explicitly, and return typed errors rather than raw
-backend output.
+The [Local worker and API contract](worker-api.md) chooses bounded
+length-prefixed JSON framing and a typed versioned envelope, while final command
+syntax and operation-specific fields remain in [#135] and [#137]. The protocol
+rejects unknown mutation intent, validates bounds, versions explicitly, and
+returns typed errors rather than raw backend output.
 
 ## Backend responsibility
 
