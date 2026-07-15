@@ -56,8 +56,9 @@ Workers are designed for systemd socket activation:
 
 - the system socket lives under a root-owned runtime directory below `/run`;
 - a user socket lives below that account's `$XDG_RUNTIME_DIR`;
-- the accepted file descriptor, worker credentials, and configured context are
-  supplied by the owning systemd manager;
+- the owning systemd manager passes one activated listening socket to one
+  worker service (`Accept=no`), and the worker accepts every connection itself;
+- worker credentials and configured context are fixed by that service;
 - a user worker is available only while its user manager and runtime directory
   exist;
 - Graft does not create a login session, enable linger, or start another user's
@@ -101,16 +102,32 @@ These are protocol maxima, not target values to allocate eagerly:
 | Outbound frame | 256 KiB |
 | Concurrent requests per connection | 32 |
 | Active streams per connection | 8 |
+| Connections per principal / worker | 16 / 128 |
+| Incomplete handshakes per principal / worker | 4 / 32 |
+| In-flight requests per principal / worker | 64 / 256 |
+| Active streams per principal / worker | 16 / 64 |
+| Buffered response bytes per principal / worker | 2 MiB / 16 MiB |
 | Unacknowledged stream items per stream | 64 |
 | Workloads in one list page | 256 |
 | Historical log records requested per page | 1,000 |
 | Encoded log message in one item | 64 KiB |
+| Complete initial handshake | 5 seconds |
+| Complete a partially received frame | 30 seconds |
 | Unary client deadline | 60 seconds |
 | Lifecycle client deadline | 5 minutes |
 
+For local Unix peers, the initial principal key is the accepted peer UID; future
+remote principals require their own authenticated key. Worker-wide accounting
+is shared by the single `Accept=no` service across all connections.
+
 The server advertises effective values no larger than these maxima. Nix policy
 may lower them. A client cannot raise them. Values are versioned protocol
-constants and require review before change.
+constants and require review before change. Limits are checked before reserving
+memory or starting backend work. When a principal or worker budget is exhausted,
+the worker rejects a new post-handshake request with `overloaded`; a connection
+that cannot complete a bounded handshake is closed. Existing accepted work is
+not evicted to admit newer work. Repeated admission failures are rate-limited
+and audited without creating an unbounded audit queue.
 
 A backend value too large for one item is truncated at a valid UTF-8 boundary
 and carries original-byte-count and truncation metadata. Paginated responses
@@ -124,7 +141,8 @@ operation is accepted before a successful handshake.
 
 `ClientHello` contains only:
 
-- protocol major and minor version;
+- protocol major version and an inclusive contiguous supported minor-version
+  range;
 - client component kind and software version;
 - requested operation capabilities;
 - requested effective limits no higher than protocol maxima; and
@@ -137,11 +155,15 @@ operation is accepted before a successful handshake.
 - fixed worker context: target, effective UID, and manager kind;
 - supported operation capabilities;
 - effective limits and deadline bounds;
-- current manifest generation and availability state; and
+- current manifest generation and availability state;
+- current worker epoch; and
 - one server-generated connection identifier for audit correlation.
 
 Major versions must match exactly. The selected minor version is the highest
-mutually supported minor within that major. Capabilities are explicit; absence
+value in the intersection of the client's inclusive range and the server's
+inclusive range for that major. An empty intersection fails negotiation.
+Support for a higher minor does not imply support for every lower minor outside
+the advertised contiguous range. Capabilities are explicit; absence
 means unavailable, never implicit fallback. Software version strings are
 diagnostic and do not replace protocol negotiation.
 
@@ -165,11 +187,14 @@ After negotiation, every JSON payload is one tagged frame variant:
 | `StreamEnd` | server to client | End with a typed reason and final cursor. |
 | `Cancel` | client to server | Stop client interest in an in-flight operation. |
 
-Every post-handshake frame includes the connection identifier and a non-zero
-request identifier selected by the client. Identifiers are unsigned integers
-encoded within JSON's interoperable integer range. Reuse while an identifier is
-active is a conflict. Stream sequence numbers start at one and increase by one
-within a request.
+Every post-handshake frame includes the server-generated connection identifier
+returned by `ServerHello` and a non-zero request identifier selected by the
+client. The client-generated handshake identifier remains diagnostic and is not
+echoed as the protocol connection identifier. Request identifiers are unsigned
+integers encoded within JSON's interoperable integer range. Starting a new
+`Request` with an identifier that is already active is a conflict; `StreamAck`
+and `Cancel` reuse the active request identifier they target. Stream sequence
+numbers start at one and increase by one within a request.
 
 The protocol is request/response and server-streaming only in its first
 version. Client-streaming and bidirectional arbitrary message exchange are not
@@ -212,7 +237,8 @@ The manifest contains:
 - manifest schema major and minor version;
 - producer Graft version;
 - target and manager kind;
-- generation identifier derived from the complete canonical manifest content;
+- generation identifier derived from the canonical manifest payload with the
+  generation field omitted;
 - creation/build provenance suitable for diagnostics;
 - sorted workload records; and
 - no secret values.
@@ -283,9 +309,15 @@ caller authorization. It never scans or adopts foreign units or containers.
 - `restart`.
 
 Each lifecycle request contains only workload identity, an operation identifier,
-and a client deadline within negotiated limits. Backend unit/action selection is
-worker-owned. There is no force, remove, delete-data, arbitrary signal, kill,
-raw job mode, unit property, or Podman option in the initial API.
+the operation's origin worker epoch, and a client deadline within negotiated
+limits. A fresh operation must use the epoch returned by the current
+`ServerHello`. Re-presenting an operation after reconnect preserves its original
+epoch so a restarted worker rejects it before backend submission. A separate
+typed operation-result query may inspect that identifier and old epoch, but can
+return only a retained result or `result_unknown`; it cannot submit lifecycle
+work. Backend unit/action selection is worker-owned. There is no force, remove,
+delete-data, arbitrary signal, kill, raw job mode, unit property, or Podman
+option in the initial API.
 
 ### Status and inspection
 
@@ -373,16 +405,22 @@ A request moves through fixed phases:
 parse and bound
   → authenticate connection
   → authorize typed operation
+  → emit denial audit and return, or emit authorized-attempt audit
   → load and validate current manifest
   → bind workload/backend identity
   → validate capability and preconditions
   → submit typed backend operation
+  → emit submission audit
   → observe terminal or accepted state
-  → return result and emit audit record
+  → emit outcome audit and return result
 ```
 
 Validation order must avoid leaking unauthorized workload existence. Detailed
-errors are returned only after observation authorization is established.
+errors are returned only after observation authorization is established. A
+mutation is not submitted unless the required denial or authorized-attempt audit
+record has been accepted by the configured bounded audit sink. An unavailable
+or saturated sink therefore fails system mutation closed. Any observation that
+host policy requires to be audited follows the same rule.
 
 Client deadlines bound how long the worker waits and how long response state is
 retained. They do not rewrite systemd's workload timeout. Once systemd accepts a
@@ -392,8 +430,9 @@ opposite lifecycle action.
 ## Mutation identity, concurrency, and interruption
 
 Every lifecycle request carries a client-generated 128-bit operation identifier
-encoded in a fixed canonical textual form. It is correlation and duplicate
-control, not authorization.
+encoded in a fixed canonical textual form plus the worker epoch in which it
+originated. They provide correlation, duplicate control, and stale-epoch
+rejection, not authorization.
 
 Within one worker epoch:
 
@@ -550,10 +589,15 @@ Running workloads continue under systemd and Podman while the worker is absent.
 
 ## Audit contract
 
-Every system mutation and every denied mutation emits a structured audit event.
-User-worker mutation auditing follows the same schema in the user's journal.
-Approved sensitive observations such as system logs may also require audit under
-host policy.
+Every system mutation and every denied mutation emits structured audit events.
+Authorization denial is recorded before the denial is returned. An authorized
+attempt is recorded before backend submission, followed by separate submission
+and outcome or result-unknown records. User-worker mutation auditing follows the
+same schema in the user's journal. Approved sensitive observations such as
+system logs may also require audit under host policy. Required initial audit
+records use a bounded sink and fail the operation closed when that sink cannot
+accept them; later audit failure cannot erase or roll back an accepted backend
+operation and is surfaced as degraded worker health.
 
 Audit fields include:
 
@@ -596,8 +640,10 @@ architecture. It affects:
   unsupported explicit intent;
 - **GRAFT-TM-02:** operation types and adapters make raw backend passthrough
   unavailable;
-- **GRAFT-TM-03:** length framing, typed parsing, output escaping obligations,
-  and bounded backend text prevent parser/terminal structure injection;
+- **GRAFT-TM-03:** length framing and typed parsing prevent protocol-structure
+  injection; CLI and TUI clients must escape or visibly encode every untrusted
+  backend string before terminal rendering, while preserving the original typed
+  value only for non-terminal machine output;
 - **GRAFT-TM-04:** manifest generation and workload identifiers bind requests to
   an explicit materialised source set;
 - **GRAFT-TM-05:** fixed worker context and UID preserve system/rootful,
