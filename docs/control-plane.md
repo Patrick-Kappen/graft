@@ -37,7 +37,7 @@ normal local user
   own user scope    system scope
         │                 │
   user systemd       system systemd
-  rootless Podman    rootful Podman
+  account Podman     rootful Podman
         └────────┬────────┘
                  │
        journald / cgroups / storage
@@ -76,6 +76,13 @@ user manager. The local authority is split:
 This follows the existing deployment boundary. A user worker must not control
 another account or the system manager. The system worker must not silently
 impersonate users or discover user buses from ambient host state.
+
+User scope does not guarantee rootless execution. A worker owned by a non-root
+account reaches that account's rootless Podman runtime. A user worker owned by
+UID 0 reaches a rootful runtime with host-root authority even though it still
+uses the user manager rather than the system manager. Design and test matrices
+must therefore keep system/rootful, non-root user/rootless, and root-owned
+user/rootful contexts separate.
 
 Exact process counts, socket paths, service identities, and any privileged
 cross-scope administrative operation belong to the worker and Nix designs in
@@ -283,6 +290,50 @@ Ordinary lifecycle and observability requests cannot enter this flow. The
 worker never silently edits TOML, commits repository changes, invokes arbitrary
 Nix commands, or treats runtime state as configuration. Detailed authoring,
 approval, rebuild, and rollback contracts require separate future design.
+
+## Security impact and capability classification
+
+This design deliberately expands Graft from deterministic build-time resolution
+to two host-aware capabilities: read-only runtime observation and explicitly
+authorized lifecycle mutation. It does not expand TOML workload authority,
+relax generated workload policy, or grant a generic host-control surface. The
+new authority belongs to authenticated API clients and remains bounded by the
+effective system or user target, account UID, materialisation identity, typed
+operation, and host policy.
+
+The design affects these current threat-model invariants:
+
+- **GRAFT-TM-01:** unknown versions, operations, fields, and explicit unsupported
+  request intent must fail closed;
+- **GRAFT-TM-02:** the API must preserve the prohibition on raw Quadlet, Podman,
+  systemd, host-command, and equivalent backend passthrough;
+- **GRAFT-TM-03:** backend-controlled logs, paths, labels, metrics, errors, and
+  other text must not inject protocol fields or terminal control output;
+- **GRAFT-TM-04:** manifest and workload relationships must bind to one explicit
+  source set, host, generation, target, and concrete identity;
+- **GRAFT-TM-05:** `user` remains manager scope rather than proof of a non-root
+  UID, so system/rootful, user/rootless, and root-owned user/rootful authority
+  stay distinct;
+- **GRAFT-TM-06:** explicit runtime lifecycle requests do not alter declarative
+  startup relationships or make materialisation imply startup;
+- **GRAFT-TM-07:** rootfs and closure identity is observed through the manifest
+  and cannot become arbitrary package, store-path, or mount selection;
+- **GRAFT-TM-09:** stop and restart operations do not implicitly remove mounted
+  state, persistent data, workspaces, or foreign units; and
+- **GRAFT-TM-13:** lifecycle requests cannot relax resolved read-only,
+  capability, or no-new-privileges policy.
+
+Operational capability classification:
+
+| Operation | Class | Reason |
+| --- | --- | --- |
+| Own-user status, metrics, logs, and inspect | First-class, potentially sensitive observation | It is read-only but may expose application data, paths, resource behavior, and failures available to that account. |
+| Own-user `up`, `down`, and `restart` | First-class typed runtime mutation | It controls only an explicitly identified workload within the caller's existing user-manager authority. |
+| System observation | Host-policy controlled | Even read-only system metadata and logs may disclose cross-service or host information. |
+| System `up`, `down`, and `restart` | Dangerous privileged operation | It mutates rootful system services and requires explicit per-operation authorization rather than ambient TUI privilege. |
+| Remote controller mutation | Dangerous and deferred | It extends mutation authority across a network and requires enrollment, mutual authentication, replay protection, audit, and local revalidation. |
+| TOML mutation or rebuild activation | Dangerous and deferred | It changes declarative intent or host generations and requires a separately reviewed authoring and deployment contract. |
+| Raw shell, Nix, systemd, D-Bus, Podman, Quadlet, path, or arbitrary RPC input | Forbidden | It bypasses typed policy and turns the worker into a generic privileged execution proxy. |
 
 ## Security boundaries
 
