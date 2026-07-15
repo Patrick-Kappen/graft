@@ -363,15 +363,15 @@ An accepted operation terminates as exactly one tagged response variant:
 - submission timestamp when `worker_submitted`, optional observed timing for
   `existing_manager_work`, and no invented submission time for `no_change`;
 - whether dependencies affected the result;
-- whether the manifest changed after submission; and
+- whether the manifest changed after operation acceptance; and
 - safe typed failure code and retry guidance when outcome is `failed` or
   `result_unknown`, absent when outcome is `succeeded`.
 
 `MutationTerminalError` contains operation and epoch identity, requested action,
 workload selector, safe typed error code, phase, timestamp, and retry guidance.
 It deliberately has no disposition, outcome, manager job, invocation, final
-workload state, or submission timestamp. The initial codes are
-`cancelled_before_submission` and `deadline_before_submission`.
+workload state, or submission timestamp. The initial codes are `cancelled_before_submission`,
+`deadline_before_submission`, and `disconnected_before_submission`.
 
 The response contains no raw D-Bus values, journal records, unit properties,
 Podman output, command lines, environment values, or arbitrary backend text.
@@ -528,17 +528,28 @@ The lock covers validation through terminal/result-unknown publication. It is
 bounded operational memory, not persistent desired state.
 
 A manifest publication during an accepted operation never retargets that
-operation. The worker rechecks generation immediately before the operation-ID
-acceptance linearization point. A mismatch at or before that point fails
-`stale_manifest` without accepting the ID. Acceptance atomically pins the
-validated generation and identity; every publication after that point is
-`manifest_changed_during_operation`, including publication before the backend
-call begins. The backend call still follows the pinned identity, while
-subsequent requests must use the new generation. If manager reload or
-replacement destroys the ability to prove original attribution or terminal
-outcome, the pinned operation returns `result_unknown`; it does not adopt the
-replacement workload. Lifecycle progress for the accepted operation follows
-this rule rather than ending merely because the manifest changed.
+operation. Nix activation and worker submission share a host-policy lock whose
+concrete path and ownership belong to [#242]. Activation holds it exclusively
+across generated-artifact replacement, manager reload, provenance validation,
+and manifest publication. The worker holds it in submission mode from its final
+manifest and loaded-unit provenance recheck through manager acceptance or
+rejection. It does not hold the lock while waiting for terminal workload state.
+
+Under that lock, the worker rechecks generation, loaded source identity, and
+generated-service provenance immediately before the operation-ID acceptance
+linearization point and backend call. A mismatch fails `stale_manifest` or the
+specific provenance error without accepting the ID or mutating the manager.
+Acceptance pins the validated generation and identity. Publication after manager
+submission is `manifest_changed_during_operation`; subsequent requests use the
+new generation. If later reload or replacement destroys original attribution or
+terminal evidence, the pinned operation returns `result_unknown`; it never
+adopts the replacement workload. Lifecycle progress follows this rule rather
+than ending merely because the manifest changed.
+
+A privileged administrator bypassing the approved activation lock is outside
+Graft's serialization guarantee. The worker still detects resulting provenance
+loss and fails closed where possible; it never treats ambient reload as
+permission to retarget.
 
 Operation identifiers use the exact canonical lowercase hyphenated UUIDv7 wire
 encoding defined by the
@@ -571,34 +582,44 @@ Any failure, `operation_in_progress`, disconnect, or malformed frame before that
 point reserves no ID. The same ID may be submitted later while its UUIDv7
 timestamp remains acceptable.
 
-After acceptance but before the backend call, cancellation or deadline performs
-no mutation and stores the typed terminal error
-`cancelled_before_submission` or `deadline_before_submission`. The complete
-error is retained for the normal acceptance window, and the same principal/ID
-can never later submit work. A backend call attempted after acceptance,
-including a synchronous manager rejection, terminates as
-`LifecycleTerminalResult` with `worker_submitted`, outcome `failed`, and failure
-phase `submission`.
+After acceptance but before the backend call, each duplicate/joined caller has
+independent interest. Deadline, explicit cancellation, or disconnect removes
+only that caller. Submission continues while any caller remains. If the final
+caller departs before the backend call linearizes, the worker suppresses
+submission and retains `deadline_before_submission`,
+`cancelled_before_submission`, or `disconnected_before_submission` according to
+that final departure. Once this terminal error is committed, later duplicates
+receive it and cannot revive submission.
 
-After submission, each duplicate/joined caller has independent interest. A deadline, cancellation, or disconnect removes only that caller and
-releases its delivery state. Normal shared observation continues while at least
-one caller remains interested. The fixed 30-second server completion grace
-starts only when the final joined caller loses interest:
+A backend call attempted after acceptance, including a synchronous manager
+rejection, terminates as `LifecycleTerminalResult` with `worker_submitted`,
+outcome `failed`, and failure phase `submission`.
+
+After submission, caller departures remain independent and release only their
+delivery state. Normal shared observation continues while at least one caller
+remains interested. The fixed 30-second server completion grace starts only when
+the final joined caller loses interest:
 
 - the manager job is not cancelled, reversed, or rolled back;
 - the worker retains the per-workload lock and bounded attribution only through
   the grace period;
 - a terminal result proven during grace becomes the retained operation result;
-- every caller that already timed out or cancelled keeps its own exit-8 client
-  result, while a later duplicate/result query receives the retained terminal
-  operation result;
+- every caller that already timed out, cancelled, or disconnected keeps its own
+  client result, while a later duplicate/result query receives the retained
+  terminal operation result;
+- a valid duplicate joining during grace cancels that grace and resumes normal
+  observation; when the final caller later departs, a fresh 30-second grace
+  starts;
 - when grace expires without proof, the worker stores `result_unknown`, releases
   the lock and backend observation, and never revises that retained result based
   on later manager state; and
 - the client must inspect current state before considering another mutation.
 
 The 30-second grace is independent of an unset or unbounded workload
-`TimeoutStartSec`/`TimeoutStopSec`. A manager job may continue after Graft has
+`TimeoutStartSec`/`TimeoutStopSec`. Rejoins cannot extend operation observation
+past the absolute cutoff of ten minutes after server acceptance. At that cutoff
+the worker retains `result_unknown`, releases the lock/observation, and ends all
+callers even if interest remains. A manager job may continue after Graft has
 published `result_unknown`; its later completion is ordinary observed state,
 not retroactive mutation completion.
 

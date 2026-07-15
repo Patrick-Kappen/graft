@@ -120,6 +120,7 @@ These are protocol maxima, not target values to allocate eagerly:
 | Unary client deadline | 60 seconds |
 | Lifecycle client deadline | 5 minutes |
 | Post-client lifecycle completion grace | 30 seconds |
+| Absolute lifecycle observation after acceptance | 10 minutes |
 
 For local Unix peers, the initial principal key is the accepted peer UID; future
 remote principals require their own authenticated key. Worker-wide accounting
@@ -418,8 +419,10 @@ parse and bound
   → load and validate current manifest
   → bind workload/backend identity
   → validate capability, preconditions, and concurrency
-  → recheck generation and atomically accept/pin mutation identity
-  → submit typed backend operation
+  → acquire activation/submission lock
+  → recheck generation and loaded-unit provenance
+  → atomically accept/pin mutation identity and submit backend operation
+  → release activation/submission lock
   → emit submission audit
   → observe terminal or accepted state
   → emit outcome audit and return result
@@ -438,10 +441,12 @@ are the explicit exception: they follow the deadline-independent
 acceptance-window retention below. Joined callers hold independent interest;
 a departing caller ends only its own delivery. After submitted lifecycle work
 loses its final interested caller, the worker observes it for at most the fixed
-30-second completion grace, then retains `result_unknown` and releases its
-operation lock if no terminal result was proven. Deadlines do not rewrite
-systemd's workload timeout.
-Once systemd accepts a job, client cancellation or disconnect does not imply
+30-second completion grace. A valid duplicate join cancels an active grace and
+a fresh grace starts after the next final departure. Neither joins nor grace may
+extend observation beyond ten minutes after server acceptance. At grace or
+absolute cutoff without proof, the worker retains `result_unknown` and releases
+its operation lock. Deadlines do not rewrite systemd's workload timeout. Once
+systemd accepts a job, client cancellation or disconnect does not imply
 rollback, stop, or an opposite lifecycle action.
 
 ## Mutation identity, concurrency, and interruption
@@ -481,18 +486,23 @@ Within one worker epoch and principal key:
   operation preconditions, and per-workload concurrency all succeed;
 - any pre-commit failure, `operation_in_progress`, disconnect, or parse failure
   reserves no identifier, so the ID may be submitted later while timestamp-valid;
-- cancellation or deadline after acceptance but before backend submission
-  retains a tagged `MutationTerminalError` with
-  `cancelled_before_submission` or `deadline_before_submission` for the full
-  acceptance window, and that identifier cannot later mutate;
+- after acceptance but before backend submission, each joined caller has
+  independent interest; only final-caller deadline, cancellation, or disconnect
+  suppresses submission and retains `deadline_before_submission`,
+  `cancelled_before_submission`, or `disconnected_before_submission` for the
+  full acceptance window, and that identifier cannot later mutate;
 - a `MutationTerminalError` contains operation/epoch identity, action, workload
   selector, code, phase, timestamp, and retry guidance but no lifecycle
   disposition, outcome, manager job, invocation, or final workload state;
 - `LifecycleTerminalResult` is the distinct tagged variant for `no_change`,
   joined, or submitted manager work and owns lifecycle disposition/outcome;
-- acceptance rechecks and atomically pins manifest generation and workload
-  identity, so only pre-acceptance changes return `stale_manifest`; publication
-  after acceptance is recorded as an in-operation change and cannot retarget;
+- Nix activation holds an exclusive host-policy lock across artifact changes,
+  manager reload, provenance validation, and manifest publication; worker
+  submission holds the corresponding lock across final generation/loaded-unit
+  provenance validation and manager acceptance/rejection;
+- only pre-acceptance mismatches return `stale_manifest` or provenance failure,
+  while post-submission publication is recorded as an in-operation change and
+  cannot retarget;
 - a backend call attempted after acceptance, including synchronous rejection,
   returns `LifecycleTerminalResult` with `worker_submitted`, `failed`, and
   failure phase `submission`;
