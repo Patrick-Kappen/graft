@@ -5,4 +5,4 @@ name = "closure-user"
 target = "user"
 
 [config.runtime]
-packages = ["graftClosureFixture"]
+packages = ["graftClosureFixture", "graftRootfsEtcFixture"]

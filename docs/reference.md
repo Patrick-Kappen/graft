@@ -121,7 +121,10 @@ command = ["bash", "-c", "exec /bin/graft-pause"]
 `graft-pause` is always added to the resolved package list. No default shell,
 `coreutils`, restart policy, or startup activation is added. Custom package names
 require an explicitly trusted host overlay or package-set extension; TOML never
-evaluates arbitrary repository Nix.
+evaluates arbitrary repository Nix. Package files must not collide; shared
+directories may merge, but neither declaration order nor `graft-pause` provides
+a collision winner. Package `/etc` content is copied fail-fast and cannot replace
+Graft-owned `/etc/mtab`, `/etc/hostname`, `/etc/hosts`, or `/etc/resolv.conf`.
 
 The materialiser derives the realised rootfs closure, creates type-matched store
 targets, and emits a read-only scaffold plus sorted member mounts. Closure
