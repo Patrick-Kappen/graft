@@ -473,12 +473,19 @@ field conflicts.
 
 Within one worker epoch and principal key:
 
-- after a complete request is parsed, authenticated, admitted, and assigned its
-  immutable payload, the first accepted operation identifier owns that payload;
-- disconnect or parse failure before acceptance reserves no identifier;
+- after a complete request is parsed, authenticated, passes the per-workload
+  concurrency check, is admitted, and receives its immutable payload, the first
+  accepted operation identifier owns that payload;
+- `operation_in_progress`, disconnect, or parse failure before acceptance
+  reserves no identifier, so the ID may be submitted later while timestamp-valid;
 - cancellation or deadline after acceptance but before backend submission
-  retains `cancelled_before_submission` or `deadline_before_submission` for the
-  full acceptance window, and that identifier cannot later mutate;
+  retains a tagged `MutationTerminalError` with
+  `cancelled_before_submission` or `deadline_before_submission` for the full
+  acceptance window, and that identifier cannot later mutate;
+- a `MutationTerminalError` contains operation/epoch identity, code, phase,
+  timestamp, and retry guidance but no lifecycle disposition or outcome;
+- `LifecycleTerminalResult` is the distinct tagged variant for `no_change`,
+  joined, or submitted manager work and owns lifecycle disposition/outcome;
 - reuse with the identical payload observes the same in-flight or completed
   result while retained;
 - reuse with a different payload fails as a conflict;

@@ -336,9 +336,16 @@ observes the eventual correlated success or failure while any joined caller
 remains interested, then for the fixed completion grace below. It never adds a
 retry loop around the lifecycle action.
 
-## Lifecycle result
+## Terminal response model
 
-Every terminal response contains bounded typed fields:
+An accepted operation terminates as exactly one tagged response variant:
+
+- `LifecycleTerminalResult` for `no_change`, worker-submitted, or joined manager
+  work; or
+- `MutationTerminalError` when the accepted request terminates before any
+  lifecycle submission or join.
+
+`LifecycleTerminalResult` contains bounded typed fields:
 
 - operation identifier and origin worker epoch;
 - current worker epoch;
@@ -358,6 +365,12 @@ Every terminal response contains bounded typed fields:
 - whether dependencies affected the result;
 - whether the manifest changed after submission; and
 - safe typed failure code and retry guidance.
+
+`MutationTerminalError` contains operation and epoch identity, safe typed error
+code, phase, timestamp, and retry guidance. It deliberately has no disposition,
+outcome, manager job, invocation, final workload state, or submission timestamp.
+The initial codes are `cancelled_before_submission` and
+`deadline_before_submission`.
 
 The response contains no raw D-Bus values, journal records, unit properties,
 Podman output, command lines, environment values, or arbitrary backend text.
@@ -502,8 +515,9 @@ Within one worker epoch and principal key:
 - the same identifier with a different request is a conflict;
 - an unknown identifier outside its acceptance window returns
   `operation_id_expired` and can never become a fresh mutation;
-- a different lifecycle mutation while one is in flight returns
-  `operation_in_progress` with safe correlation metadata;
+- a different lifecycle mutation while one is in flight fails admission before
+  its new ID is accepted, returning `operation_in_progress` with safe
+  correlation metadata;
 - read-only status may proceed concurrently; and
 - an existing manager job not submitted through Graft is handled according to
   the action tables rather than being cancelled or replaced.
@@ -546,9 +560,11 @@ it does not fix the shared operation outcome. It also does not replace
 intent.
 
 An operation ID becomes accepted and reserved only after a complete bounded
-request has been parsed, authenticated, admitted to the principal-scoped
-mutation registry, and assigned its immutable payload. A disconnect or malformed
-frame before that point reserves no ID. After acceptance but before backend
+request has been parsed, authenticated, passed the per-workload concurrency
+check, admitted to the principal-scoped mutation registry, and assigned its
+immutable payload. `operation_in_progress`, disconnect, or malformed frame
+before that point reserves no ID. After the current mutation finishes, that ID
+may be submitted again while its UUIDv7 timestamp remains acceptable. After acceptance but before backend
 submission, cancellation or deadline performs no mutation and stores the typed
 terminal error `cancelled_before_submission` or
 `deadline_before_submission`. The complete error is retained for the normal
