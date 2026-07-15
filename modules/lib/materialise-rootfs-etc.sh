@@ -29,7 +29,17 @@ if [[ -e "$source_etc" || -L "$source_etc" ]]; then
   fi
 fi
 
-if [[ ! -L "$target_etc/mtab" || $(readlink "$target_etc/mtab") != /proc/mounts ]]; then
+if [[ ! -L "$target_etc/mtab" ]]; then
+  echo "$option_name: Graft-owned '/etc/mtab' is invalid for container '$container_name'" >&2
+  exit 1
+fi
+
+if ! mtab_target=$(readlink "$target_etc/mtab"); then
+  echo "$option_name: failed to read Graft-owned '/etc/mtab' for container '$container_name'" >&2
+  exit 1
+fi
+
+if [[ "$mtab_target" != /proc/mounts ]]; then
   echo "$option_name: Graft-owned '/etc/mtab' is invalid for container '$container_name'" >&2
   exit 1
 fi
