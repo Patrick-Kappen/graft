@@ -1143,24 +1143,32 @@
                 escaped="generated-$scope/escape-$scope.service"
                 test -f "$plain"
                 test -f "$escaped"
+                test "$(grep -c '^ExecStart=' "$plain")" -eq 1
+                test "$(grep -c '^ExecStart=' "$escaped")" -eq 1
+                plain_exec=$(grep '^ExecStart=' "$plain")
+                escaped_exec=$(grep '^ExecStart=' "$escaped")
 
-                grep -Fq -- "--name nix-check-plain-$scope" "$plain"
-                grep -Fq -- "--security-opt=no-new-privileges --cap-drop all --read-only" "$plain"
-                grep -Eq -- '--rootfs /nix/store/[^ ]+-env:O /bin/graft-pause$' "$plain"
+                printf '%s\n' "$plain_exec" | grep -Fq -- "--name nix-check-plain-$scope"
+                printf '%s\n' "$plain_exec" | grep -Fq -- "--security-opt=no-new-privileges"
+                printf '%s\n' "$plain_exec" | grep -Fq -- "--cap-drop all"
+                printf '%s\n' "$plain_exec" | grep -Fq -- "--read-only"
+                printf '%s\n' "$plain_exec" | grep -Eq -- '--rootfs /nix/store/[^ ]+-env:O /bin/graft-pause$'
 
-                grep -Fq -- "--name escape-$scope" "$escaped"
+                printf '%s\n' "$escaped_exec" | grep -Fq -- "--name escape-$scope"
                 grep -Fxq 'Environment="DOLLAR=cost $$5"' "$escaped"
                 grep -Fxq 'Environment="PERCENT=100%%"' "$escaped"
                 grep -Fxq "Restart=on-failure" "$escaped"
                 grep -Fxq "RestartSec=15s" "$escaped"
-                grep -Fq -- '--workdir /work%%space/$$HOME' "$escaped"
-                grep -Fq -- '--user 100%%0:100%%0' "$escaped"
-                grep -Fq -- '-v /tmp/graft-$$USER-%%n:/data$$HOME-%%h:ro,bind' "$escaped"
-                grep -Fq -- '--env-file "/etc/graft/my\x20config.env"' "$escaped"
-                grep -Fq -- '"cost\x20$$5" "foo\\.bar" "C:\\Temp" "say\x20\"hi\""' "$escaped"
+                printf '%s\n' "$escaped_exec" | grep -Fq -- '--workdir /work%%space/$$HOME'
+                printf '%s\n' "$escaped_exec" | grep -Fq -- '--user 100%%0:100%%0'
+                printf '%s\n' "$escaped_exec" | grep -Fq -- '-v /tmp/graft-$$USER-%%n:/data$$HOME-%%h:ro,bind'
+                printf '%s\n' "$escaped_exec" | grep -Fq -- '--env-file "/etc/graft/my\x20config.env"'
+                printf '%s\n' "$escaped_exec" | grep -Fq -- '"cost\x20$$5" "foo\\.bar" "C:\\Temp" "say\x20\"hi\""'
               done
-              grep -Fq -- '--publish 127.0.0.1:18%%080:80' generated-system/escape-system.service
-              grep -Fq -- '--publish 127.0.0.1:28%%080:80' generated-user/escape-user.service
+              grep '^ExecStart=' generated-system/escape-system.service \
+                | grep -Fq -- '--publish 127.0.0.1:18%%080:80'
+              grep '^ExecStart=' generated-user/escape-user.service \
+                | grep -Fq -- '--publish 127.0.0.1:28%%080:80'
 
               mkdir -p runtime/systemd
               XDG_RUNTIME_DIR="$PWD/runtime" \
