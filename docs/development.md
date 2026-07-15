@@ -320,9 +320,9 @@ isolated from internal cancellation groups. Direct CI for an untrusted fork is
 therefore unavailable in this manual model. A maintainer must first review and
 adopt the proposed change as trusted internal work; copying an unreviewed fork
 SHA into a dispatchable repository ref is not an accepted validation path.
-Advisory activation and CDI VM jobs are opt-in and should be requested for
-changes affecting activation, user managers, Podman, Quadlet runtime behavior,
-CDI, rootfs materialisation, or shared security boundaries. Documentation deployment is separate, manual, and
+Advisory activation, notify-protocol, and CDI VM jobs are opt-in and should be
+requested for changes affecting activation, user managers, Podman, Quadlet
+runtime behavior, CDI, rootfs materialisation, or shared security boundaries. Documentation deployment is separate, manual, and
 restricted to its configured protected publication ref.
 
 The module-eval and Quadlet generator checks use IFD, so build them explicitly.

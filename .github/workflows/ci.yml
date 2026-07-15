@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       runtime_tests:
-        description: Run advisory activation and CDI VM tests
+        description: Run advisory activation, notify-protocol, and CDI VM tests
         required: false
         type: boolean
         default: false
@@ -244,6 +244,23 @@ jobs:
 
       - name: Startup activation runtime test
         run: nix build .#packages.x86_64-linux.activation-runtime-test --no-link --print-build-logs
+
+  notify_protocol_runtime:
+    name: notify-protocol-runtime
+    if: ${{ inputs.runtime_tests }}
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - name: Setup Nix
+        uses: ./.github/actions/setup-nix
+
+      - name: Rootless notify protocol runtime test
+        run: nix build .#packages.x86_64-linux.notify-protocol-runtime-test --no-link --print-build-logs
 
   cdi_runtime:
     name: cdi-runtime

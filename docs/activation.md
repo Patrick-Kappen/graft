@@ -248,8 +248,14 @@ rootless Quadlet workload has intermittently entered `Result=protocol` during
 user-manager bootstrap. The generated service follows Quadlet's `Type=notify`,
 `NotifyAccess=all`, and `--sdnotify=conmon` contract, and the test reports the
 terminal result immediately rather than retrying or masking it as a timeout.
-The focused reproducer has not recreated the failure, so the compatibility
-boundary remains advisory and is tracked by
+The focused reproducer compares ten starts under an already-running user
+manager with the initial linger bootstrap and eight subsequent full bootstraps
+inside one VM. Each successful start requires conmon to be the main PID in the
+workload service cgroup and records systemd's `MAINPID` and `READY=1`
+attribution. Five local derivation executions produced 45 successful bootstrap
+starts and 50 successful active-manager starts without recreating the failure.
+This does not invalidate the earlier advisory failures; it narrows them to a
+low-frequency bootstrap compatibility boundary tracked by
 [#212](https://github.com/Patrick-Kappen/graft/issues/212) under the broader
 version matrix in [#129](https://github.com/Patrick-Kappen/graft/issues/129).
 
@@ -258,6 +264,9 @@ Run the focused reproducer with:
 ```bash
 nix build .#packages.x86_64-linux.notify-protocol-runtime-test --no-link --print-build-logs
 ```
+
+The `notify-protocol-runtime` CI job runs the same reproducer only when the
+maintainer requests the advisory runtime matrix.
 
 ## Upstream evidence
 
