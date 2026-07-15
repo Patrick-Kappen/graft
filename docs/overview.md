@@ -76,11 +76,12 @@ writable, but the current secure baseline renders `ReadOnly=true`, so rootfs
 paths are read-only unless the user explicitly opts out. Typed tmpfs, binds,
 managed volumes, or trusted CDI edits can create separate writable mounts.
 
-The renderer currently binds the complete host `/nix/store` read-only so store
-symlinks resolve. Typed mount targets cannot overlap that protected path, though
-a bind can expose a selected store source elsewhere and trusted CDI may inject
-mounts. Mandatory per-workload closure exposure is approved but remains future
-implementation in [#209](https://github.com/Patrick-Kappen/graft/issues/209).
+The renderer exposes only the realised rootfs runtime closure through a
+read-only `/nix/store` scaffold followed by one read-only member mount per store
+path. Typed mount targets cannot overlap that protected tree, though a bind can
+expose a selected store source elsewhere and trusted CDI may inject mounts. A
+closure error fails materialisation; there is no complete-store fallback. See
+the [closure-scoped store contract](closure-scoped-store.md).
 
 ## Runtime and security model
 

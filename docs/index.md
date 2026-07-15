@@ -40,10 +40,10 @@ The implemented contract includes:
 - explicit typed relaxations where the current contract permits them;
 - no implicit autostart or hidden restart policy.
 
-Graft currently exposes the complete host `/nix/store` read-only so rootfs
-symlinks resolve. Replacing that mount with mandatory per-workload closure
-exposure is an approved design, not yet implemented. Containers share the host
-kernel and are not a VM-equivalent isolation boundary.
+Graft exposes only each workload's realised Nix runtime closure through a
+read-only store scaffold and mandatory member mounts. It never falls back to the
+complete host store. Containers share the host kernel and are not a
+VM-equivalent isolation boundary.
 
 ## Find the right chapter
 
@@ -72,8 +72,8 @@ is the authoritative current/planned/deferred matrix.
 
 [Roadmap](roadmap.md) describes active delivery. [Long-term vision](vision.md)
 is non-committed direction. [Non-goals](non-goals.md) records deliberate current
-exclusions. The [closure-scoped store design](closure-scoped-store.md) is an
-approved future implementation contract and is labelled accordingly.
+exclusions. The [closure-scoped store contract](closure-scoped-store.md)
+documents the implemented mandatory store view and its limits.
 
 ## Host responsibility
 

@@ -179,7 +179,7 @@ fails closed.
 
 | Concept | Status |
 | --- | --- |
-| `rootfs-store` `.container` workloads | Current flagship backend |
+| `rootfs-store` `.container` workloads | Current flagship backend with mandatory closure-scoped, read-only store exposure and no complete-store fallback |
 | Typed `.network` resources | Planned in [#147] |
 | Typed `.volume` resources | Planned in [#148] |
 | Typed `.pod` resources and membership | Designed through [#149]; implementation tracked by [#167] |

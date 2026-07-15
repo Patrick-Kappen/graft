@@ -123,6 +123,11 @@ command = ["bash", "-c", "exec /bin/graft-pause"]
 require an explicitly trusted host overlay or package-set extension; TOML never
 evaluates arbitrary repository Nix.
 
+The materialiser derives the realised rootfs closure, creates type-matched store
+targets, and emits a read-only scaffold plus sorted member mounts. Closure
+scoping is mandatory rootfs mechanics, not configurable TOML, and has no
+complete-store fallback. See [Closure-scoped Nix store](closure-scoped-store.md).
+
 ## Container
 
 ```toml

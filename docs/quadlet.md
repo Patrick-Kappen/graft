@@ -29,7 +29,8 @@ A minimal workload with the secure defaults and no explicit command renders:
 ContainerName=graft-example
 Rootfs=/nix/store/...-graft-graft-example-env:O
 Exec="/bin/graft-pause"
-Volume=/nix/store:/nix/store:ro
+Volume=/nix/store/...-rootfs/nix/store:/nix/store:ro,bind,nodev,nosuid
+Volume=/nix/store/...-member:/nix/store/...-member:ro,bind,nodev,nosuid
 ReadOnly=true
 DropCapability=all
 NoNewPrivileges=true
@@ -40,10 +41,12 @@ long-running workload without argv uses `/bin/graft-pause`; finite `job` and
 `setup` workloads must supply a command. Graft does not render `Image=` or pull
 an image for this backend.
 
-The fixed complete-store bind currently lets rootfs store symlinks resolve.
-Typed targets cannot overlap `/nix/store`. Closure-scoped replacement remains an
-approved future implementation and has no fallback to a writable or silently
-missing store.
+The first store line mounts the rootfs scaffold read-only; following lines mount
+the sorted realised closure members at their exact store paths. The source unit
+is derived from `pkgs.closureInfo`, retains those paths as Nix references, and
+fails if closure enumeration, target type, member count, or fragment size is
+invalid. Typed targets cannot overlap `/nix/store`, and there is no complete-store
+fallback.
 
 ## Optional container output
 
@@ -77,7 +80,8 @@ Network=none
 
 Relevant ordering is deterministic:
 
-1. fixed rootfs-store keys and selected container identity;
+1. fixed rootfs-store keys, selected container identity, store scaffold, and
+   bytewise-sorted closure members;
 2. sorted environment variables and ordered environment files;
 3. ordered tmpfs, binds, managed volumes, and CDI references;
 4. rootfs and process hardening, with additions after drop-all;
