@@ -195,7 +195,8 @@ The resolver rejects:
 
 - target `/`, which would replace the workload rootfs;
 - any target equal to, below, or above `/nix/store`, including `/nix`, preserving
-  Graft's fixed read-only store bind without nested mount ambiguity;
+  Graft's read-only closure scaffold and member mounts without nested mount
+  ambiguity;
 - any target equal to or below `/dev`, `/proc`, or `/sys`;
 - bind or managed-volume targets equal to or below `/run`, `/tmp`, or
   `/var/tmp`;

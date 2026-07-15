@@ -38,7 +38,7 @@
 - [Roadmap](roadmap.md)
 - [Long-term vision](vision.md)
 - [Non-goals and deferred scope](non-goals.md)
-- [Approved closure-scoped store design](closure-scoped-store.md)
+- [Closure-scoped Nix store](closure-scoped-store.md)
 
 # Contributing
 

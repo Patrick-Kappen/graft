@@ -1,12 +1,11 @@
 # Closure-scoped Nix store exposure
 
-> **Status:** approved design for [#207]. Implementation belongs to [#209].
+> **Status:** implemented through [#209] from the design approved in [#207].
 
-Graft currently mounts the host's complete `/nix/store` read-only into every
-`rootfs-store` workload. The rootfs uses only its selected package closure, but
-the container can enumerate and execute unrelated host store paths. This design
-replaces that complete-store bind with one read-only bind for every path in the
-realised rootfs runtime closure.
+Graft exposes each `rootfs-store` workload's realised runtime closure instead of
+the host's complete `/nix/store`. A read-only scaffold protects the store tree,
+and one read-only bind for every exact closure member keeps rootfs symlinks
+functional without exposing unrelated host store paths.
 
 ## Security invariant
 
@@ -217,22 +216,21 @@ Different Podman, Quadlet, systemd, crun, kernel, mount, and host argument limit
 remain compatibility dimensions. A target that rejects the generated mounts
 fails closed. Closure scoping is not silently disabled for compatibility.
 
-## Implementation decision
+## Implemented contract
 
-Implementation may proceed in [#209] with this scope:
+[#209] implements the approved mechanism:
 
-1. build the package-environment closure metadata;
-2. reject top-level symlink outputs, create type-matched closure targets in the
-   rootfs, and assert the final closure shape;
-3. derive one shared NixOS/Home Manager Quadlet source with a read-only scaffold
-   mount followed by sorted per-path mounts and fixed options;
-4. enforce member and source-size limits with actionable diagnostics;
-5. add generator, rootful, rootless, regular-file, absent-path, GC-reference,
-   malformed-input, writable-rootfs, `CAP_SYS_ADMIN` boundary, and no-fallback
-   tests; and
-6. update the threat model, design, overview, Quadlet, reference, capability,
-   and compatibility documentation from complete-store to closure-scoped
-   exposure.
+1. package-environment and final-rootfs closure metadata come from
+   `pkgs.closureInfo`;
+2. top-level symlink outputs fail, type-matched closure targets are created in
+   the rootfs, and the final closure must equal the package closure plus rootfs;
+3. one shared NixOS/Home Manager derived Quadlet source contains a read-only
+   scaffold followed by bytewise-sorted member mounts with fixed options;
+4. member and source-size limits fail with actionable diagnostics;
+5. deterministic checks cover parity, ordering, regular-file targets,
+   references, generator translation, and no complete-store fallback; and
+6. an advisory NixOS VM covers writable-rootfs, missing-source, unrelated-path,
+   rootful, and non-root rootless behavior.
 
 Reporting closure member count and NAR size through a future unified inspection
 command belongs to [#137]. It does not block implementation because the build

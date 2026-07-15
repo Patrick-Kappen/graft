@@ -22,8 +22,9 @@ The current implementation proves the core rootfs-store path:
   long-running lifecycle intent; finite workloads require a command.
 - Common Quadlet fields are rendered for container identity, working directory,
   quoted environment, environment files, published ports, typed mounts,
-  qualified CDI references, secure defaults and typed relaxations, service
-  timing, and typed systemd dependency relationships.
+  qualified CDI references, secure defaults and typed relaxations,
+  closure-scoped Nix store exposure, service timing, and typed systemd
+  dependency relationships.
 
 The generated TOML schema intentionally exposes only the implemented MVP
 contract. Additional parser-recognised roadmap fields fail closed; their status
@@ -181,7 +182,6 @@ Planned hardening:
 - `userns=auto`
 - per-container limited UIDs
 - workdir-only write access
-- replace complete-store visibility with the approved [closure-scoped store design](closure-scoped-store.md)
 - explicit network policies
 - secrets support
 - resource limits

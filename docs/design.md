@@ -100,10 +100,12 @@ Manager module-evaluation checks directly.
 
 ## Quadlet and runtime ownership
 
-For `rootfs-store`, Nix renders a `.container` source unit with a store-backed
-`Rootfs=`, resolved command, fixed complete-store bind, typed mounts, and
-supported policy. Quadlet turns that source into a systemd service; systemd owns
-activation and lifecycle; Podman owns container creation and runtime behavior.
+For `rootfs-store`, Nix derives a `.container` source unit with a store-backed
+`Rootfs=`, resolved command, a read-only closure scaffold and member mounts,
+typed workload mounts, and supported policy. The derived source retains the
+runtime closure through ordinary Nix references. Quadlet turns that source into
+a systemd service; systemd owns activation and lifecycle; Podman owns container
+creation and runtime behavior.
 
 The module never invokes `systemctl enable`. An absent activation setting emits
 no `[Install]` section. Explicit startup resolves to a fixed manager-specific

@@ -106,11 +106,12 @@ when its Home Manager account is non-root.
 ## Scope and security
 
 Graft is early-alpha software. Containers share the host kernel and are not a
-VM-equivalent security boundary. The current backend also exposes the complete
-host `/nix/store` read-only so rootfs symlinks resolve; mandatory closure-scoped
-exposure is [designed but not yet implemented](docs/closure-scoped-store.md).
-Review the [threat model](docs/threat-model.md) before selecting a target or
-trusting configuration input.
+VM-equivalent security boundary. The current backend exposes only each
+workload's realised Nix runtime closure through mandatory read-only store mounts;
+there is no complete-store fallback. Explicit binds and trusted CDI edits remain
+separate authority. Review the [closure-scoped store contract](docs/closure-scoped-store.md)
+and [threat model](docs/threat-model.md) before selecting a target or trusting
+configuration input.
 
 Graft fits small Nix-native services and development workloads that benefit from
 reviewable TOML and systemd ownership. Choose direct Quadlet when full upstream
