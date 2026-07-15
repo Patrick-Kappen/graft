@@ -128,9 +128,13 @@ For local Unix peers, the initial principal key is the accepted peer UID; future
 remote principals require their own authenticated key. Worker-wide accounting
 is shared by the single `Accept=no` service across all connections.
 
-The server advertises effective values no larger than these maxima. Nix policy
-may lower them. A client cannot raise them. Values are versioned protocol
-constants and require review before change. Limits are checked before reserving
+The manager-submission response, ambiguous-submission reconciliation,
+post-client completion grace, and absolute lifecycle observation rows are exact
+version-1 semantic intervals, not negotiable maxima; Nix policy cannot lower or
+raise them. The server advertises effective values no larger than the other
+maxima, and Nix policy may lower those other values. A client cannot raise any
+value. All values are versioned protocol constants and require review before
+change. Limits are checked before reserving
 memory or starting backend work. When a principal or worker budget is exhausted,
 the worker rejects a new post-handshake request with `overloaded`; a connection
 that cannot complete a bounded handshake is closed. Existing accepted work is
@@ -325,9 +329,10 @@ connection/request correlation, and response-format state. A fresh operation
 must use the epoch returned by the current
 `ServerHello`. Re-presenting an operation after reconnect preserves its original
 epoch so a restarted worker rejects it before backend submission. A separate
-typed operation-result query may inspect that identifier and old epoch, but can
-return only a retained result or `result_unknown`; it cannot submit lifecycle
-work. Backend unit/action selection is worker-owned. There is no force, remove,
+typed operation-result query may inspect that identifier and old epoch. It
+returns a retained tagged terminal response when present, or
+`OperationResultUnavailable` with code `cache_lost` after epoch/cache loss; it
+cannot submit lifecycle work. Backend unit/action selection is worker-owned. There is no force, remove,
 delete-data, arbitrary signal, kill, raw job mode, unit property, or Podman
 option in the initial API.
 
