@@ -159,9 +159,11 @@ implementation:
 - operational caches or history becoming a hidden desired-state database.
 
 The planned split keeps a user worker within its owning account and a system
-worker within system scope. A normal CLI/TUI may aggregate authorized views, but
-system mutation requires explicit host authorization and ambiguous cross-scope
-names fail closed. The worker does not accept raw shell, Nix, systemd, D-Bus,
+worker within system scope. User scope is not proof of rootless authority: a
+UID-0 user worker remains rootful and must be designed and tested separately
+from both the system worker and non-root user workers. A normal CLI/TUI may
+aggregate authorized views, but system mutation requires explicit host
+authorization and ambiguous cross-scope names fail closed. The worker does not accept raw shell, Nix, systemd, D-Bus,
 Podman, Quadlet, or host-path passthrough. Controller loss cannot stop workloads
 or block local clients, and worker restart reconstructs observations from
 read-only manifests and authoritative backends rather than persisted intent.
