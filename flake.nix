@@ -111,9 +111,9 @@
             target = "system";
             optionName = "services.graft";
           };
-          collisionFailure = pkgs.testers.testBuildFailure (
-            collisionMaterialised.containerInners."collision-system.toml"
-          );
+          collisionFailure =
+            pkgs.testers.testBuildFailure
+              collisionMaterialised.containerInners."collision-system.toml";
           largeClosureMembers = lib.genList (
             index: builtins.toFile "graft-closure-member-${lib.fixedWidthString 3 "0" (toString index)}" ""
           ) 511;
