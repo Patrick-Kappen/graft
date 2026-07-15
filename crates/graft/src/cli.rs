@@ -88,6 +88,7 @@ fn resolve_cli(cli: &Cli) -> Result<CliOutput> {
     let loaded = load_sources(&paths)?;
     let sources = config_sources(&loaded);
     resolve::resolve_with_context(&loaded[0].config, &sources)
+        .with_context(|| format!("failed to resolve config: {}", toml_file.display()))
         .map(Box::new)
         .map(CliOutput::Single)
 }
