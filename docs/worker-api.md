@@ -421,8 +421,10 @@ parse and bound
   → validate capability, preconditions, and concurrency
   → acquire activation/submission lock
   → recheck generation and loaded-unit provenance
-  → atomically accept/pin mutation identity and submit backend operation
-  → release activation/submission lock
+  → accept and pin mutation identity
+  → serialize final-caller departure against submission start
+  → begin typed backend submission
+  → release activation/submission lock after acceptance/rejection
   → emit submission audit
   → observe terminal or accepted state
   → emit outcome audit and return result

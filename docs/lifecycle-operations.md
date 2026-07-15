@@ -536,15 +536,22 @@ manifest and loaded-unit provenance recheck through manager acceptance or
 rejection. It does not hold the lock while waiting for terminal workload state.
 
 Under that lock, the worker rechecks generation, loaded source identity, and
-generated-service provenance immediately before the operation-ID acceptance
-linearization point and backend call. A mismatch fails `stale_manifest` or the
-specific provenance error without accepting the ID or mutating the manager.
-Acceptance pins the validated generation and identity. Publication after manager
-submission is `manifest_changed_during_operation`; subsequent requests use the
-new generation. If later reload or replacement destroys original attribution or
-terminal evidence, the pinned operation returns `result_unknown`; it never
-adopts the replacement workload. Lifecycle progress follows this rule rather
-than ending merely because the manifest changed.
+generated-service provenance before two distinct linearization points. First,
+operation-ID acceptance pins the validated generation and identity. Second,
+backend-submission start commits to calling the manager. An operation-state lock
+serializes final-caller departure against submission start: if final departure
+wins, the worker commits the matching `*_before_submission` terminal error and
+never calls the backend; if submission start wins, later departures cannot
+suppress or reverse the call. This accepted interval makes pre-submission
+cancellation reachable without opening a manifest/reload race.
+
+A provenance mismatch before acceptance fails `stale_manifest` or the specific
+provenance error without accepting the ID or mutating the manager. Publication
+after manager submission is `manifest_changed_during_operation`; subsequent
+requests use the new generation. If later reload or replacement destroys
+original attribution or terminal evidence, the pinned operation returns
+`result_unknown`; it never adopts the replacement workload. Lifecycle progress
+follows this rule rather than ending merely because the manifest changed.
 
 A privileged administrator bypassing the approved activation lock is outside
 Graft's serialization guarantee. The worker still detects resulting provenance
