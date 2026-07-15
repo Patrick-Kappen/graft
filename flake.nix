@@ -78,6 +78,7 @@
         let
           pkgs = nixpkgs.legacyPackages.${system};
           inherit (pkgs) lib;
+          graftPackage = self.packages.${system}.default;
 
           closureRegularFile = pkgs.writeText "graft-closure-regular-file" "regular-file\n";
           closureSymlink = pkgs.runCommand "graft-closure-symlink" { } ''
@@ -91,17 +92,28 @@
             mkdir -p $out/etc/graft-test
             echo materialised > $out/etc/graft-test/config
           '';
-          collisionPackageA = pkgs.writeTextDir "bin/graft-collision" "first\n";
-          collisionPackageB = pkgs.writeTextDir "bin/graft-collision" "second\n";
-          collisionEnvironment = pkgs.buildEnv {
-            name = "graft-collision-test";
-            paths = [
-              collisionPackageA
-              collisionPackageB
-            ];
-            ignoreCollisions = false;
+          collisionPackageA = lib.meta.hiPrio (pkgs.writeTextDir "bin/graft-collision" "first\n");
+          collisionPackageB = lib.meta.lowPrio (pkgs.writeTextDir "bin/graft-collision" "second\n");
+          collisionTestPkgs = pkgs.extend (
+            _: _: {
+              graftCollisionFirst = collisionPackageA;
+              graftCollisionSecond = collisionPackageB;
+            }
+          );
+          collisionMaterialised = import ./modules/lib/materialise-containers.nix {
+            inherit lib;
+            pkgs = collisionTestPkgs;
+            cfg = {
+              package = graftPackage;
+              configRoot = ./tests/nix/rootfs-collision;
+              configRoots = [ ];
+            };
+            target = "system";
+            optionName = "services.graft";
           };
-          collisionFailure = pkgs.testers.testBuildFailure collisionEnvironment;
+          collisionFailure = pkgs.testers.testBuildFailure (
+            collisionMaterialised.containerInners."collision-system.toml"
+          );
           largeClosureMembers = lib.genList (
             index: builtins.toFile "graft-closure-member-${lib.fixedWidthString 3 "0" (toString index)}" ""
           ) 511;
