@@ -119,6 +119,8 @@ These are protocol maxima, not target values to allocate eagerly:
 | Complete a partially received frame | 30 seconds |
 | Unary client deadline | 60 seconds |
 | Lifecycle client deadline | 5 minutes |
+| Manager submission response | 5 seconds |
+| Ambiguous-submission reconciliation | 5 seconds |
 | Post-client lifecycle completion grace | 30 seconds |
 | Absolute lifecycle observation after acceptance | 10 minutes |
 
@@ -420,7 +422,7 @@ parse and bound
   → bind workload/backend identity
   → validate capability, preconditions, and concurrency
   → acquire activation/submission lock
-  → recheck generation and loaded-unit provenance
+  → re-read manager state/job and recheck generation/loaded-unit provenance
   → accept and pin mutation identity (`no_change` may complete here)
   → serialize final-caller departure against manager-work commitment
   → attach to verified existing work or begin typed backend submission
@@ -502,8 +504,14 @@ Within one worker epoch and principal key:
   joined, or submitted manager work and owns lifecycle disposition/outcome;
 - Nix activation holds an exclusive host-policy lock across artifact changes,
   manager reload, provenance validation, and manifest publication; worker
-  submission holds the corresponding lock across final generation/loaded-unit
-  provenance validation and manager acceptance/rejection;
+  submission holds the corresponding lock while re-reading state/job evidence,
+  validating generation/provenance, and obtaining manager acceptance/rejection;
+- before the call, worker submission writes a bounded `/run` pending-submission
+  interlock record; manager response and exact reconciliation have separate
+  five-second deadlines;
+- unresolved ambiguous delivery retains `result_unknown`, degrades lifecycle,
+  and leaves the record so Nix activation and further workload mutation fail
+  closed until explicit proven administrator recovery from [#242];
 - only pre-acceptance mismatches return `stale_manifest` or provenance failure,
   while post-submission publication is recorded as an in-operation change and
   cannot retarget;
@@ -532,8 +540,11 @@ Within one worker epoch and principal key:
 
 A worker restart creates a new epoch and loses this operational cache. Exactly
 once mutation across restart is impossible without persistent hidden state and
-is not promised. A disconnect, deadline, cancellation, or worker crash after
-backend submission may therefore return `result_unknown`. The client must query
+is not promised. An old-epoch result query returns the separate tagged
+`OperationResultUnavailable` response containing operation identity,
+old/current epochs, code `cache_lost`, timestamp, and refresh guidance, with no
+fabricated lifecycle result fields. A disconnect, deadline, cancellation, or
+worker crash after backend submission may return `result_unknown`. The client must query
 the current workload state and must not blindly replay a non-idempotent
 operation. The [local lifecycle contract](lifecycle-operations.md) defines
 which observed states make a new `up`, `down`, or `restart` safe.

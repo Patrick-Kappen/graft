@@ -119,10 +119,10 @@ Authorization principles:
 - an unqualified name present in multiple accessible scopes is ambiguous and
   fails closed.
 
-Command names and action semantics are fixed by
-[Local lifecycle operations](lifecycle-operations.md). Concrete argument and
-presentation details belong to client implementation; authorization actions and
-host policy remain in [#242].
+Command names, explicit `--scope system|user` selection, and action semantics are
+fixed by [Local lifecycle operations](lifecycle-operations.md). Other rendering
+and presentation details belong to client implementation; authorization actions
+and host policy remain in [#242].
 
 ## Declarative discovery manifest
 
