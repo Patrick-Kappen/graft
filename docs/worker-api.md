@@ -110,7 +110,7 @@ These are protocol maxima, not target values to allocate eagerly:
 | Buffered response bytes per principal / worker | 2 MiB / 16 MiB |
 | Retained mutation records per principal / worker | 256 / 1,024 |
 | Encoded retained lifecycle result | 32 KiB |
-| Mutation UUIDv7 timestamp window | 10 minutes before through 1 minute after server receive time |
+| Mutation UUIDv7 timestamp window | From 10 minutes before server receive time through 1 minute after it |
 | Unacknowledged stream items per stream | 64 |
 | Workloads in one list page | 256 |
 | Historical log records requested per page | 1,000 |
@@ -441,9 +441,9 @@ Client deadlines bound how long the worker waits and how long ordinary response
 state is retained. Mutation duplicate records and their bounded terminal results
 are the explicit exception: they follow the deadline-independent
 acceptance-window retention below. Joined callers hold independent interest;
-a departing caller ends only its own delivery. After committed submitted or
-joined lifecycle work loses its final interested caller, the worker observes it
-for at most the fixed
+a departing caller ends only its own delivery. After committed lifecycle
+work—whether submitted or joined—loses its final interested caller, the worker
+observes it for at most the fixed
 30-second completion grace. A valid duplicate join cancels an active grace and
 a fresh grace starts after the next final departure. Neither joins nor grace may
 extend observation beyond ten minutes after server acceptance. At grace or
