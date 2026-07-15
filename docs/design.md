@@ -83,7 +83,8 @@ NixOS and Home Manager consume resolved JSON through Import From Derivation
 (IFD). The shared materialisation path:
 
 1. selects resolved workloads for its `system` or `user` target;
-2. maps package names through the target's pinned package set;
+2. maps `graft-pause` to the configured Graft package and other package names
+   through the target's pinned `pkgs`;
 3. builds the Nix-store rootfs;
 4. creates required runtime directories and mount targets;
 5. renders deterministic Quadlet source units;

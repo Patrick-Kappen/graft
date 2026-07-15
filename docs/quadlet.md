@@ -20,9 +20,9 @@ locations. The TOML filename currently selects the `.container` filename and
 resulting service stem; resolved top-level `name` selects `ContainerName=`. Keep
 them equal until [#107](https://github.com/Patrick-Kappen/graft/issues/107).
 
-## Fixed rootfs-store output
+## Minimal rootfs-store output
 
-Every current workload starts with mechanically owned keys:
+A minimal workload with the secure defaults and no explicit command renders:
 
 ```ini
 [Container]
