@@ -36,8 +36,8 @@ security, and workflow checks as applicable. In particular:
 - Rust changes require tests and clippy with warnings denied.
 - Nix module changes require both NixOS and Home Manager coverage where the
   behavior is shared.
-- IFD-backed module checks must be built explicitly, not inferred from
-  `nix flake check` alone.
+- IFD-backed module and materialiser checks must be built explicitly, not
+  inferred from `nix flake check` alone.
 - Runtime-sensitive Quadlet behavior needs generator/systemd verification and,
   where practical, a real system or user runtime check.
 - Public documentation must not contain private hosts, paths, endpoints,

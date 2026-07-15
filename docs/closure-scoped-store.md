@@ -226,7 +226,7 @@ fails closed. Closure scoping is not silently disabled for compatibility.
    the rootfs, and the final closure must equal the package closure plus rootfs;
 3. one shared NixOS/Home Manager derived Quadlet source contains a read-only
    scaffold followed by bytewise-sorted member mounts with fixed options;
-4. member and source-size limits fail with actionable diagnostics;
+4. member and closure-mount-fragment limits fail with actionable diagnostics;
 5. deterministic checks cover parity, ordering, regular-file and rejected
    symlink targets, exact and exceeded limits, references, generator translation,
    and the generated service and `ExecStart=` budgets; and
