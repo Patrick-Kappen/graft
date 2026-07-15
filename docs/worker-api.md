@@ -456,9 +456,21 @@ receive time and no more than ten minutes old, compared as Unix epoch
 milliseconds. These fields provide correlation, duplicate control, expiry
 enforcement, and stale-epoch rejection, not authorization.
 
-Within one worker epoch:
+Mutation records are keyed by worker epoch, authenticated principal key, and
+validated UUID. For local workers, that principal key contains the fixed worker
+context and accepted peer UID; a future remote transport supplies its own stable
+authenticated principal ID. UUID reuse by another principal neither joins nor
+conflicts with the first record. Every duplicate request is reauthorized before
+any retained or in-flight result is disclosed.
 
-- the first accepted operation identifier owns one immutable request payload;
+Within one worker epoch and principal key:
+
+- after a complete request is parsed, authenticated, admitted, and assigned its
+  immutable payload, the first accepted operation identifier owns that payload;
+- disconnect or parse failure before acceptance reserves no identifier;
+- cancellation or deadline after acceptance but before backend submission
+  retains `cancelled_before_submission` or `deadline_before_submission` for the
+  full acceptance window, and that identifier cannot later mutate;
 - reuse with the identical payload observes the same in-flight or completed
   result while retained;
 - reuse with a different payload fails as a conflict;
