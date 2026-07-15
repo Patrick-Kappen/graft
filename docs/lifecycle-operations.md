@@ -751,7 +751,7 @@ None may be approximated through a generic escape hatch.
 
 ## Implementation slices
 
-After this design and [#137] and [#242] are approved:
+After this design, [#137], and [#242] are approved:
 
 1. Publish lifecycle action, progress, result, and error types with exhaustive
    serialization and unknown-field tests.
