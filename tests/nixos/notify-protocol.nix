@@ -84,19 +84,22 @@ in
       "containers/systemd/users/1001/login-user.container".source = loginUser;
     };
 
-    systemd.tmpfiles.rules = [
-      "d /var/lib/graft-activation 0755 root root -"
-      "d /var/lib/graft-workspace 0755 root root -"
-      "f /var/lib/graft-workspace/marker 0644 root root - preserved"
-    ];
-    systemd.services.graft-foreign = {
-      description = "Foreign unit preserved across Graft activation changes";
-      wantedBy = [ "multi-user.target" ];
-      serviceConfig = {
-        Type = "oneshot";
-        RemainAfterExit = true;
+    systemd = {
+      user.extraConfig = "LogLevel=debug";
+      tmpfiles.rules = [
+        "d /var/lib/graft-activation 0755 root root -"
+        "d /var/lib/graft-workspace 0755 root root -"
+        "f /var/lib/graft-workspace/marker 0644 root root - preserved"
+      ];
+      services.graft-foreign = {
+        description = "Foreign unit preserved across Graft activation changes";
+        wantedBy = [ "multi-user.target" ];
+        serviceConfig = {
+          Type = "oneshot";
+          RemainAfterExit = true;
+        };
+        script = "touch /var/lib/graft-activation/foreign-unit";
       };
-      script = "touch /var/lib/graft-activation/foreign-unit";
     };
   };
 
@@ -141,26 +144,65 @@ in
             "grep -Ei '(linger-user|notify|protocol|conmon)' | tail -n 120"
         )
 
-    machine.start()
-    machine.wait_for_unit("multi-user.target")
-    machine.wait_for_file("/var/lib/systemd/linger/graftlinger")
-    machine.wait_for_unit("user@1000.service")
-    machine.wait_until_succeeds("test -d /run/user/1000", timeout=120)
-    machine.wait_for_file("/run/user/1000/bus", timeout=120)
-    machine.wait_until_succeeds(
-        user_systemctl(
-            "show linger-user.service -P ActiveState | grep -Ex '(active|failed)'"
-        ),
-        timeout=120,
-    )
+    def wait_for_linger_result():
+        machine.wait_for_unit("multi-user.target")
+        machine.wait_for_file("/var/lib/systemd/linger/graftlinger")
+        machine.wait_for_unit("user@1000.service")
+        machine.wait_until_succeeds("test -d /run/user/1000", timeout=120)
+        machine.wait_for_file("/run/user/1000/bus", timeout=120)
+        machine.wait_until_succeeds(
+            user_systemctl(
+                "show linger-user.service -P ActiveState | grep -Ex '(active|failed)'"
+            ),
+            timeout=120,
+        )
 
-    failures = []
-    initial_state = unit_property("ActiveState")
-    initial_result = unit_property("Result")
-    record_diagnostics("initial linger startup")
-    if initial_state != "active":
-        failures.append(f"initial:{initial_state}/{initial_result}")
+    def assess_active_unit(label):
+        state = unit_property("ActiveState")
+        substate = unit_property("SubState")
+        result = unit_property("Result")
+        main_pid = unit_property("MainPID")
+        control_group = unit_property("ControlGroup")
+        observed = (
+            f"{label}: state={state}/{substate} result={result} "
+            f"main_pid={main_pid} control_group={control_group}"
+        )
+        print(observed)
 
+        problems = []
+        if state != "active" or substate != "running" or result != "success":
+            problems.append(observed)
+        if main_pid == "0":
+            problems.append(f"{label}: no main PID")
+        else:
+            process_status, process_output = machine.execute(
+                f"ps -p {main_pid} -o comm="
+            )
+            process_name = process_output.strip()
+            print(
+                f"{label}: main process exit={process_status} name={process_name}"
+            )
+            if process_status != 0 or process_name != "conmon":
+                problems.append(
+                    f"{label}: main process exit={process_status} name={process_name}, not conmon"
+                )
+        if not control_group.endswith("/app.slice/linger-user.service"):
+            problems.append(f"{label}: unexpected control group {control_group}")
+
+        if problems:
+            record_diagnostics(label)
+        else:
+            print_command(
+                "journalctl -b _UID=1000 --no-pager -o short-monotonic | "
+                "grep -Ei '(MAINPID|READY=1|notification message|new main PID|belongs to unit)' | "
+                "tail -n 40"
+            )
+        return problems
+
+    machine.start(allow_reboot=True)
+    wait_for_linger_result()
+
+    failures = assess_active_unit("initial linger startup")
     machine.execute(user_systemctl("stop linger-user.service"))
 
     for attempt in range(1, 11):
@@ -168,26 +210,25 @@ in
         start_status, _ = machine.execute(
             user_systemctl("start linger-user.service")
         )
-        state = unit_property("ActiveState")
-        result = unit_property("Result")
-        if start_status != 0 or state != "active":
+        if start_status != 0:
+            failures.append(f"active-manager-{attempt}: start exit {start_status}")
             record_diagnostics(f"failed active-manager attempt {attempt}")
-            failures.append(
-                f"attempt-{attempt}:exit-{start_status}/{state}/{result}"
-            )
         else:
-            main_pid = unit_property("MainPID")
-            control_group = unit_property("ControlGroup")
-            print(
-                f"active-manager attempt {attempt}: "
-                f"state={state} result={result} main_pid={main_pid} "
-                f"control_group={control_group}"
+            failures.extend(
+                assess_active_unit(f"active-manager attempt {attempt}")
             )
         machine.execute(user_systemctl("stop linger-user.service"))
 
+    for boot_attempt in range(1, 9):
+        machine.reboot()
+        wait_for_linger_result()
+        failures.extend(
+            assess_active_unit(f"linger bootstrap reboot {boot_attempt}")
+        )
+
     if failures:
         raise Exception(
-            "rootless Quadlet notify protocol failure(s): " + ", ".join(failures)
+            "rootless Quadlet notify protocol failure(s): " + "; ".join(failures)
         )
   '';
 }
