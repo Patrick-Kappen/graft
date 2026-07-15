@@ -125,6 +125,22 @@ unavailable authoritative observation and returns backend unavailable. These
 global rules apply before the action matrices, so no raw manager state is
 silently coerced.
 
+The selected unit's queued `Job` is inspected independently of `ActiveState`
+before every matrix decision:
+
+| Requested action | Queued job handling |
+| --- | --- |
+| `up` | Join a verified compatible start job; every other job conflicts. |
+| `down` | Join a verified compatible stop job; cancel a verified start job then submit stop; every other job conflicts. |
+| `restart` | Join a verified compatible restart job; every other job conflicts. |
+
+A job is compatible only when its concrete unit, type, and current identity match
+the pinned selected service and expected action. If job identity or state changes
+between validation and submission, the request conflicts. `no_change` and a
+successful terminal condition additionally require that no queued job can
+reverse the observed state. The worker never derives job absence from
+`ActiveState` alone.
+
 Detailed state fields and cross-layer status remain owned by the observability
 design in [#137]. This vocabulary fixes only what lifecycle completion needs.
 
@@ -212,7 +228,9 @@ runtime data.
 | `unknown` | Fail backend unavailable; do not submit. |
 
 For a finite job, `down` during `activating` aborts the current execution. The
-terminal lifecycle result reports `stopped`, not job success. For setup,
+terminal result uses the existing model: action `down`, disposition
+`worker_submitted`, outcome `succeeded`, and final state `inactive`. It does not
+claim successful completion of the job command. For setup,
 `down` clears retained `active-exited` state. For long-running workloads it
 stops the generated service and lets the generated service execute its normal
 stop and best-effort cleanup commands.
@@ -296,7 +314,7 @@ condition:
 | `restart`, `setup` | Correlated stop phase succeeded and new invocation completed successfully in `active-exited`. |
 | `restart`, `job` | Correlated stop phase succeeded and new finite invocation completed successfully in `inactive`. |
 | `down`, every lifecycle | Unit is `inactive`, or is quiescent `failed` and any submitted stop itself completed successfully. |
-| Any valid `no_change` | Initial state already satisfies the action without submission. |
+| Any valid `no_change` | Initial state already satisfies the action without submission and no queued job can reverse it. |
 
 The worker must not infer successful job completion from `inactive` alone. It
 uses manager job completion, invocation identity, and typed service result. A
@@ -458,7 +476,14 @@ to accept the required initial audit record fails mutation closed.
 The worker admits at most one lifecycle mutation per workload. This is in
 addition to worker-wide and per-principal limits.
 
-Within one worker epoch:
+Mutation records are keyed by worker epoch, authenticated principal key, and
+UUIDv7. For local workers, the principal key contains the fixed worker context
+and accepted peer UID. Future remote callers use a separate stable authenticated
+principal identifier. The UUID is explicitly not authorization and cannot join
+or conflict with another principal's record. Every duplicate is reauthorized
+before returning any in-flight or retained result.
+
+Within one worker epoch and principal key:
 
 - a duplicate operation identifier with the identical immutable request joins
   its retained in-flight or terminal result;
@@ -508,9 +533,16 @@ it does not fix the shared operation outcome. It also does not replace
 `TimeoutStartSec`, `TimeoutStopSec`, or manager job timeouts from materialised
 intent.
 
-Before backend submission, cancellation returns `cancelled` and performs no
-mutation. After submission, each duplicate/joined caller has independent
-interest. A deadline, cancellation, or disconnect removes only that caller and
+An operation ID becomes accepted and reserved only after a complete bounded
+request has been parsed, authenticated, admitted to the principal-scoped
+mutation registry, and assigned its immutable payload. A disconnect or malformed
+frame before that point reserves no ID. After acceptance but before backend
+submission, cancellation or deadline performs no mutation and stores the typed
+terminal error `cancelled_before_submission` or
+`deadline_before_submission`. The complete error is retained for the normal
+acceptance window, and the same principal/ID can never later submit work.
+
+After submission, each duplicate/joined caller has independent interest. A deadline, cancellation, or disconnect removes only that caller and
 releases its delivery state. Normal shared observation continues while at least
 one caller remains interested. The fixed 30-second server completion grace
 starts only when the final joined caller loses interest:
