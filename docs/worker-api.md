@@ -418,7 +418,7 @@ parse and bound
   → load and validate current manifest
   → bind workload/backend identity
   → validate capability, preconditions, and concurrency
-  → accept and reserve mutation identity
+  → recheck generation and atomically accept/pin mutation identity
   → submit typed backend operation
   → emit submission audit
   → observe terminal or accepted state
@@ -485,10 +485,14 @@ Within one worker epoch and principal key:
   retains a tagged `MutationTerminalError` with
   `cancelled_before_submission` or `deadline_before_submission` for the full
   acceptance window, and that identifier cannot later mutate;
-- a `MutationTerminalError` contains operation/epoch identity, code, phase,
-  timestamp, and retry guidance but no lifecycle disposition or outcome;
+- a `MutationTerminalError` contains operation/epoch identity, action, workload
+  selector, code, phase, timestamp, and retry guidance but no lifecycle
+  disposition, outcome, manager job, invocation, or final workload state;
 - `LifecycleTerminalResult` is the distinct tagged variant for `no_change`,
   joined, or submitted manager work and owns lifecycle disposition/outcome;
+- acceptance rechecks and atomically pins manifest generation and workload
+  identity, so only pre-acceptance changes return `stale_manifest`; publication
+  after acceptance is recorded as an in-operation change and cannot retarget;
 - a backend call attempted after acceptance, including synchronous rejection,
   returns `LifecycleTerminalResult` with `worker_submitted`, `failed`, and
   failure phase `submission`;

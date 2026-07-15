@@ -367,11 +367,11 @@ An accepted operation terminates as exactly one tagged response variant:
 - safe typed failure code and retry guidance when outcome is `failed` or
   `result_unknown`, absent when outcome is `succeeded`.
 
-`MutationTerminalError` contains operation and epoch identity, safe typed error
-code, phase, timestamp, and retry guidance. It deliberately has no disposition,
-outcome, manager job, invocation, final workload state, or submission timestamp.
-The initial codes are `cancelled_before_submission` and
-`deadline_before_submission`.
+`MutationTerminalError` contains operation and epoch identity, requested action,
+workload selector, safe typed error code, phase, timestamp, and retry guidance.
+It deliberately has no disposition, outcome, manager job, invocation, final
+workload state, or submission timestamp. The initial codes are
+`cancelled_before_submission` and `deadline_before_submission`.
 
 The response contains no raw D-Bus values, journal records, unit properties,
 Podman output, command lines, environment values, or arbitrary backend text.
@@ -527,16 +527,18 @@ Within one worker epoch and principal key:
 The lock covers validation through terminal/result-unknown publication. It is
 bounded operational memory, not persistent desired state.
 
-A manifest publication during an in-flight operation never retargets that
-operation. Before backend submission, a generation change fails validation as
-`stale_manifest`. After submission, the worker remains pinned to the original
-generation, generated service, manager job, and invocation evidence. The result
-records `manifest_changed_during_operation = true`, while subsequent requests
-must use the new generation. If manager reload or replacement destroys the
-ability to prove the original attribution or terminal outcome, the pinned
-operation returns `result_unknown`; it does not adopt the replacement workload.
-Lifecycle progress for the submitted operation follows this rule rather than
-ending merely because the manifest changed.
+A manifest publication during an accepted operation never retargets that
+operation. The worker rechecks generation immediately before the operation-ID
+acceptance linearization point. A mismatch at or before that point fails
+`stale_manifest` without accepting the ID. Acceptance atomically pins the
+validated generation and identity; every publication after that point is
+`manifest_changed_during_operation`, including publication before the backend
+call begins. The backend call still follows the pinned identity, while
+subsequent requests must use the new generation. If manager reload or
+replacement destroys the ability to prove original attribution or terminal
+outcome, the pinned operation returns `result_unknown`; it does not adopt the
+replacement workload. Lifecycle progress for the accepted operation follows
+this rule rather than ending merely because the manifest changed.
 
 Operation identifiers use the exact canonical lowercase hyphenated UUIDv7 wire
 encoding defined by the
@@ -626,10 +628,13 @@ persistent operation database to manufacture that guarantee.
 
 ## CLI output and exit status
 
-Human output includes explicit host/scope identity, action, disposition,
-outcome, final state, and concise typed failure guidance. Machine output serializes the same
-bounded lifecycle result and keeps stdout free of logs. Progress and diagnostics
-use their documented client channels.
+Output follows the terminal response tag. Human
+`LifecycleTerminalResult` output includes explicit host/scope identity, action,
+disposition, outcome, final state, and concise typed failure guidance. Human
+`MutationTerminalError` output includes identity, action, error code, phase, and
+guidance without inventing disposition, outcome, or final state. Machine output
+serializes the same tagged union and keeps stdout free of logs. Progress and
+diagnostics use their documented client channels.
 
 Initial lifecycle command exit statuses are:
 
