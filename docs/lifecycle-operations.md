@@ -63,20 +63,21 @@ scope-mismatched identity fails closed as defined by the worker API.
 
 ## Manager operation mapping
 
-The worker submits exactly one typed operation for the manifest-bound generated
-service to its fixed systemd manager:
+The worker submits one typed action for the manifest-bound generated service to
+its fixed systemd manager:
 
-| Graft action | systemd operation |
-| --- | --- |
-| `up` | start the generated service |
-| `down` | stop the generated service |
-| `restart` | restart the generated service |
+| Graft action | systemd operation | Fixed conflict behavior |
+| --- | --- | --- |
+| `up` | start the generated service | Preserve an incompatible queued job (`fail`). |
+| `down` | stop the generated service | Replace a conflicting job for the selected unit (`replace`). |
+| `restart` | restart the generated service | Preserve an incompatible queued job (`fail`). |
 
-The adapter chooses the concrete D-Bus method, unit identity, and fixed job mode.
-The initial fixed job mode preserves a conflicting queued job rather than
-silently replacing unrelated manager work. Clients cannot select or override
-it. If manager state cannot satisfy the transition without cancelling or
-replacing independently submitted work, Graft returns a conflict.
+The adapter chooses the concrete D-Bus method and unit identity. Clients cannot
+select or override the job mode. The `down` exception intentionally lets an
+operator abort activation of the selected workload, including a finite job; it
+does not authorize arbitrary unit selection or wholesale manager-queue
+replacement. `up` and `restart` never cancel independently submitted manager
+work. Any other incompatible transaction returns a conflict.
 
 `restart` is one manager restart operation. It is not implemented in the client
 as `down` followed by `up`; that would introduce an externally visible inactive
@@ -117,7 +118,7 @@ the materialised lifecycle.
 | --- | --- |
 | `inactive` | Submit start and wait for `active-running`. |
 | `failed` | Submit start and wait for `active-running`; a successful new invocation clears the prior failed state. |
-| `activating` | Join observation of the existing start job; do not submit another start. |
+| `activating` | Join a compatible start job, or observe a recognized manager-owned automatic-restart phase; otherwise return conflict. |
 | `active-running` | Return success with `no_change`. |
 | `active-exited` | Fail `unexpected_state`; do not reinterpret a mismaterialised unit. |
 | `deactivating` | Return conflict; do not reverse an independently active stop. |
@@ -134,7 +135,7 @@ reaches `active-running` before the client deadline.
 | --- | --- |
 | `inactive` | Submit start and wait for `active-exited`. |
 | `failed` | Submit start and wait for a new successful `active-exited` invocation. |
-| `activating` | Join observation of the existing setup invocation. |
+| `activating` | Join a compatible start job/invocation, or observe a recognized automatic-restart phase; otherwise return conflict. |
 | `active-exited` | Return success with `no_change`. |
 | `active-running` | Fail `unexpected_state`. |
 | `deactivating` | Return conflict. |
@@ -149,7 +150,7 @@ not run the command again. Callers use `restart` for an explicit new execution.
 | --- | --- |
 | `inactive` | Submit and wait for one new finite execution. |
 | `failed` | Submit and wait for one new finite execution. |
-| `activating` | Join observation of the currently active execution. |
+| `activating` | Join a compatible start job/execution, or observe a recognized automatic-restart phase; otherwise return conflict. |
 | `active-running` or `active-exited` | Fail `unexpected_state`. |
 | `deactivating` | Return conflict. |
 | `unknown` | Fail backend unavailable; do not submit. |
@@ -159,23 +160,32 @@ identifier submitted after a completed job requests a new execution. Duplicate
 suppression for the same operation identifier prevents accidental replay of one
 request; it does not turn a finite job into retained desired state.
 
-Joining an existing activation means waiting for and reporting that manager job.
-It does not claim that Graft originally submitted it. The result marks the
-submission source as `existing_manager_job` rather than `worker_submitted`.
+An `activating` state does not prove that a manager job exists. During
+`RestartSec`, for example, systemd may report an automatic-restart substate
+between attempts with no queued job. The worker therefore inspects job presence,
+service substate, invocation identity, and restart metadata. It may join a
+compatible manager job or boundedly observe a recognized automatic-restart
+sequence. An unrecognized activation without correlatable evidence is a
+conflict, not permission to submit another start.
+
+Joining existing manager work means waiting for and reporting that work. It does
+not claim that Graft originally submitted it. The result disposition is
+`existing_manager_work`, not `worker_submitted`.
 
 ## `down` contract
 
-`down` requests inactive unit state. It does not request absence of materialised
-artifacts or runtime data.
+`down` requests a quiescent unit: `inactive`, or sticky `failed` with no active
+job or service process. It does not request absence of materialised artifacts or
+runtime data.
 
 | Initial state | Behavior |
 | --- | --- |
 | `inactive` | Return success with `no_change`. |
-| `failed` | Submit stop as needed and require final `inactive`; this clears retained failed state without deleting data. |
-| `activating` | Submit stop, cancelling the active service/job through systemd, and wait for `inactive`. |
+| `failed` | If quiescent, return `no_change` and preserve failure evidence; otherwise submit stop and require a quiescent result. |
+| `activating` | Submit stop with the fixed replacement behavior, cancelling activation of the selected service/job, and wait for a quiescent result. |
 | `active-running` | Submit stop and wait for `inactive`. |
 | `active-exited` | Submit stop and wait for `inactive`. |
-| `deactivating` | Join observation of the existing stop job. |
+| `deactivating` | Join a compatible stop job or observe recognized service cleanup; otherwise return conflict. |
 | `unknown` | Fail backend unavailable; do not submit. |
 
 For a finite job, `down` during `activating` aborts the current execution. The
@@ -183,6 +193,12 @@ terminal lifecycle result reports `stopped`, not job success. For setup,
 `down` clears retained `active-exited` state. For long-running workloads it
 stops the generated service and lets the generated service execute its normal
 stop and best-effort cleanup commands.
+
+A sticky failed state is valuable diagnostic evidence and `StopUnit` alone does
+not clear it. The initial `down` contract therefore does not call
+`ResetFailedUnit`. A quiescent failed unit is already stopped and succeeds with
+`no_change` while retaining `failed` as its final manager state. Explicit typed
+failure reset remains deferred rather than hidden inside `down`.
 
 `down` never directly removes or mutates:
 
@@ -247,7 +263,7 @@ condition:
 | `up` / `restart`, `long-running` | Correlated service is `active-running`. |
 | `up` / `restart`, `setup` | Correlated invocation completed successfully and unit is `active-exited`. |
 | `up` / `restart`, `job` | Correlated finite invocation completed successfully and unit is `inactive`. |
-| `down`, every lifecycle | Correlated stop completed and unit is `inactive`. |
+| `down`, every lifecycle | Correlated stop completed in `inactive`, or the unit is quiescent `failed` with no submission needed. |
 | Any valid `no_change` | Initial state already satisfies the action without submission. |
 
 The worker must not infer successful job completion from `inactive` alone. It
@@ -269,9 +285,10 @@ Every terminal response contains bounded typed fields:
 - current worker epoch;
 - manifest generation and workload selector;
 - lifecycle kind and requested action;
-- authorization and submission classification;
+- authorization classification;
 - initial state;
-- disposition: `applied` or `no_change`;
+- disposition: `no_change`, `worker_submitted`, or `existing_manager_work`;
+- outcome: `succeeded`, `failed`, or `result_unknown`;
 - manager job identity when one was observed;
 - invocation identity when available;
 - final state and typed unit result;
@@ -285,19 +302,29 @@ The response contains no raw D-Bus values, journal records, unit properties,
 Podman output, command lines, environment values, or arbitrary backend text.
 Observability clients may follow separately authorized details through [#137].
 
-### Result dispositions
+### Result disposition and outcome
 
-`applied` means the worker submitted the operation or joined an existing manager
-job and proved the required terminal state. It does not imply the worker was the
-original submitter when submission classification says otherwise.
+Disposition records how manager work related to the request, independently of
+whether it succeeded:
 
-`no_change` means no manager operation was submitted because the initial state
-already satisfied the action. A job `up` is never `no_change` merely because a
-previous execution succeeded.
+- `no_change`: no manager operation was needed because initial state already
+  satisfied the action;
+- `worker_submitted`: this worker submitted the typed manager operation; or
+- `existing_manager_work`: the worker joined a compatible job, invocation,
+  automatic-restart sequence, or cleanup already in progress.
 
-`result_unknown` means submission may have changed manager state but the worker
-cannot prove the terminal result. It is not success or failure of the workload
-and must not be converted to either by a client.
+A job `up` is never `no_change` merely because a previous execution succeeded.
+
+Outcome records what could be proved:
+
+- `succeeded`: the action-specific successful terminal condition was proven;
+- `failed`: a terminal manager, dependency, or process failure was proven; or
+- `result_unknown`: manager state may have changed, but the terminal result
+  cannot be proven.
+
+Thus `worker_submitted` plus `failed` represents an accepted operation whose
+workload execution failed. `result_unknown` is not success or failure of the
+workload and must not be converted to either by a client.
 
 ## Progress stream
 
@@ -307,7 +334,7 @@ Items are tagged states, not backend strings:
 ```text
 authorized
 validated
-existing_manager_job | submitted
+existing_manager_work | worker_submitted
 queued
 activating | deactivating
 terminal | result_unknown
@@ -399,6 +426,8 @@ Within one worker epoch:
 - a duplicate operation identifier with the identical immutable request joins
   its retained in-flight or terminal result;
 - the same identifier with a different request is a conflict;
+- an identifier outside its acceptance window returns `operation_id_expired`
+  and can never become a fresh mutation;
 - a different lifecycle mutation while one is in flight returns
   `operation_in_progress` with safe correlation metadata;
 - read-only status may proceed concurrently; and
@@ -407,6 +436,18 @@ Within one worker epoch:
 
 The lock covers validation through terminal/result-unknown publication. It is
 bounded operational memory, not persistent desired state.
+
+Operation identifiers are canonical UUIDv7 values. Their embedded timestamp may
+be at most one minute ahead of server receive time and at most ten minutes old.
+The server publishes its current time in `ServerHello` so clients can detect
+local skew before mutation. Every accepted identifier retains its immutable request while in flight and its
+terminal result or a tombstone until both the operation is terminal and the
+complete ten-minute acceptance window has passed. A known identical in-flight
+request may still join after its timestamp ages out; an unknown expired ID
+cannot start work. Entries are never evicted early and reused as fresh. Retained
+results are capped at 32 KiB each and admission is bounded to
+256 records per principal and 1,024 per worker. Exhaustion rejects new mutations
+with `overloaded` rather than weakening duplicate protection.
 
 ## Deadlines, cancellation, and disconnects
 
@@ -434,8 +475,8 @@ an unknown result.
 A worker restart creates a new epoch and loses in-memory duplicate results. It
 does not stop workloads or manager jobs.
 
-A reconnect presenting an old operation epoch cannot submit lifecycle work. The
-operation-result query may return a retained terminal audit-derived reference
+A reconnect presenting an old operation epoch or expired UUIDv7 cannot submit
+lifecycle work. The operation-result query may return a retained terminal audit-derived reference
 only if an approved implementation can do so without treating audit as desired
 state; otherwise it returns `result_unknown`. The client then obtains a fresh
 status snapshot.
@@ -448,8 +489,8 @@ persistent operation database to manufacture that guarantee.
 
 ## CLI output and exit status
 
-Human output includes explicit host/scope identity, action, disposition, final
-state, and concise typed failure guidance. Machine output serializes the same
+Human output includes explicit host/scope identity, action, disposition,
+outcome, final state, and concise typed failure guidance. Machine output serializes the same
 bounded lifecycle result and keeps stdout free of logs. Progress and diagnostics
 use their documented client channels.
 

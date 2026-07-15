@@ -107,6 +107,9 @@ These are protocol maxima, not target values to allocate eagerly:
 | In-flight requests per principal / worker | 64 / 256 |
 | Active streams per principal / worker | 16 / 64 |
 | Buffered response bytes per principal / worker | 2 MiB / 16 MiB |
+| Retained mutation records per principal / worker | 256 / 1,024 |
+| Encoded retained lifecycle result | 32 KiB |
+| Mutation identifier acceptance window | 10 minutes |
 | Unacknowledged stream items per stream | 64 |
 | Workloads in one list page | 256 |
 | Historical log records requested per page | 1,000 |
@@ -156,7 +159,7 @@ operation is accepted before a successful handshake.
 - supported operation capabilities;
 - effective limits and deadline bounds;
 - current manifest generation and availability state;
-- current worker epoch; and
+- current worker epoch and server wall-clock time; and
 - one server-generated connection identifier for audit correlation.
 
 Major versions must match exactly. The selected minor version is the highest
@@ -430,10 +433,11 @@ opposite lifecycle action.
 
 ## Mutation identity, concurrency, and interruption
 
-Every lifecycle request carries a client-generated 128-bit operation identifier
-encoded in a fixed canonical textual form plus the worker epoch in which it
-originated. They provide correlation, duplicate control, and stale-epoch
-rejection, not authorization.
+Every lifecycle request carries a client-generated canonical UUIDv7 operation
+identifier plus the worker epoch in which it originated. The embedded timestamp
+must be no more than one minute ahead of server receive time and no more than ten
+minutes old. They provide correlation, duplicate control, expiry enforcement,
+and stale-epoch rejection, not authorization.
 
 Within one worker epoch:
 
@@ -441,11 +445,15 @@ Within one worker epoch:
 - reuse with the identical payload observes the same in-flight or completed
   result while retained;
 - reuse with a different payload fails as a conflict;
+- an expired identifier fails with `operation_id_expired` and never starts work;
 - at most one lifecycle mutation may be in flight per workload;
 - concurrent read operations remain permitted within connection and backend
   limits; and
-- completed operation results are retained only in bounded memory for a
-  documented short interval.
+- an accepted identifier's request remains while in flight, and its bounded
+  result or tombstone remains until both terminal completion and its complete
+  ten-minute acceptance window have passed; and
+- retained mutation records are capped at 256 per principal and 1,024 per
+  worker, with overload rejection instead of early eviction.
 
 A worker restart creates a new epoch and loses this operational cache. Exactly
 once mutation across restart is impossible without persistent hidden state and

@@ -379,10 +379,11 @@ The first local control plane does not provide:
 1. Approve this umbrella architecture in [#232].
 2. Specify the worker, local API, authorization, and manifest contract in
    [#240].
-3. Implement the approved [local lifecycle contract](lifecycle-operations.md)
-   after specifying observability in [#137].
+3. Specify observability semantics in [#137], composing with the approved
+   [local lifecycle contract](lifecycle-operations.md).
 4. Specify Nix installation, socket, service, and ownership policy in [#242].
-5. Implement the worker and CLI integration in [#241] and [#136].
+5. Implement the worker, lifecycle operations, and CLI integration in [#241]
+   and [#136].
 6. Design and implement the TUI in [#243] and [#244].
 7. Design the authenticated controller protocol in [#245].
 8. Design and implement multi-host deployment through [#161], [#246], and
