@@ -2,8 +2,9 @@
 
 > **Status:** approved design for future implementation. The current release
 > does not install a worker or expose runtime API commands. Lifecycle details
-> remain in [#135], observability details in [#137], and service/socket
-> installation details in [#242].
+> are fixed by [Local lifecycle operations](lifecycle-operations.md);
+> observability details remain in [#137], and service/socket installation
+> details remain in [#242].
 
 This document specifies the local worker boundary required by the
 [Control-plane architecture](control-plane.md). It defines process authority,
@@ -431,10 +432,12 @@ host policy requires to be audited follows the same rule.
 Client deadlines bound how long the worker waits and how long ordinary response
 state is retained. Mutation duplicate records and their bounded terminal results
 are the explicit exception: they follow the deadline-independent
-acceptance-window retention below. After submitted lifecycle work loses client
-interest, the worker observes it for at most the fixed 30-second completion
-grace, then retains `result_unknown` and releases its operation lock if no
-terminal result was proven. Deadlines do not rewrite systemd's workload timeout.
+acceptance-window retention below. Joined callers hold independent interest;
+a departing caller ends only its own delivery. After submitted lifecycle work
+loses its final interested caller, the worker observes it for at most the fixed
+30-second completion grace, then retains `result_unknown` and releases its
+operation lock if no terminal result was proven. Deadlines do not rewrite
+systemd's workload timeout.
 Once systemd accepts a job, client cancellation or disconnect does not imply
 rollback, stop, or an opposite lifecycle action.
 
@@ -549,7 +552,8 @@ backend response maps.
 
 - connects only to the worker context's manager;
 - maps manifest-issued service identity to typed unit state and jobs;
-- submits only approved start/stop/restart behavior from [#135];
+- submits only approved behavior from
+  [Local lifecycle operations](lifecycle-operations.md);
 - reports invocation, result, cgroup, and lifecycle changes; and
 - never exposes arbitrary D-Bus methods or unit names to clients.
 
@@ -686,7 +690,7 @@ Capability classification remains:
 
 | Capability | Class | Availability |
 | --- | --- | --- |
-| Own-user observation and lifecycle | First-class | Planned in #241 after this contract, #135, #137, and #242 are approved |
+| Own-user observation and lifecycle | First-class | Planned in #241 after this contract, the lifecycle contract, #137, and #242 are approved |
 | System observation | Dangerous | Planned with separate host-policy authorization |
 | System lifecycle mutation | Dangerous | Planned with per-operation authorization |
 | Remote controller request | Dangerous | Planned in #245/#246 |
@@ -710,7 +714,9 @@ Implementation should remain reviewable and testable in this order:
 3. Add a socket-activated read-only worker with manifest and mock systemd
    adapters.
 4. Add typed status/inspect and bounded logs/metrics after [#137] approval.
-5. Add user lifecycle operations after [#135] approval.
+5. Add user lifecycle operations after the approved
+   [local lifecycle contract](lifecycle-operations.md) and required
+   observability/Nix designs.
 6. Add system observation and per-operation lifecycle authorization after [#242]
    approval.
 7. Add restart, interruption, concurrency, audit, and failure-injection tests.
@@ -733,7 +739,6 @@ operation.
 - [#245]: enrollment, mutual authentication, remote replay protection, and
   controller authorization.
 
-[#135]: https://github.com/Patrick-Kappen/graft/issues/135
 [#137]: https://github.com/Patrick-Kappen/graft/issues/137
 [#171]: https://github.com/Patrick-Kappen/graft/issues/171
 [#241]: https://github.com/Patrick-Kappen/graft/issues/241

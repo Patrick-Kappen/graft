@@ -147,8 +147,10 @@ the materialised lifecycle.
 
 A clean exit after readiness is not `up` success if the unit is already inactive
 when completion is evaluated. A matching systemd restart policy may create
-further activations; `up` succeeds only when the operation-correlated service
-reaches `active-running` before the client deadline.
+further activations. A directly waiting caller receives success only when the
+operation-correlated service reaches `active-running` before that caller's
+deadline. Shared operation observation may still establish the retained result
+under the deadline and grace rules below.
 
 ### Setup workload
 
@@ -306,8 +308,9 @@ by the operation is terminal failure even if the unit is ultimately quiescent.
 
 A systemd restart policy may perform retries within one activation. Those are
 manager behavior from materialised intent, not worker retries. The worker
-observes the eventual correlated success or failure until its client deadline.
-It never adds a retry loop around the lifecycle action.
+observes the eventual correlated success or failure while any joined caller
+remains interested, then for the fixed completion grace below. It never adds a
+retry loop around the lifecycle action.
 
 ## Lifecycle result
 
@@ -500,20 +503,25 @@ with `overloaded` rather than weakening duplicate protection.
 
 ## Deadlines, cancellation, and disconnects
 
-The client deadline bounds how long the worker retains client interest and waits
-for a result. It does not replace `TimeoutStartSec`, `TimeoutStopSec`, or manager
-job timeouts from materialised intent.
+A client deadline bounds only that caller's interest and synchronous delivery;
+it does not fix the shared operation outcome. It also does not replace
+`TimeoutStartSec`, `TimeoutStopSec`, or manager job timeouts from materialised
+intent.
 
 Before backend submission, cancellation returns `cancelled` and performs no
-mutation. After submission, client deadline, cancellation, or disconnect starts
-a fixed 30-second server completion grace:
+mutation. After submission, each duplicate/joined caller has independent
+interest. A deadline, cancellation, or disconnect removes only that caller and
+releases its delivery state. Normal shared observation continues while at least
+one caller remains interested. The fixed 30-second server completion grace
+starts only when the final joined caller loses interest:
 
-- client delivery state is released immediately;
 - the manager job is not cancelled, reversed, or rolled back;
 - the worker retains the per-workload lock and bounded attribution only through
   the grace period;
-- a terminal result proven during grace becomes the retained duplicate/audit
-  result;
+- a terminal result proven during grace becomes the retained operation result;
+- every caller that already timed out or cancelled keeps its own exit-8 client
+  result, while a later duplicate/result query receives the retained terminal
+  operation result;
 - when grace expires without proof, the worker stores `result_unknown`, releases
   the lock and backend observation, and never revises that retained result based
   on later manager state; and
