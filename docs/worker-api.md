@@ -118,6 +118,7 @@ These are protocol maxima, not target values to allocate eagerly:
 | Complete a partially received frame | 30 seconds |
 | Unary client deadline | 60 seconds |
 | Lifecycle client deadline | 5 minutes |
+| Post-client lifecycle completion grace | 30 seconds |
 
 For local Unix peers, the initial principal key is the accepted peer UID; future
 remote principals require their own authenticated key. Worker-wide accounting
@@ -429,9 +430,12 @@ host policy requires to be audited follows the same rule.
 Client deadlines bound how long the worker waits and how long ordinary response
 state is retained. Mutation duplicate records and their bounded terminal results
 are the explicit exception: they follow the deadline-independent
-acceptance-window retention below. Deadlines do not rewrite systemd's workload
-timeout. Once systemd accepts a job, client cancellation or disconnect does not
-imply rollback, stop, or an opposite lifecycle action.
+acceptance-window retention below. After submitted lifecycle work loses client
+interest, the worker observes it for at most the fixed 30-second completion
+grace, then retains `result_unknown` and releases its operation lock if no
+terminal result was proven. Deadlines do not rewrite systemd's workload timeout.
+Once systemd accepts a job, client cancellation or disconnect does not imply
+rollback, stop, or an opposite lifecycle action.
 
 ## Mutation identity, concurrency, and interruption
 
