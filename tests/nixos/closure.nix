@@ -104,7 +104,8 @@ in
         machine.succeed("grep '^Volume=/nix/store/' /etc/containers/systemd/closure-system.container | tail -n +2 | cut -d: -f1 | sed 's#^Volume=/nix/store/##' | LC_ALL=C sort > /tmp/expected-system")
         machine.succeed("podman exec closure-system find /nix/store -mindepth 1 -maxdepth 1 -printf '%f\\n' | LC_ALL=C sort > /tmp/actual-system")
         machine.succeed("cmp /tmp/expected-system /tmp/actual-system")
-        machine.succeed("podman exec closure-system grep ' /nix/store ' /proc/mounts | grep -Eq ' /nix/store [^ ]+ ro(,| )'")
+        machine.succeed("podman exec closure-system cat /proc/mounts > /tmp/mounts-system")
+        machine.succeed("awk -v expected=$(($(wc -l < /tmp/expected-system) + 1)) '$2 == \"/nix/store\" || index($2, \"/nix/store/\") == 1 { count++; if ((\",\" $4 \",\") !~ /,ro,/) exit 1 } END { if (count != expected) exit 1 }' /tmp/mounts-system")
 
     with subtest("rootless runtime sees exactly its declared closure"):
         machine.succeed(f"{user_systemctl} start closure-user.service")
@@ -115,7 +116,8 @@ in
         machine.succeed("grep '^Volume=/nix/store/' /etc/containers/systemd/users/1000/closure-user.container | tail -n +2 | cut -d: -f1 | sed 's#^Volume=/nix/store/##' | LC_ALL=C sort > /tmp/expected-user")
         machine.succeed(f"{user_podman} exec closure-user find /nix/store -mindepth 1 -maxdepth 1 -printf '%f\\n' | LC_ALL=C sort > /tmp/actual-user")
         machine.succeed("cmp /tmp/expected-user /tmp/actual-user")
-        machine.succeed(f"{user_podman} exec closure-user grep ' /nix/store ' /proc/mounts | grep -Eq ' /nix/store [^ ]+ ro(,| )'")
+        machine.succeed(f"{user_podman} exec closure-user cat /proc/mounts > /tmp/mounts-user")
+        machine.succeed("awk -v expected=$(($(wc -l < /tmp/expected-user) + 1)) '$2 == \"/nix/store\" || index($2, \"/nix/store/\") == 1 { count++; if ((\",\" $4 \",\") !~ /,ro,/) exit 1 } END { if (count != expected) exit 1 }' /tmp/mounts-user")
 
     with subtest("missing closure source fails without fallback"):
         machine.succeed("systemctl stop closure-system.service")

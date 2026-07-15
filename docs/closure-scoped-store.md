@@ -227,10 +227,12 @@ fails closed. Closure scoping is not silently disabled for compatibility.
 3. one shared NixOS/Home Manager derived Quadlet source contains a read-only
    scaffold followed by bytewise-sorted member mounts with fixed options;
 4. member and source-size limits fail with actionable diagnostics;
-5. deterministic checks cover parity, ordering, regular-file targets,
-   references, generator translation, and no complete-store fallback; and
+5. deterministic checks cover parity, ordering, regular-file and rejected
+   symlink targets, exact and exceeded limits, references, generator translation,
+   and the generated service and `ExecStart=` budgets; and
 6. an advisory NixOS VM covers writable-rootfs, missing-source, unrelated-path,
-   rootful, and non-root rootless behavior.
+   and read-only scaffold and member mounts for rootful and non-root rootless
+   behavior.
 
 Reporting closure member count and NAR size through a future unified inspection
 command belongs to [#137]. It does not block implementation because the build
