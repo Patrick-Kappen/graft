@@ -426,9 +426,11 @@ record has been accepted by the configured bounded audit sink. An unavailable
 or saturated sink therefore fails system mutation closed. Any observation that
 host policy requires to be audited follows the same rule.
 
-Client deadlines bound how long the worker waits and how long response state is
-retained. They do not rewrite systemd's workload timeout. Once systemd accepts a
-job, client cancellation or disconnect does not imply rollback, stop, or an
+Client deadlines bound how long the worker waits and how long ordinary response
+state is retained. Mutation duplicate records and tombstones are the explicit
+exception: they follow the deadline-independent acceptance-window retention
+below. Deadlines do not rewrite systemd's workload timeout. Once systemd accepts
+a job, client cancellation or disconnect does not imply rollback, stop, or an
 opposite lifecycle action.
 
 ## Mutation identity, concurrency, and interruption
@@ -445,7 +447,9 @@ Within one worker epoch:
 - reuse with the identical payload observes the same in-flight or completed
   result while retained;
 - reuse with a different payload fails as a conflict;
-- an expired identifier fails with `operation_id_expired` and never starts work;
+- an unknown expired identifier fails with `operation_id_expired` and never
+  starts work, while a known identical in-flight or retained request may still
+  join its record;
 - at most one lifecycle mutation may be in flight per workload;
 - concurrent read operations remain permitted within connection and backend
   limits; and

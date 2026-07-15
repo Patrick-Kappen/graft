@@ -80,29 +80,43 @@ replacement. `up` and `restart` never cancel independently submitted manager
 work. Any other incompatible transaction returns a conflict.
 
 `restart` is one manager restart operation. It is not implemented in the client
-as `down` followed by `up`; that would introduce an externally visible inactive
-window, lose one operation identity, and make interruption ambiguous.
+as `down` followed by `up`; two operations would permit unrelated work to
+interleave, lose one operation identity, and make interruption ambiguous.
+Systemd may still expose stop, inactive, and start states while executing its
+single restart transaction; Graft does not promise an unobservable transition.
 
 The worker does not call Podman directly as a fallback. Quadlet's generated
 service owns Podman creation, stop, and generator-defined cleanup.
 
 ## State vocabulary
 
-This contract uses these manager-level states:
+This contract normalizes authoritative systemd state exhaustively:
 
-- `inactive`;
-- `activating`;
-- `active-running`;
-- `active-exited`;
-- `deactivating`;
-- `failed`; and
-- `unknown` when authoritative state cannot be obtained.
+| systemd `ActiveState` and relevant substate | Lifecycle state |
+| --- | --- |
+| `inactive` | `inactive` |
+| `activating` with correlatable start/invocation/restart evidence | `activating` |
+| `active` with expected running substate | `active-running` |
+| `active` with expected exited substate | `active-exited` |
+| `deactivating` with correlatable stop/cleanup evidence | `deactivating` |
+| `failed` | `failed` |
+| `reloading`, `refreshing`, or `maintenance` | `manager-busy` |
+| `active`, `activating`, or `deactivating` with an incompatible or unrecognized substate | `unsupported-manager-state` |
+| Any future unrecognized authoritative value | `unsupported-manager-state` |
+| Authoritative state cannot be obtained | `unknown` |
 
 `active-running` is the expected successful active state for `long-running`.
 `active-exited` is the expected retained success state for `setup`. A successful
 `job` returns to `inactive`; success must therefore come from the
 operation-correlated manager job and invocation result rather than current
 active state alone.
+
+For every action, `manager-busy` returns conflict without submission because
+reload, refresh, and maintenance are outside this API. An
+`unsupported-manager-state` returns `unexpected_state` without submission.
+`unknown` remains reserved for unavailable authoritative observation and returns
+backend unavailable. These global rules apply before the action matrices, so no
+raw manager state is silently coerced.
 
 Detailed state fields and cross-layer status remain owned by the observability
 design in [#137]. This vocabulary fixes only what lifecycle completion needs.
@@ -263,14 +277,16 @@ condition:
 | `up` / `restart`, `long-running` | Correlated service is `active-running`. |
 | `up` / `restart`, `setup` | Correlated invocation completed successfully and unit is `active-exited`. |
 | `up` / `restart`, `job` | Correlated finite invocation completed successfully and unit is `inactive`. |
-| `down`, every lifecycle | Correlated stop completed in `inactive`, or the unit is quiescent `failed` with no submission needed. |
+| `down`, every lifecycle | Unit is `inactive`, or is quiescent `failed` and any submitted stop itself completed successfully. |
 | Any valid `no_change` | Initial state already satisfies the action without submission. |
 
 The worker must not infer successful job completion from `inactive` alone. It
 uses manager job completion, invocation identity, and typed service result. A
 non-zero exit, signal, timeout, protocol failure such as `Result=protocol`,
 dependency failure, condition failure, or start-limit rejection remains a typed
-failure.
+failure. For `down`, a sticky failure that predates the operation may remain as
+diagnostic state after a successful stop. A new stop or cleanup failure caused
+by the operation is terminal failure even if the unit is ultimately quiescent.
 
 A systemd restart policy may perform retries within one activation. Those are
 manager behavior from materialised intent, not worker retries. The worker
@@ -426,8 +442,8 @@ Within one worker epoch:
 - a duplicate operation identifier with the identical immutable request joins
   its retained in-flight or terminal result;
 - the same identifier with a different request is a conflict;
-- an identifier outside its acceptance window returns `operation_id_expired`
-  and can never become a fresh mutation;
+- an unknown identifier outside its acceptance window returns
+  `operation_id_expired` and can never become a fresh mutation;
 - a different lifecycle mutation while one is in flight returns
   `operation_in_progress` with safe correlation metadata;
 - read-only status may proceed concurrently; and
