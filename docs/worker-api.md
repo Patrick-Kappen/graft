@@ -315,9 +315,11 @@ caller authorization. It never scans or adopts foreign units or containers.
 - `down`; and
 - `restart`.
 
-Each lifecycle request contains only workload identity, an operation identifier,
-the operation's origin worker epoch, and a client deadline within negotiated
-limits. A fresh operation must use the epoch returned by the current
+Each lifecycle mutation payload contains only action, workload identity,
+operation identifier, and origin worker epoch. Each caller attachment separately
+contains its client deadline within negotiated limits, progress preference,
+connection/request correlation, and response-format state. A fresh operation
+must use the epoch returned by the current
 `ServerHello`. Re-presenting an operation after reconnect preserves its original
 epoch so a restarted worker rejects it before backend submission. A separate
 typed operation-result query may inspect that identifier and old epoch, but can
@@ -462,6 +464,12 @@ context and accepted peer UID; a future remote transport supplies its own stable
 authenticated principal ID. UUID reuse by another principal neither joins nor
 conflicts with the first record. Every duplicate request is reauthorized before
 any retained or in-flight result is disclosed.
+
+Immutable payload equality covers action, structured workload selector,
+manifest generation, and origin worker epoch. Per-caller connection/request
+IDs, deadlines, progress preferences, and response formatting are excluded. A
+caller may join with a new delivery deadline; changing an immutable mutation
+field conflicts.
 
 Within one worker epoch and principal key:
 
