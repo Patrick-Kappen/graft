@@ -85,8 +85,9 @@ NixOS and Home Manager consume resolved JSON through Import From Derivation
 1. selects resolved workloads for its `system` or `user` target;
 2. maps `graft-pause` to the configured Graft package and other package names
    through the target's pinned `pkgs`;
-3. builds the Nix-store rootfs;
-4. creates required runtime directories and mount targets;
+3. builds the Nix-store rootfs, failing on package file collisions;
+4. creates required runtime directories and mount targets, then materialises
+   package `/etc` content without replacing Graft-owned runtime entries;
 5. renders deterministic Quadlet source units;
 6. places those units in the selected manager's search path.
 

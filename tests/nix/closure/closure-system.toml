@@ -5,4 +5,4 @@ name = "closure-system"
 target = "system"
 
 [config.runtime]
-packages = ["graftClosureFixture"]
+packages = ["graftClosureFixture", "graftRootfsEtcFixture"]

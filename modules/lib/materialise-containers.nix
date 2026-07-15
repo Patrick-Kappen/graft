@@ -86,7 +86,7 @@ let
     pkgs.buildEnv {
       name = "graft-${ctr.name}-inner";
       paths = map (packageFor ctr.name) ctr.runtime.packages;
-      ignoreCollisions = true;
+      ignoreCollisions = false;
     }
   ) containers;
 
@@ -118,10 +118,12 @@ let
         ln -s "$entry" "$out/$entry_name"
       done
 
-      # Copy /etc contents from packages (if any) into our real /etc.
-      if [ -e ${inner}/etc ]; then
-        cp -rL ${inner}/etc/. $out/etc/ 2>/dev/null || true
-      fi
+      # Materialise package /etc without replacing runtime-owned entries.
+      ${pkgs.bash}/bin/bash ${./materialise-rootfs-etc.sh} \
+        ${inner} \
+        "$out" \
+        ${lib.escapeShellArg optionName} \
+        ${lib.escapeShellArg ctr.name}
 
       # OCI runtimes require every nested bind target before applying ReadOnly=.
       ${pkgs.bash}/bin/bash ${./prepare-closure-targets.sh} \

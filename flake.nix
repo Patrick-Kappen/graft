@@ -87,6 +87,21 @@
             mkdir -p $out/share
             ln -s ${closureRegularFile} $out/share/regular-file
           '';
+          rootfsEtcFixturePackage = pkgs.runCommand "graft-rootfs-etc-fixture" { } ''
+            mkdir -p $out/etc/graft-test
+            echo materialised > $out/etc/graft-test/config
+          '';
+          collisionPackageA = pkgs.writeTextDir "bin/graft-collision" "first\n";
+          collisionPackageB = pkgs.writeTextDir "bin/graft-collision" "second\n";
+          collisionEnvironment = pkgs.buildEnv {
+            name = "graft-collision-test";
+            paths = [
+              collisionPackageA
+              collisionPackageB
+            ];
+            ignoreCollisions = false;
+          };
+          collisionFailure = pkgs.testers.testBuildFailure collisionEnvironment;
           largeClosureMembers = lib.genList (
             index: builtins.toFile "graft-closure-member-${lib.fixedWidthString 3 "0" (toString index)}" ""
           ) 511;
@@ -122,6 +137,7 @@
           closureTestPkgs = pkgs.extend (
             _: _: {
               graftClosureFixture = closureFixturePackage;
+              graftRootfsEtcFixture = rootfsEtcFixturePackage;
             }
           );
 
@@ -716,6 +732,69 @@
             assert !(lib.hasInfix "WorkingDir=" quickstartHomeManagerRendered);
             pkgs.writeText "graft-home-manager-module-eval" homeManagerRendered;
 
+          rootfs-materialisation = pkgs.runCommand "graft-rootfs-materialisation" { } ''
+            set -euo pipefail
+
+            prepare_rootfs() {
+              rootfs=$1
+              mkdir -p "$rootfs/etc" "$rootfs/run"
+              ln -s /proc/mounts "$rootfs/etc/mtab"
+              touch \
+                "$rootfs/etc/hostname" \
+                "$rootfs/etc/hosts" \
+                "$rootfs/etc/resolv.conf" \
+                "$rootfs/run/.containerenv"
+            }
+
+            mkdir inner-empty rootfs-empty
+            prepare_rootfs rootfs-empty
+            ${pkgs.bash}/bin/bash ${./modules/lib/materialise-rootfs-etc.sh} \
+              inner-empty rootfs-empty services.graft no-etc
+
+            mkdir -p inner-valid/etc/graft-test
+            echo materialised > inner-valid/etc/graft-test/config
+            mkdir rootfs-valid
+            prepare_rootfs rootfs-valid
+            ${pkgs.bash}/bin/bash ${./modules/lib/materialise-rootfs-etc.sh} \
+              inner-valid rootfs-valid services.graft valid-etc
+            grep -Fx materialised rootfs-valid/etc/graft-test/config
+
+            for reserved_name in mtab hostname hosts resolv.conf; do
+              mkdir -p "inner-reserved-$reserved_name/etc"
+              touch "inner-reserved-$reserved_name/etc/$reserved_name"
+              mkdir "rootfs-reserved-$reserved_name"
+              prepare_rootfs "rootfs-reserved-$reserved_name"
+              if ${pkgs.bash}/bin/bash ${./modules/lib/materialise-rootfs-etc.sh} \
+                "inner-reserved-$reserved_name" \
+                "rootfs-reserved-$reserved_name" \
+                services.graft \
+                reserved-etc \
+                2> "reserved-$reserved_name-error"; then
+                echo "reserved package '/etc/$reserved_name' entry was accepted" >&2
+                exit 1
+              fi
+              grep -Fq \
+                "package content conflicts with Graft-owned '/etc/$reserved_name'" \
+                "reserved-$reserved_name-error"
+            done
+
+            mkdir -p inner-dangling/etc/graft-test
+            ln -s missing inner-dangling/etc/graft-test/dangling
+            mkdir rootfs-dangling
+            prepare_rootfs rootfs-dangling
+            if ${pkgs.bash}/bin/bash ${./modules/lib/materialise-rootfs-etc.sh} \
+              inner-dangling rootfs-dangling services.graft dangling-etc \
+              2> dangling-error; then
+              echo "dangling package /etc entry was accepted" >&2
+              exit 1
+            fi
+            grep -F "failed to materialise package /etc" dangling-error
+
+            grep -F "two given paths contain a conflicting subpath" ${collisionFailure}/testBuildFailure.log
+
+            mkdir "$out"
+          '';
+
           closure-scoped-store =
             pkgs.runCommand "graft-closure-scoped-store"
               {
@@ -760,6 +839,13 @@
                   rootfs_path="''${scaffold_path%/nix/store}"
                   test -d "$scaffold_path/$(basename "$rootfs_path")"
                   test -f "$scaffold_path/$(basename ${lib.escapeShellArg "${closureRegularFile}"})"
+                  grep -Fx materialised "$rootfs_path/etc/graft-test/config"
+                  test -L "$rootfs_path/etc/mtab"
+                  test "$(readlink "$rootfs_path/etc/mtab")" = /proc/mounts
+                  test -f "$rootfs_path/etc/hostname"
+                  test -f "$rootfs_path/etc/hosts"
+                  test -f "$rootfs_path/etc/resolv.conf"
+                  test -f "$rootfs_path/run/.containerenv"
 
                   cp "$source_file" "$out/$expected_name.container"
                 }

@@ -206,13 +206,14 @@ jobs:
             git ls-files "*.nix" -z | xargs -0 nixfmt --check
             statix check .
             deadnix --fail .
-            shellcheck tests/runtime/network.sh
+            shellcheck modules/lib/materialise-rootfs-etc.sh tests/runtime/network.sh
           '
           nix build .#packages.x86_64-linux.default
           nix build \
             .#checks.x86_64-linux.nixos-module-eval \
             .#checks.x86_64-linux.home-manager-module-eval \
             .#checks.x86_64-linux.closure-scoped-store \
+            .#checks.x86_64-linux.rootfs-materialisation \
             .#checks.x86_64-linux.quadlet-activation \
             .#checks.x86_64-linux.quadlet-cdi \
             .#checks.x86_64-linux.quadlet-dependencies \
