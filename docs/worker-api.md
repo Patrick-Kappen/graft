@@ -341,11 +341,12 @@ complete structured selector. The worker authorizes supplied scope/action under
 current policy; a known record must exactly match action/selector before
 workload-sensitive disclosure, while recordless variants assert no workload
 existence. It returns exactly one of retained `Terminal`, current `InProgress`,
-current-epoch `NotFound`, or old-epoch
-`OperationResultUnavailable(cache_lost)`. Epoch classification takes precedence:
-every old epoch returns `cache_lost` regardless of UUID age. Only an unknown
-current-epoch UUID is split into `operation_id_expired` when expired or
-`NotFound` while valid. Querying never submits or joins lifecycle work. Backend
+current-epoch `NotFound`, current-epoch `Expired`, or old-epoch
+`OperationResultUnavailable`. Epoch classification takes precedence: every old
+epoch returns `OperationResultUnavailable(cache_lost)` regardless of UUID age.
+An unknown current-epoch UUID returns `Expired(operation_id_expired)` when
+expired or `NotFound(not_found)` while valid. Querying never submits or joins
+lifecycle work. Backend
 unit/action selection is worker-owned. There is no force, remove,
 delete-data, arbitrary signal, kill, raw job mode, unit property, or Podman
 option in the initial API.
