@@ -186,9 +186,10 @@ Neither worker accepts a client field that changes row.
 | Audit context | owning user journal |
 
 `$XDG_RUNTIME_DIR` and `$XDG_CONFIG_HOME` above describe the Nix-installed
-account paths. The worker does not trust client environment variables to resolve
-them. Its service receives fixed expanded paths from the owning manager/Nix
-generation. Empty, relative, non-normalized, wrong-owner, or scope-mismatched
+account paths. For this Linux/systemd integration, `%t` must resolve to canonical
+`/run/user/<effective-uid>`; the worker validates that equality at startup. The
+worker does not trust client environment variables to resolve paths. Its service
+receives fixed expanded paths from the owning manager/Nix generation. Empty, relative, non-normalized, wrong-owner, or scope-mismatched
 generation pointers fail closed. The fixed `current` pathname may be exactly one
 Nix-managed symlink to an immutable directory in the Nix store. That directory
 contains regular `manifest.json` and `endpoint.json` files; neither may be a
@@ -287,17 +288,27 @@ socket environment variable. A descriptor contains only:
 - descriptor schema version;
 - host identity issued by Nix policy;
 - context `system` or `user`;
-- fixed socket path;
+- typed socket address: absolute system path or fixed Linux user-runtime-relative
+  suffix;
 - expected worker/API compatibility range;
 - package producer identity; and
 - descriptor generation/digest.
 
 System and user descriptors are independently readable according to their
-context. A user descriptor deliberately omits effective UID because immutable
-Home Manager evaluation cannot reliably know runtime UID. The user worker binds
-its actual effective UID at startup, returns it through the authenticated
-handshake/observation envelope, and requires exact peer-UID equality. A client
-may aggregate both configured descriptors, but it preserves
+context. The system descriptor encodes
+`absolute("/run/graft/system/worker.sock")`. The user descriptor encodes
+`linux_user_runtime_relative("graft/user/worker.sock")`; it contains neither an
+expanded path nor effective UID. A Linux user client derives exactly
+`/run/user/<geteuid()>/graft/user/worker.sock` from its kernel effective UID,
+rejects overflow/non-canonical UID formatting and path components, and verifies
+the directory/socket ownership, mode, type, and authenticated worker handshake.
+It never reads `$XDG_RUNTIME_DIR` or another ambient variable for privileged
+endpoint selection.
+
+The user worker likewise binds its actual effective UID at startup, proves its
+manager `%t` equals canonical `/run/user/<effective-uid>`, returns the UID through
+the authenticated handshake/observation envelope, and requires exact peer-UID
+equality. A client may aggregate both configured descriptors, but it preserves
 scope and rejects duplicate/ambiguous workload names as specified by the API.
 The descriptor is discovery data, not proof that a socket peer is genuine:
 clients also verify socket type, ownership, mode, context, handshake, and
@@ -390,10 +401,18 @@ The manifest envelope contains:
 - deterministic workload count; and
 - sorted workload records.
 
-The generation ID is derived from canonical manifest content plus producer
-compatibility metadata, not wall-clock time or mutable host state. The digest
-algorithm and canonical JSON encoding are versioned. Build checks independently
-recompute both and reject mismatch.
+Version 1 uses canonical JSON bytes and SHA-256 with this non-circular rule:
+
+1. remove top-level `generationId` and `manifestDigest` from the manifest;
+2. canonicalize the remaining manifest, which already includes producer
+   compatibility metadata;
+3. set `manifestDigest` to lowercase hexadecimal SHA-256 of those bytes; and
+4. set `generationId` equal to that digest.
+
+Neither field is represented as null in the preimage; both keys are absent.
+Wall-clock time and mutable host state are excluded. A verifier removes exactly
+those two fields, recomputes the digest, checks both stored values, and rejects
+unknown digest algorithms or encodings.
 
 ### Workload record
 
@@ -447,9 +466,14 @@ Each context builds one immutable Nix store directory:
 <generation>/endpoint.json
 ```
 
-Both files carry the same host ID, context, generation ID, producer identity,
-and compatibility metadata. Their digests are covered by the generation ID.
-Build checks reject any mismatch. The fixed atomic pointer is:
+Both files carry the same host ID, context, manifest `generationId`, producer
+identity, and compatibility metadata. The endpoint also carries the exact
+`manifestDigest`. Its own `endpointDigest` is lowercase hexadecimal SHA-256 of
+canonical endpoint JSON with only `endpointDigest` omitted. Thus endpoint
+identity is non-circular and cryptographically binds the manifest generation it
+advertises; immutable same-directory publication binds the pair. Build checks
+independently recompute both preimages/digests and reject any mismatch. The fixed
+atomic pointer is:
 
 ```text
 /etc/graft/current
@@ -835,8 +859,9 @@ NixOS and Home Manager checks cover:
   modes, tmpfiles, hardening, and restart limits;
 - absence of network listeners, arbitrary path/argument options, controller
   enrollment, and store secrets;
-- canonical same-directory manifest/descriptor generation, shared generation
-  identity, digest/schema validation, and absence of build-time user UID;
+- canonical same-directory manifest/descriptor generation, exact omitted-field
+  digest preimages, shared generation identity, schema validation, typed
+  user-runtime-relative endpoint resolution, and absence of build-time user UID;
 - system/non-root-user/UID-0-user context separation;
 - polkit action mapping and default policy relationships;
 - activation script lock ordering/effect; and

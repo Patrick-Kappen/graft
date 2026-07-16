@@ -271,8 +271,9 @@ The manifest contains:
 - manifest schema major and minor version;
 - producer Graft version;
 - target and manager kind;
-- generation identifier derived from the canonical manifest payload with the
-  generation field omitted;
+- manifest digest derived from canonical manifest bytes with the top-level
+  `generationId` and `manifestDigest` fields omitted, and a generation identifier
+  equal to that digest;
 - creation/build provenance suitable for diagnostics;
 - sorted workload records; and
 - no secret values.
