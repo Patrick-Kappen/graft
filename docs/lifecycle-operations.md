@@ -621,8 +621,10 @@ The lock covers validation through terminal/result-unknown publication. It is
 bounded operational memory, not persistent desired state.
 
 A manifest publication during an accepted operation never retargets that
-operation. Nix activation and worker submission share a host-policy lock whose
-concrete path and ownership belong to [#242]. Activation holds it exclusively
+operation. Nix activation and worker submission share a host-policy lock whose concrete
+path and ownership are fixed by
+[Nix worker integration](nix-worker-integration.md). Activation holds it
+exclusively
 across generated-artifact replacement, manager reload, provenance validation,
 and manifest publication. The worker holds it in submission mode from its final
 manifest and loaded-unit provenance recheck through manager acceptance or
@@ -733,7 +735,8 @@ interlock.
 
 Further lifecycle mutation for that workload is rejected while the record
 remains. The record is operational request safety state, not desired state;
-[#242] must define explicit administrator recovery that stops or proves terminal
+[Nix worker integration](nix-worker-integration.md) defines explicit
+administrator recovery that stops or proves terminal
 all correlated manager work before clearing it. It is never cleared merely by
 timeout, `result_unknown`, worker restart, or cache eviction.
 
@@ -871,7 +874,8 @@ wrong-owner/scope, duplicate, unavailable, or ambiguous records remain
 fail-closed and keep lifecycle mutation plus Nix activation blocked. Routine
 terminal completion while the worker was down can therefore unblock startup
 automatically, while uncertainty still requires backend recovery or the explicit
-proven administrator recovery from [#242].
+proven administrator recovery from
+[Nix worker integration](nix-worker-integration.md).
 
 A reconnect presenting an old operation epoch or expired UUIDv7 cannot submit
 lifecycle work. After worker restart has lost the operational cache, an
@@ -998,8 +1002,8 @@ None may be approximated through a generic escape hatch.
 
 ## Implementation slices
 
-After this design, [Runtime observability](observability.md), and [#242] are
-approved:
+After this design, [Runtime observability](observability.md), and
+[Nix worker integration](nix-worker-integration.md) are approved:
 
 1. Publish lifecycle action, progress, result, and error types with exhaustive
    serialization and unknown-field tests.
@@ -1030,15 +1034,15 @@ the required bounded `/run` activation-interlock phase records.
 - [#171] owns complete unit shadow/override detection;
 - [#241] implements the local worker and typed API, including worker-side
   `up`/`down`/`restart` and the remaining `restart` client integration;
-- [#242] exclusively defines concrete Nix services, runtime paths, file
-  ownership/modes, lock/interlock primitives, activation quiescence integration,
-  administrator recovery interface, and authorization while preserving the
-  semantic safety requirements here; and
+- [Nix worker integration](nix-worker-integration.md) exclusively defines
+  concrete Nix services, runtime paths, file ownership/modes, lock/interlock
+  primitives, activation quiescence integration, administrator recovery
+  interface, and authorization while preserving the semantic safety requirements
+  here; and
 - [#245] defines remote controller authentication and replay protection.
 
 [#136]: https://github.com/Patrick-Kappen/graft/issues/136
 [#146]: https://github.com/Patrick-Kappen/graft/issues/146
 [#171]: https://github.com/Patrick-Kappen/graft/issues/171
 [#241]: https://github.com/Patrick-Kappen/graft/issues/241
-[#242]: https://github.com/Patrick-Kappen/graft/issues/242
 [#245]: https://github.com/Patrick-Kappen/graft/issues/245
