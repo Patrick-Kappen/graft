@@ -56,13 +56,14 @@ additional raw backend fields.
 Every snapshot, page, event, metric sample, log record, and diagnostic carries or
 inherits one bounded typed observation envelope:
 
-- Nix-configured non-secret host identity;
+- Nix-configured non-secret host identity when authorized;
 - target `system` or `user`;
 - effective UID for user scope;
-- complete structured workload selector, including manifest generation;
-- host boot ID;
+- complete structured workload selector, including manifest generation, when the
+  observation is workload-specific;
+- host boot ID when applicable and authorized;
 - worker epoch;
-- manager epoch from the worker contract;
+- manager epoch from the worker contract when applicable and correlatable;
 - server observation time as UTC Unix epoch milliseconds;
 - source monotonic time where the source provides it;
 - snapshot revision or stream sequence where applicable;
@@ -445,7 +446,8 @@ Each record contains:
 
 - observation envelope identity;
 - journal boot ID;
-- manager epoch observed for the unit binding;
+- manager epoch observed for the unit binding when correlatable, otherwise
+  explicit `unavailable`;
 - journal realtime timestamp;
 - journal monotonic timestamp when available;
 - typed priority;
@@ -455,6 +457,12 @@ Each record contains:
 - original byte count;
 - truncation flag; and
 - redaction flag/classification.
+
+For a historical boot, the worker normally cannot reconstruct the complete
+manager epoch because journald does not retain its D-Bus bus UUID and unique
+systemd owner. Such records expose manager epoch as `unavailable` unless another
+approved authoritative source proves every component; the worker never combines
+current-manager components with a historical boot.
 
 Message content is untrusted display data. The worker preserves record
 boundaries, truncates at a valid UTF-8 boundary to the protocol limit, and never
@@ -555,7 +563,7 @@ worker reports categories independently:
 - writable container layer bytes;
 - named managed-volume bytes;
 - anonymous ephemeral-volume bytes when attributable;
-- approved bind-source bytes only when host policy explicitly enables it;
+- bind-source bytes as `unsupported` in version 1;
 - shared/deduplicated bytes when a backend can prove them; and
 - aggregate logical bytes with explicit double-counting semantics.
 
@@ -572,8 +580,13 @@ misattribution.
 The worker selects writable layer and volume identities from manifest/runtime
 attribution. Clients never provide paths. Named/external volumes preserve their
 ownership classification; anonymous volumes remain ephemeral and may disappear
-with generated cleanup. Bind-source traversal is dangerous, host-policy gated,
-and disabled by default.
+with generated cleanup.
+
+Bind-source accounting is `unsupported` in version 1. Lexically validated bind
+sources may contain symlinks and nested mount points, so safe size accounting
+requires a separately reviewed host-aware root-resolution, symlink, mount,
+filesystem-boundary, and race contract. Policy cannot enable traversal until
+that contract exists.
 
 ### Budgets and caching
 
@@ -622,7 +635,6 @@ The worker emits only fixed event variants:
 - `manager_job_changed`;
 - `invocation_changed`;
 - `runtime_state_changed`;
-- `metric_sample`;
 - `backend_availability_changed`;
 - `interlock_changed`;
 - `authorization_changed`; and
@@ -656,7 +668,9 @@ complete. Worker restart creates a new epoch; reconnect cannot resume from the
 old request-local sequence. Journal follow may separately resume by journal
 cursor.
 
-Events and revisions are not persisted as history.
+Events and revisions are not persisted as history. Fast metric samples use the
+separately authorized metric-follow operation and are never delivered through a
+generic event/status stream.
 
 ## Diagnostics
 
@@ -796,22 +810,22 @@ reconstructed from manifest and authoritative backends.
 
 ## Security impact
 
-This contract preserves and extends the existing threat-model boundaries:
+This contract applies analogous controls without extending the scope of the
+stable `GRAFT-TM-*` invariants:
 
-- **GRAFT-TM-01:** unknown snapshot, filter, metric, event, and diagnostic intent
-  fails closed;
-- **GRAFT-TM-02:** read APIs expose no raw backend passthrough;
-- **GRAFT-TM-03:** backend strings remain bounded untrusted data and terminal
-  clients visibly encode control characters;
-- **GRAFT-TM-04:** explicit source/target/identity constraints remain, with
-  observations additionally bound to manifest, worker, manager, and boot epochs;
-- **GRAFT-TM-05:** system/rootful, non-root user/rootless, and UID-0 user/rootful
-  observation remain separate;
-- **GRAFT-TM-06:** observation cannot alter startup activation or lifecycle;
-- **GRAFT-TM-07:** clients cannot select store, rootfs, cgroup, overlay, volume,
-  or host paths; and
-- **GRAFT-TM-13:** inspection exposes no hardening-relaxation operation or secret
-  backend configuration.
+- unknown snapshot, filter, metric, event, and diagnostic intent fails closed;
+- read APIs expose no raw backend passthrough;
+- backend strings remain bounded untrusted data and terminal clients visibly
+  encode control characters;
+- observations are bound to manifest, worker, manager, boot, target, and
+  workload identity where applicable;
+- system/rootful, non-root user/rootless, and UID-0 user/rootful observation
+  remain separate;
+- observation cannot alter startup activation or lifecycle;
+- clients cannot select store, rootfs, cgroup, overlay, volume, or host paths;
+  and
+- inspection exposes no hardening-relaxation operation or secret backend
+  configuration.
 
 Capability classification remains:
 
