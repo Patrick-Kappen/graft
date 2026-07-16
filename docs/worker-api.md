@@ -326,7 +326,11 @@ state, metric, log, and event fields are owned by [#137].
 - inspect non-secret workload provenance.
 
 Discovery returns only records visible under the connected worker context and
-caller authorization. It never scans or adopts foreign units or containers.
+caller authorization. Disabled manifest records remain visible with
+`deploy.enable = false`, no lifecycle capability, and no claim that a generated
+unit exists. Lifecycle mutation against one returns pre-acceptance
+`workload_disabled`, not unknown/missing/stale, and performs no unit lookup or
+backend action. Discovery never scans or adopts foreign units or containers.
 
 ### Lifecycle
 

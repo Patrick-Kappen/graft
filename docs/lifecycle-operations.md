@@ -521,8 +521,14 @@ activation may still be started manually when it is validly materialised.
 Systemd unit-file enablement is not workload availability and is not changed by
 `up` or `down`.
 
+A manifest record with `deploy.enable = false` remains discoverable as disabled
+but has no lifecycle capability. Any `up`, `down`, or `restart` request returns
+typed pre-acceptance `workload_disabled` before unit lookup or manager mutation;
+it is not reclassified as unknown, missing, or stale. Enabling it requires TOML
+plus approved Nix/Home Manager activation, never a lifecycle action.
+
 A missing, masked, not-found, shadowed, stale, generator-failed, or provenance-
-mismatched service returns its typed materialisation failure. The worker does
+mismatched enabled service returns its typed materialisation failure. The worker does
 not attempt reload as repair because doing so could activate unreviewed ambient
 source changes and would hide a broken Nix activation.
 
@@ -873,6 +879,7 @@ Lifecycle-specific failures include:
 | --- | --- |
 | Ambiguous scope/name | Fail before mutation and identify required qualification. |
 | Stale generation | Fail before mutation; client refreshes discovery. |
+| `deploy.enable = false` | Return pre-acceptance `workload_disabled`; no unit lookup, reload, or mutation. |
 | Missing/shadowed/foreign service | Fail before mutation; no daemon reload or Podman fallback. |
 | Masked or invalid unit | Fail before mutation with materialisation/manager evidence. |
 | Unexpected lifecycle state | Fail closed; do not reinterpret unit shape. |
