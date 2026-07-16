@@ -915,9 +915,14 @@ This contract preserves and strengthens:
   contexts remain distinct;
 - **GRAFT-TM-06:** runtime commands do not change declarative startup intent,
   enablement, or activation policy;
-- **GRAFT-TM-09:** `down` and `restart` never imply persistent-data deletion;
-  and
-- **GRAFT-TM-13:** no lifecycle request can weaken materialised hardening.
+- **GRAFT-TM-09:** lifecycle operations add no cleanup control plane beyond the
+  already materialised Quadlet stop/cleanup behavior, so declarative startup
+  changes still do not implicitly remove mounted durable state, workspace
+  markers, or foreign units; and
+- **GRAFT-TM-13:** lifecycle requests act only on the fixed manifest-bound unit
+  and expose no field that can weaken its resolved read-only rootfs,
+  drop-capabilities, no-new-privileges, explicit-target, or visible typed opt-out
+  hardening contract.
 
 Restart replay, finite-job replay, manager-job replacement, automatic reload,
 and fallback to direct runtime mutation are fail-closed boundaries rather than
