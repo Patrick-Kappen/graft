@@ -559,7 +559,14 @@ Within one worker epoch and principal key:
   submission holds the corresponding lock while re-reading state/job evidence,
   validating generation/provenance, and obtaining manager acceptance/rejection;
 - before manager-work commitment, the worker writes a bounded `/run` in-flight
-  activation interlock record; correlated job identity is optional for
+  activation interlock with durable phase `prepared`; it atomically advances to
+  `committing_submission` before a backend call, `observing_existing` before
+  attachment, or `committed_submission` after manager acceptance, so
+  `prepared` proves no Graft call/attachment began;
+- final departure before commitment clears `prepared` under the same locks, and
+  confirmed synchronous rejection clears `committing_submission` only after
+  proving no manager work;
+- correlated job identity is optional for
   recognized jobless automatic-restart/cleanup work, and the record remains
   until either the job is terminal or lifecycle-specific jobless transition
   evidence is terminal, with no scheduled retry or queued/late action able to
@@ -747,9 +754,11 @@ On restart the worker:
    duplicate, or unverifiable record as fail-closed startup degradation without
    deleting it or reading further unbounded content;
 5. reconnects only its fixed-context backends and reconciles each valid record
-   against exact unit, optional job, invocation, transition, and provenance
-   evidence;
-6. clears a record only when its correlated job is terminal or recognized
+   against durable phase plus exact unit, optional job, invocation, transition,
+   and provenance evidence;
+6. clears valid `prepared` after proving no call/attachment began, clears
+   `committing_submission` only after proving rejection/no manager work, or
+   clears other phases only when their correlated job is terminal or recognized
    jobless automatic-restart/cleanup evidence is terminal, no scheduled retry or
    queued/late action
    can target a replacement, and lifecycle-specific proof succeeds; a stable

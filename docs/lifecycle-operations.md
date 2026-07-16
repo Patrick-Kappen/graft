@@ -613,8 +613,16 @@ follows this rule rather than ending merely because the manifest changed.
 
 Manager submission has a five-second response deadline. Before manager-work
 commitment, the worker writes one bounded non-secret in-flight activation
-interlock record under `/run` while holding the activation lock. Job identity in
-the record is optional because recognized automatic-restart delays and cleanup
+interlock record under `/run` while holding the activation lock. Its atomically
+persisted phase is one of `prepared`, `committing_submission`,
+`observing_existing`, or `committed_submission`. Before any backend call it
+persists `committing_submission`; before attaching to existing work it persists
+`observing_existing` with exact evidence; confirmed manager acceptance advances
+to `committed_submission`. Therefore `prepared` proves that no Graft backend
+call or attachment began.
+
+Job identity in the record is optional because recognized automatic-restart
+delays and cleanup
 may have no queued job. For work with a correlated job, that job must be
 terminal. For jobless work, lifecycle-specific transition evidence must be
 terminal: an automatic-restart sequence has left its retry substate and reached
@@ -632,10 +640,14 @@ activation checks all such records under its exclusive lock and fails closed
 without artifact replacement, manager reload, or manifest publication while any
 record remains.
 
-A submission timeout triggers a further five-second manager reconciliation for
-the exact job, unit, invocation, and operation evidence. Proven rejection before
-manager work exists clears the record and returns submission failure. Proven
-acceptance keeps the record through terminal manager completion. If
+Final-caller departure before commitment clears a still-`prepared` record under
+the same operation/activation locks before returning its terminal error.
+Confirmed synchronous rejection likewise clears the `committing_submission`
+record after proving no manager work exists. A submission timeout or crash in a
+committing/committed phase triggers a further five-second manager reconciliation
+for the exact job, unit, invocation, and operation evidence. Proven rejection
+before manager work exists clears the record and returns submission failure.
+Proven acceptance keeps the record through terminal manager completion. If
 reconciliation remains ambiguous, the worker retains `result_unknown`, marks its
 lifecycle backend degraded, and leaves the record in place. The same applies
 when client/grace/absolute observation ends before the manager job itself is
@@ -766,9 +778,11 @@ A worker restart creates a new epoch and loses in-memory duplicate results. It
 does not stop workloads or manager jobs. Before accepting clients or allowing
 Nix activation, it loads every fixed-context `/run` activation interlock and
 reconciles exact unit, optional job, invocation, transition, and provenance
-evidence. A record is cleared only when its correlated job is terminal or its
-recognized jobless automatic-restart/cleanup transition has the terminal
-evidence defined above. Every case also requires no queued/late replacement
+evidence. A `prepared` record is cleared after phase validation proves no call/attachment
+began; a `committing_submission` record may clear only after reconciliation
+proves rejection and no manager work. Otherwise a record is cleared only when
+its correlated job is terminal or its recognized jobless
+automatic-restart/cleanup transition has the terminal evidence defined above. Every case also requires no queued/late replacement
 action and proven lifecycle-specific evidence. A stable attributed
 `active-running` invocation satisfies long-running success without requiring
 process termination; successful reconciliation is audited. Malformed,
