@@ -398,8 +398,14 @@ Observability clients may follow separately authorized details through [#137].
 
 ### Operation-result query
 
-After current authorization, an operation-result query returns exactly one
-tagged variant:
+An operation-result query carries origin epoch, UUIDv7, immutable action, and the
+complete structured workload selector. The current principal is authenticated
+from transport. Before lookup, the worker authorizes the supplied scope/action
+under current policy. A known record must exactly match supplied action and
+selector or returns `query_identity_mismatch` without disclosure. Recordless
+`NotFound` and `OperationResultUnavailable` assert no workload existence and use
+only that current scope/action authorization because no cached payload exists.
+After these checks, the query returns exactly one tagged variant:
 
 | Variant | Meaning |
 | --- | --- |
@@ -540,8 +546,9 @@ UUIDv7. For local workers, the principal key contains the fixed worker context
 and accepted peer UID. Future remote callers use a separate stable authenticated
 principal identifier. The UUID is explicitly not authorization and cannot join
 or conflict with another principal's record. Every duplicate and every separate
-operation-result query is reauthorized against the current principal, workload,
-and action before returning any in-flight or retained result.
+operation-result query is reauthorized against its supplied scope/action and,
+for a known exact-match record, workload identity before returning any in-flight
+or retained result.
 
 Immutable mutation equality covers only action, the complete structured workload
 selector (including generation), and origin worker epoch under the

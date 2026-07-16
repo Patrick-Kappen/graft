@@ -331,9 +331,12 @@ connection/request correlation, and response-format state. A fresh operation
 must use the epoch returned by the current
 `ServerHello`. Re-presenting an operation after reconnect preserves its original
 epoch so a restarted worker rejects it before backend submission. A separate
-typed operation-result query may inspect that identifier and epoch. After
-current authorization it returns exactly one of retained `Terminal`, current
-`InProgress`, current-epoch `NotFound`, or old-epoch
+typed operation-result query carries origin epoch, UUIDv7, immutable action, and
+complete structured selector. The worker authorizes supplied scope/action under
+current policy; a known record must exactly match action/selector before
+workload-sensitive disclosure, while recordless variants assert no workload
+existence. It returns exactly one of retained `Terminal`, current `InProgress`,
+current-epoch `NotFound`, or old-epoch
 `OperationResultUnavailable(cache_lost)`; an expired unknown UUID remains
 `operation_id_expired`. Querying never submits or joins lifecycle work. Backend
 unit/action selection is worker-owned. There is no force, remove,
@@ -490,9 +493,11 @@ Mutation records are keyed by worker epoch, authenticated principal key, and
 validated UUID. For local workers, that principal key contains the fixed worker
 context and accepted peer UID; a future remote transport supplies its own stable
 authenticated principal ID. UUID reuse by another principal neither joins nor
-conflicts with the first record. Every duplicate request and separate
-operation-result query is reauthorized against the current principal, workload,
-and action before any retained or in-flight result is disclosed.
+conflicts with the first record. Every duplicate request is reauthorized against
+the current principal, workload, and action. A result query authorizes its
+supplied scope/action first; known records additionally require exact immutable
+payload match and workload authorization before disclosure. Recordless
+`NotFound`/`cache_lost` responses disclose no workload existence.
 
 Immutable payload equality covers action, the complete structured workload
 selector (including generation), and origin worker epoch. Per-caller connection/request
