@@ -364,7 +364,11 @@ retry loop around the lifecycle action.
 
 ## Terminal response model
 
-An accepted operation terminates as exactly one tagged response variant:
+When its originating worker epoch survives through terminalization, an accepted
+operation terminates as exactly one tagged response variant. A worker crash may
+instead lose the cache and produce the separately defined
+`OperationResultUnavailable(cache_lost)` query response without fabricating a
+terminal operation response:
 
 - `LifecycleTerminalResult` for `no_change`, worker-submitted, or joined manager
   work; or
@@ -699,13 +703,14 @@ readings are ignored, so it advances without decreasing or stalling through wall
 jumps/corrections. Clients derive UUIDv7 timestamps from
 `ServerHello.server_time_ms` plus their own monotonic elapsed time rather than an
 independently adjustable wall clock. Timestamp validation and replay expiry use
-the same worker value. Every accepted identifier retains its immutable request while in
-flight and its complete bounded terminal result until the operation is terminal
-and both logical-time replay boundaries have closed: ten minutes since server
-acceptance and ten minutes since the UUIDv7 embedded timestamp. Retention therefore ends at the later
-boundary, preventing a future-skewed but still-valid UUID from becoming fresh
-after eviction. A resultless tombstone cannot replace that result. A known
-identical in-flight or terminal request may still
+the same worker value. Every accepted identifier retains its immutable request while
+in flight. When the originating epoch survives to terminalization, its complete
+bounded terminal result remains until all three logical-time boundaries close:
+ten minutes since server acceptance, ten minutes since the UUIDv7 embedded
+timestamp, and ten minutes since terminal completion. This guarantees a
+post-terminal query window and prevents a future-skewed but still-valid UUID from
+becoming fresh after eviction. A resultless tombstone cannot replace that result.
+A known identical in-flight or terminal request may still
 join after its timestamp ages out and receives the same result; an unknown
 expired ID cannot start work. Entries are never evicted early and reused as
 fresh. Retained results are capped at 32 KiB each and admission is bounded to

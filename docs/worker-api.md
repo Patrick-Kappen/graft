@@ -128,6 +128,7 @@ intervals identified below. Maxima are not target values to allocate eagerly:
 | Ambiguous-submission reconciliation | 5 seconds |
 | Post-client lifecycle completion grace | 30 seconds |
 | Absolute lifecycle observation after acceptance | 10 minutes |
+| Post-terminal mutation result retention | 10 minutes |
 
 For local Unix peers, the initial principal key is the accepted peer UID; future
 remote principals require their own authenticated key. Worker-wide accounting
@@ -135,7 +136,8 @@ is shared by the single `Accept=no` service across all connections.
 
 The mutation UUIDv7 timestamp window, manager-submission response,
 ambiguous-submission reconciliation, post-client completion grace, absolute
-lifecycle observation, persisted interlock count/byte limits, reconciliation
+lifecycle observation, post-terminal result retention, persisted interlock
+count/byte limits, reconciliation
 concurrency, and healthy complete-sweep rows form one exact version-1 safety and
 liveness tuple, not negotiable maxima; Nix policy cannot lower or raise them
 independently or together. The server advertises effective values no larger than the other
@@ -555,9 +557,8 @@ Within one worker epoch and principal key:
   independent interest; only final-caller deadline, cancellation, or disconnect
   suppresses both existing-work attachment and submission and retains
   `deadline_before_commitment`, `cancelled_before_commitment`, or
-  `disconnected_before_commitment` through the later of ten minutes after server
-  acceptance or ten minutes after the UUIDv7 timestamp, and that identifier
-  cannot later mutate;
+  `disconnected_before_commitment` through the general terminal-result retention
+  boundary below, and that identifier cannot later mutate;
 - a `MutationTerminalError` contains operation/epoch identity, action, workload
   selector, code, phase, timestamp, and retry guidance but no lifecycle
   disposition, outcome, manager job, invocation, or final workload state;
@@ -610,10 +611,12 @@ Within one worker epoch and principal key:
 - at most one lifecycle mutation may be in flight per workload;
 - concurrent read operations remain permitted within connection and backend
   limits; and
-- an accepted identifier's request remains while in flight, and its complete
-  bounded terminal result remains through terminal completion and the later of
-  ten minutes after server acceptance or ten minutes after the UUIDv7 embedded
-  timestamp, so a still-valid future-skewed ID cannot replay after eviction; and
+- when the originating epoch survives to terminalization, an accepted
+  identifier's complete bounded terminal result remains until all three logical
+  boundaries have closed: ten minutes after server acceptance, ten minutes
+  after the UUIDv7 embedded timestamp, and ten minutes after terminal completion;
+  thus reconnects have a post-terminal query window and a still-valid ID cannot
+  replay after eviction; and
 - retained mutation records are capped at 256 per principal and 1,024 per
   worker, with overload rejection instead of early eviction.
 
