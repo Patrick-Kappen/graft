@@ -194,7 +194,7 @@ After negotiation, every JSON payload is one tagged frame variant:
 | --- | --- | --- |
 | `ClientHello` | client to server | Negotiate protocol, capabilities, and limits. |
 | `ServerHello` | server to client | Fix worker context and negotiated contract. |
-| `Request` | client to server | Start one typed unary or streaming operation. |
+| `Request` | client to server | Start or join one typed unary or streaming operation. |
 | `Response` | server to client | Return one unary success or typed error. |
 | `StreamItem` | server to client | Return one sequenced bounded stream item. |
 | `StreamAck` | client to server | Advance per-stream backpressure window. |
@@ -209,6 +209,11 @@ integers encoded within JSON's interoperable integer range. Starting a new
 `Request` with an identifier that is already active is a conflict; `StreamAck`
 and `Cancel` reuse the active request identifier they target. Stream sequence
 numbers start at one and increase by one within a request.
+
+A lifecycle `Request` separates an immutable mutation payload from per-request
+delivery metadata. The payload is shared for duplicate identity; delivery
+metadata belongs only to that request/connection and includes deadline,
+progress preference, request correlation, and response formatting.
 
 The protocol is request/response and server-streaming only in its first
 version. Client-streaming and bidirectional arbitrary message exchange are not
@@ -325,8 +330,8 @@ caller authorization. It never scans or adopts foreign units or containers.
 
 Each lifecycle mutation payload contains only action, structured workload
 selector (including generation), operation identifier, and origin worker epoch.
-Each caller attachment separately contains its client deadline within negotiated
-limits, progress preference,
+Each lifecycle `Request` separately carries per-request delivery metadata:
+client deadline within negotiated limits, progress preference,
 connection/request correlation, and response-format state. A fresh operation
 must use the epoch returned by the current
 `ServerHello`. Re-presenting an operation after reconnect preserves its original
@@ -451,7 +456,8 @@ record has been accepted by the configured bounded audit sink. An unavailable
 or saturated sink therefore fails system mutation closed. Any observation that
 host policy requires to be audited follows the same rule.
 
-Each caller attachment encodes `deadline_ms` as an unsigned JSON integer duration
+Each `Request` encodes delivery metadata `deadline_ms` as an unsigned JSON
+integer duration
 in milliseconds. Its monotonic timer starts when the server receives the
 complete framed `Request`; processing and admission time count against it. Zero
 is invalid, omission uses the advertised effective maximum, and a value above
