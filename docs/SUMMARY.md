@@ -15,6 +15,7 @@
 - [Workload lifecycle](lifecycle.md)
 - [Local lifecycle operations](lifecycle-operations.md)
 - [Runtime observability](observability.md)
+- [Nix worker integration](nix-worker-integration.md)
 - [Startup activation](activation.md)
 - [Workload dependencies](dependencies.md)
 - [Container networking](networking.md)

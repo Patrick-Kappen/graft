@@ -175,8 +175,9 @@ accept raw shell, Nix, systemd, D-Bus, Podman, Quadlet, or host-path passthrough
 Controller loss cannot stop workloads
 or block local clients, and worker restart reconstructs observations from
 read-only manifests and authoritative backends rather than persisted intent.
-Detailed controls and evidence remain acceptance criteria of [#240], [#242],
-and [#245]; this section does not claim they are implemented today.
+Detailed controls and evidence remain acceptance criteria of [#240],
+[Nix worker integration](nix-worker-integration.md), and [#245]; this section
+does not claim they are implemented today.
 
 ### 1. Config selection and parsing
 
@@ -500,7 +501,6 @@ Suspected violations of these boundaries must follow the private
 [#193]: https://github.com/Patrick-Kappen/graft/issues/193
 [#203]: https://github.com/Patrick-Kappen/graft/issues/203
 [#240]: https://github.com/Patrick-Kappen/graft/issues/240
-[#242]: https://github.com/Patrick-Kappen/graft/issues/242
 [#245]: https://github.com/Patrick-Kappen/graft/issues/245
 [activation-test]: https://github.com/Patrick-Kappen/graft/blob/main/tests/nixos/activation.nix
 [ci-source]: https://github.com/Patrick-Kappen/graft/blob/main/.github/workflows/ci.yml

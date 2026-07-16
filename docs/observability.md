@@ -1041,7 +1041,8 @@ Capability classification remains:
 
 ## Implementation slices
 
-After this design and [#242] are approved:
+After this design and
+[Nix worker integration](nix-worker-integration.md) are approved:
 
 1. Publish snapshot, layer availability, diagnostic, log, metric, event, and
    cursor types with exhaustive schemas and unknown-field tests.
@@ -1068,8 +1069,8 @@ database, or mutation side effect.
 - [#146] owns typed health/readiness/reload/shutdown intent;
 - [#171] owns complete Quadlet search-path/drop-in drift detection;
 - [#241] implements the worker/API including this observability surface;
-- [#242] owns concrete Nix services, sockets, paths, authorization, and adapter
-  installation; and
+- [Nix worker integration](nix-worker-integration.md) owns concrete Nix
+  services, sockets, paths, authorization, and adapter installation; and
 - [#245] owns remote controller authentication and transport.
 
 [#101]: https://github.com/Patrick-Kappen/graft/issues/101
@@ -1077,5 +1078,4 @@ database, or mutation side effect.
 [#146]: https://github.com/Patrick-Kappen/graft/issues/146
 [#171]: https://github.com/Patrick-Kappen/graft/issues/171
 [#241]: https://github.com/Patrick-Kappen/graft/issues/241
-[#242]: https://github.com/Patrick-Kappen/graft/issues/242
 [#245]: https://github.com/Patrick-Kappen/graft/issues/245

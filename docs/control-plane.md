@@ -88,7 +88,8 @@ user/rootful contexts separate.
 The [Local worker and API contract](worker-api.md) fixes the process authority,
 manifest, transport, framing, authorization, limits, recovery, and adapter
 boundaries. Concrete socket paths, service identities, hardening, and any
-privileged cross-scope administrative operation remain in [#242].
+privileged cross-scope administrative operation is fixed by
+[Nix worker integration](nix-worker-integration.md).
 
 ## One local client experience
 
@@ -122,7 +123,8 @@ Authorization principles:
 Command names, explicit `--scope system|user` selection, and action semantics are
 fixed by [Local lifecycle operations](lifecycle-operations.md). Other rendering
 and presentation details belong to client implementation; authorization actions
-and host policy remain in [#242].
+and host policy are fixed by
+[Nix worker integration](nix-worker-integration.md).
 
 ## Declarative discovery manifest
 
@@ -132,7 +134,8 @@ instead publish a read-only, generation-specific manifest derived from resolved
 workloads.
 
 The detailed schema is fixed by the
-[Local worker and API contract](worker-api.md); [#242] supplies its concrete Nix
+[Local worker and API contract](worker-api.md);
+[Nix worker integration](nix-worker-integration.md) supplies its concrete Nix
 publication path and policy. It contains enough identity and provenance to bind
 an operation safely, including:
 
@@ -388,7 +391,8 @@ The first local control plane does not provide:
    authorization and manifest identity.
 3. Approve [Runtime observability](observability.md), composing with the
    [local lifecycle contract](lifecycle-operations.md).
-4. Specify Nix installation, socket, service, and ownership policy in [#242].
+4. Approve [Nix worker integration](nix-worker-integration.md), including
+   installation, socket, service, and ownership policy.
 5. Implement the worker-side lifecycle API and `restart` client integration in
    [#241], with the initial `up`/`down` client/runtime slice in [#136].
 6. Design and implement the TUI in [#243] and [#244].
@@ -402,7 +406,6 @@ The first local control plane does not provide:
 [#174]: https://github.com/Patrick-Kappen/graft/issues/174
 [#232]: https://github.com/Patrick-Kappen/graft/issues/232
 [#241]: https://github.com/Patrick-Kappen/graft/issues/241
-[#242]: https://github.com/Patrick-Kappen/graft/issues/242
 [#243]: https://github.com/Patrick-Kappen/graft/issues/243
 [#244]: https://github.com/Patrick-Kappen/graft/issues/244
 [#245]: https://github.com/Patrick-Kappen/graft/issues/245

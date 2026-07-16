@@ -5,7 +5,7 @@
 > are fixed by [Local lifecycle operations](lifecycle-operations.md);
 > status, logs, metrics, and events are fixed by
 > [Runtime observability](observability.md), and service/socket installation
-> details remain in [#242].
+> details are fixed by [Nix worker integration](nix-worker-integration.md).
 
 This document specifies the local worker boundary required by the
 [Control-plane architecture](control-plane.md). It defines process authority,
@@ -50,7 +50,8 @@ not access the system manager or another user's runtime.
 
 The same worker executable may support these deployment contexts, but the Nix
 service definition fixes the effective context before accepting clients. Final
-executable arguments and unit names belong to implementation and [#242].
+executable arguments and unit names are fixed by
+[Nix worker integration](nix-worker-integration.md).
 
 ### Socket activation and availability
 
@@ -68,7 +69,8 @@ Workers are designed for systemd socket activation:
 - controller loss has no effect on local socket activation.
 
 The exact socket paths, modes, groups, service hardening, startup ordering, and
-idle policy are decided in [#242]. Clients discover configured endpoints
+idle policy are fixed by [Nix worker integration](nix-worker-integration.md).
+Clients discover configured endpoints
 through installed Graft policy, not an environment-provided arbitrary path for
 privileged operations.
 
@@ -259,7 +261,8 @@ identity.
 
 Nix materialisation publishes one immutable manifest per worker context and an
 atomically replaced configured reference to the current manifest. Final paths
-and activation mechanics belong to [#242].
+and activation mechanics belong to
+[Nix worker integration](nix-worker-integration.md).
 
 ### Manifest envelope
 
@@ -268,8 +271,9 @@ The manifest contains:
 - manifest schema major and minor version;
 - producer Graft version;
 - target and manager kind;
-- generation identifier derived from the canonical manifest payload with the
-  generation field omitted;
+- `manifestDigest` as lowercase hexadecimal SHA-256 over canonical JSON bytes
+  with top-level `generationId` and `manifestDigest` keys absent, and
+  `generationId` exactly equal to `manifestDigest`;
 - creation/build provenance suitable for diagnostics;
 - sorted workload records; and
 - no secret values.
@@ -448,7 +452,8 @@ as polkit. A stale PID, changed credentials, vanished subject, denied prompt, or
 unavailable authorizer fails before backend mutation.
 
 The final action identifiers, group policy, non-interactive behavior, prompt
-agent behavior, and root bypass rules belong to [#242]. They must not be
+agent behavior, and root bypass rules are fixed by
+[Nix worker integration](nix-worker-integration.md). They must not be
 client-selected strings.
 
 ## Request execution and deadlines
@@ -617,7 +622,8 @@ Within one worker epoch and principal key:
 - manager response and exact reconciliation have separate five-second deadlines;
   unresolved delivery or non-terminal work after client observation ends keeps
   the record so Nix activation and further workload mutation fail closed until
-  terminal proof or explicit proven administrator recovery from [#242];
+  terminal proof or explicit proven administrator recovery from
+  [Nix worker integration](nix-worker-integration.md);
 - only pre-acceptance mismatches return `stale_manifest` or provenance failure,
   while post-submission publication is recorded as an in-operation change and
   cannot retarget;
@@ -891,7 +897,7 @@ Capability classification remains:
 
 | Capability | Class | Availability |
 | --- | --- | --- |
-| Own-user observation and lifecycle | First-class | Planned in #241 after this contract, lifecycle/observability contracts, and #242 are approved |
+| Own-user observation and lifecycle | First-class | Planned in #241 after the worker, lifecycle, observability, and Nix integration contracts are approved |
 | System observation | Dangerous | Planned with separate host-policy authorization |
 | System lifecycle mutation | Dangerous | Planned with per-operation authorization |
 | Remote controller request | Dangerous | Planned in #245/#246 |
@@ -919,8 +925,8 @@ Implementation should remain reviewable and testable in this order:
 5. Add user lifecycle operations after the approved
    [local lifecycle contract](lifecycle-operations.md) and required
    observability/Nix designs.
-6. Add system observation and per-operation lifecycle authorization after [#242]
-   approval.
+6. Add system observation and per-operation lifecycle authorization after
+   [Nix worker integration](nix-worker-integration.md) is implemented.
 7. Add restart, interruption, concurrency, audit, and failure-injection tests.
 8. Integrate CLI commands, then the TUI, against the same client library.
 9. Add the separate remote protocol only after [#245] approval.
@@ -936,14 +942,14 @@ operation.
   log filters, cursor recovery, and storage accounting semantics;
 - [#171]: complete search-path shadow and foreign-override detection;
 - [#241]: implementation crate boundaries and selected backend libraries;
-- [#242]: exclusive ownership of concrete paths, units, users/groups, socket
-  modes, lock/interlock primitives, activation quiescence wiring, recovery
-  interface, polkit actions, hardening, idle policy, and upgrade ordering while
-  preserving this document's semantic requirements;
+- [Nix worker integration](nix-worker-integration.md): exclusive ownership of
+  concrete paths, units, users/groups, socket modes, lock/interlock primitives,
+  activation quiescence wiring, recovery interface, polkit actions, hardening,
+  idle policy, and upgrade ordering while preserving this document's semantic
+  requirements;
 - [#245]: enrollment, mutual authentication, remote replay protection, and
   controller authorization.
 
 [#171]: https://github.com/Patrick-Kappen/graft/issues/171
 [#241]: https://github.com/Patrick-Kappen/graft/issues/241
-[#242]: https://github.com/Patrick-Kappen/graft/issues/242
 [#245]: https://github.com/Patrick-Kappen/graft/issues/245
