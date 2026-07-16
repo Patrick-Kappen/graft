@@ -183,8 +183,9 @@ successful terminal condition additionally require that no queued job can
 reverse the observed state. The worker never derives job absence from
 `ActiveState` alone.
 
-Detailed state fields and cross-layer status remain owned by the observability
-design in [#137]. This vocabulary fixes only what lifecycle completion needs.
+Detailed state fields and cross-layer status are owned by
+[Runtime observability](observability.md). This vocabulary fixes only what
+lifecycle completion needs.
 
 ## `up` contract
 
@@ -429,7 +430,8 @@ workload state, or submission timestamp. The initial codes are
 
 The response contains no raw D-Bus values, journal records, unit properties,
 Podman output, command lines, environment values, or arbitrary backend text.
-Observability clients may follow separately authorized details through [#137].
+Clients may follow separately authorized details through
+[Runtime observability](observability.md).
 
 ### Operation-result query
 
@@ -996,7 +998,8 @@ None may be approximated through a generic escape hatch.
 
 ## Implementation slices
 
-After this design, [#137], and [#242] are approved:
+After this design, [Runtime observability](observability.md), and [#242] are
+approved:
 
 1. Publish lifecycle action, progress, result, and error types with exhaustive
    serialization and unknown-field tests.
@@ -1021,7 +1024,8 @@ the required bounded `/run` activation-interlock phase records.
 
 - [#136] implements the initial `up` and `down` client/runtime slice after
   worker prerequisites;
-- [#137] defines detailed status, result evidence, logs, metrics, and events;
+- [Runtime observability](observability.md) defines detailed status, result
+  evidence, logs, metrics, storage, and events;
 - [#146] owns health, readiness, watchdog, and graceful behavior;
 - [#171] owns complete unit shadow/override detection;
 - [#241] implements the local worker and typed API, including worker-side
@@ -1033,7 +1037,6 @@ the required bounded `/run` activation-interlock phase records.
 - [#245] defines remote controller authentication and replay protection.
 
 [#136]: https://github.com/Patrick-Kappen/graft/issues/136
-[#137]: https://github.com/Patrick-Kappen/graft/issues/137
 [#146]: https://github.com/Patrick-Kappen/graft/issues/146
 [#171]: https://github.com/Patrick-Kappen/graft/issues/171
 [#241]: https://github.com/Patrick-Kappen/graft/issues/241
