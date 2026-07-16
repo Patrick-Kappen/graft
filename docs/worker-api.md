@@ -505,16 +505,20 @@ URN prefixes, non-version-7 values, non-RFC variants, and every other alternate
 UUID representation are rejected rather than normalized. Dedupe keys use the
 validated 128-bit UUID value.
 
-At epoch creation the worker records wall-clock Unix milliseconds and a
-monotonic-clock origin. Its logical receive time is the maximum of the prior
-logical value, current wall-clock value, and epoch-origin wall time plus elapsed
-monotonic time. It therefore never decreases or stalls within an epoch even if
-the wall clock moves backward or stops. `ServerHello.server_time_ms`, UUID
-validation, server-acceptance retention, and UUID replay expiry all use this one
-logical time; durations use the monotonic clock directly.
+At epoch creation the worker records one wall-clock Unix-millisecond anchor and
+one monotonic-clock origin. Logical receive time is exactly the wall anchor plus
+elapsed monotonic time; the worker does not fold later wall-clock readings into
+that epoch. It therefore advances continuously and never decreases or stalls
+when wall time jumps, stops, or is corrected. A worker restart creates a new
+epoch and anchor, so cross-anchor identifiers cannot submit as current-epoch
+work.
 
-The embedded UUIDv7 timestamp must be no more than one minute ahead of logical
-receive time and no more than ten minutes old. These fields provide correlation,
+`ServerHello.server_time_ms`, UUID validation, server-acceptance retention, and
+UUID replay expiry all use this one logical time; durations use the same
+monotonic source. Clients generate UUIDv7 timestamps from the advertised logical
+time plus their monotonic elapsed time, not from independently adjustable wall
+time. The embedded UUIDv7 timestamp must be no more than one minute ahead of
+logical receive time and no more than ten minutes old. These fields provide correlation,
 duplicate control, expiry enforcement, and stale-epoch rejection, not
 authorization.
 
