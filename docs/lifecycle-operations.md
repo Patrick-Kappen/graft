@@ -671,7 +671,8 @@ with `overloaded` rather than weakening duplicate protection.
 
 ## Deadlines, cancellation, and disconnects
 
-Each caller attachment encodes `deadline_ms` as an unsigned JSON integer duration
+Each lifecycle `Request` encodes per-request delivery metadata `deadline_ms` as
+an unsigned JSON integer duration
 in milliseconds. The server starts a monotonic timer when it has received the
 complete framed `Request`. Zero is invalid; omission selects the server's
 advertised effective lifecycle maximum; a value above that maximum is rejected.
