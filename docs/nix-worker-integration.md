@@ -159,8 +159,9 @@ Neither worker accepts a client field that changes row.
 | Socket unit | `graft-system-worker.socket` |
 | Socket | `/run/graft/system/worker.sock` |
 | Runtime directory | `/run/graft/system` |
-| Manifest current reference | `/etc/graft/manifests/system.json` |
-| Endpoint descriptor | `/etc/graft/endpoints/system.json` |
+| Generation pointer | `/etc/graft/current` |
+| Manifest | `/etc/graft/current/manifest.json` |
+| Endpoint descriptor | `/etc/graft/current/endpoint.json` |
 | Activation lock | `/run/graft/system/activation.lock` |
 | Interlock directory | `/run/graft/system/interlocks` |
 | Socket access group | `graft` |
@@ -175,8 +176,9 @@ Neither worker accepts a client field that changes row.
 | Socket unit | `graft-user-worker.socket` |
 | Socket | `$XDG_RUNTIME_DIR/graft/user/worker.sock` |
 | Runtime directory | `$XDG_RUNTIME_DIR/graft/user` |
-| Manifest current reference | `$XDG_CONFIG_HOME/graft/manifests/user.json` |
-| Endpoint descriptor | `$XDG_CONFIG_HOME/graft/endpoints/user.json` |
+| Generation pointer | `$XDG_CONFIG_HOME/graft/current` |
+| Manifest | `$XDG_CONFIG_HOME/graft/current/manifest.json` |
+| Endpoint descriptor | `$XDG_CONFIG_HOME/graft/current/endpoint.json` |
 | Activation lock | `$XDG_RUNTIME_DIR/graft/user/activation.lock` |
 | Interlock directory | `$XDG_RUNTIME_DIR/graft/user/interlocks` |
 | Socket owner | owning effective UID and primary GID |
@@ -187,10 +189,12 @@ Neither worker accepts a client field that changes row.
 account paths. The worker does not trust client environment variables to resolve
 them. Its service receives fixed expanded paths from the owning manager/Nix
 generation. Empty, relative, non-normalized, wrong-owner, or scope-mismatched
-current references fail closed. The configured current-reference pathname may
-be exactly one Nix-managed final symlink to an immutable regular file in the Nix
-store. Symlinked parent components, another symlink at the resolved target,
-additional chains, non-store targets, and wrong target type/owner fail closed.
+generation pointers fail closed. The fixed `current` pathname may be exactly one
+Nix-managed symlink to an immutable directory in the Nix store. That directory
+contains regular `manifest.json` and `endpoint.json` files; neither may be a
+symlink. Symlinked components before `current`, another symlink at the resolved
+store directory, additional chains, non-store targets, unexpected entries, and
+wrong target/file type or owner fail closed.
 
 No option permits overriding service names, socket paths, lock paths, interlock
 paths, manager address, Podman connection, or manifest target. Stable client
@@ -283,14 +287,17 @@ socket environment variable. A descriptor contains only:
 - descriptor schema version;
 - host identity issued by Nix policy;
 - context `system` or `user`;
-- effective UID for user context;
 - fixed socket path;
 - expected worker/API compatibility range;
 - package producer identity; and
 - descriptor generation/digest.
 
 System and user descriptors are independently readable according to their
-context. A client may aggregate both configured descriptors, but it preserves
+context. A user descriptor deliberately omits effective UID because immutable
+Home Manager evaluation cannot reliably know runtime UID. The user worker binds
+its actual effective UID at startup, returns it through the authenticated
+handshake/observation envelope, and requires exact peer-UID equality. A client
+may aggregate both configured descriptors, but it preserves
 scope and rejects duplicate/ambiguous workload names as specified by the API.
 The descriptor is discovery data, not proof that a socket peer is genuine:
 clients also verify socket type, ownership, mode, context, handshake, and
@@ -378,7 +385,7 @@ The manifest envelope contains:
 - minimum/maximum compatible worker API version;
 - package producer name/version/build identity;
 - non-secret Nix host identity;
-- exact context and effective UID where applicable;
+- exact target/manager context, without a build-time user UID;
 - generation ID and full manifest digest;
 - deterministic workload count; and
 - sorted workload records.
@@ -431,29 +438,40 @@ Build-time checks enforce:
 The real materialisation outputs feed these checks; tests do not duplicate a
 simplified manifest generator.
 
-## Current-reference publication
+## Current-generation publication
 
-Each generation-specific manifest is immutable in the Nix store. The fixed
-current reference is a Nix-managed symlink/file reference to that exact store
-artifact:
+Each context builds one immutable Nix store directory:
 
 ```text
-/etc/graft/manifests/system.json
-$XDG_CONFIG_HOME/graft/manifests/user.json
+<generation>/manifest.json
+<generation>/endpoint.json
 ```
 
-The worker opens only the configured reference without following an unexpected
-intermediate symlink chain, resolves the final expected store artifact, validates
-ownership/type/digest/schema/context, and retains an open descriptor/snapshot for
-one request generation. It never searches neighboring generations.
+Both files carry the same host ID, context, generation ID, producer identity,
+and compatibility metadata. Their digests are covered by the generation ID.
+Build checks reject any mismatch. The fixed atomic pointer is:
+
+```text
+/etc/graft/current
+$XDG_CONFIG_HOME/graft/current
+```
+
+The worker/client opens that one configured pointer, validates the resolved
+immutable store directory and both regular children, then retains descriptors
+and parsed snapshots from that same opened directory for an operation. It never
+resolves `current` independently for each file, follows another chain, or
+searches neighboring generations.
 
 Publication occurs only inside the activation critical section below. The
 implementation replaces generic `environment.etc`/`xdg.configFile` publication
-for Graft-owned Quadlet and current-manifest references with one lock-aware
-activation publisher; two independent activation mechanisms may not own the same
-paths. A failed activation keeps or restores the prior current reference and
-does not advertise the incoming generation. Merely building a Nix generation
-does not make it current.
+for Graft-owned Quadlet artifacts and this generation pointer with one
+lock-aware activation publisher; two independent activation mechanisms may not
+own the same paths. Activation atomically replaces only `current` after all
+incoming artifacts/provenance pass. A failed activation before replacement
+leaves the old pointer; a failure after replacement atomically restores the old
+pointer before releasing the lock and revalidates its pair. Thus endpoint and
+manifest cannot advertise different generations. Merely building a Nix
+generation does not make it current.
 
 ## Shared activation and submission lock
 
@@ -494,7 +512,7 @@ NixOS/Home Manager activation holds the exclusive lock across this exact order:
 6. replace context-owned Quadlet/artifact references;
 7. request the correct manager generator reload/`daemon-reload`;
 8. verify expected generated services and provenance with bounded deadlines;
-9. atomically publish the manifest current reference;
+9. atomically publish the one manifest/endpoint generation pointer;
 10. notify/restart the worker only after publication; and
 11. release the lock.
 
@@ -817,7 +835,8 @@ NixOS and Home Manager checks cover:
   modes, tmpfiles, hardening, and restart limits;
 - absence of network listeners, arbitrary path/argument options, controller
   enrollment, and store secrets;
-- canonical manifest/descriptor generation and digest/schema validation;
+- canonical same-directory manifest/descriptor generation, shared generation
+  identity, digest/schema validation, and absence of build-time user UID;
 - system/non-root-user/UID-0-user context separation;
 - polkit action mapping and default policy relationships;
 - activation script lock ordering/effect; and
