@@ -449,6 +449,7 @@ parse and bound
   → validate capability, preconditions, and concurrency
   → acquire activation/submission lock
   → re-read manager state/job and recheck generation/loaded-unit provenance
+  → durably write `prepared` interlock unless immediate `no_change`
   → accept and pin mutation identity (`no_change` may complete here)
   → serialize final-caller departure against manager-work commitment
   → attach to verified existing work or begin typed backend submission
@@ -562,8 +563,12 @@ Within one worker epoch and principal key:
   manager reload, provenance validation, and manifest publication; worker
   submission holds the corresponding lock while re-reading state/job evidence,
   validating generation/provenance, and obtaining manager acceptance/rejection;
-- before manager-work commitment, the worker writes a bounded `/run` in-flight
-  activation interlock with durable phase `prepared`; it atomically advances to
+- before accepting any non-`no_change` mutation, the worker atomically writes
+  and syncs a bounded `/run` activation interlock with durable phase `prepared`;
+  write/capacity failure is a generic pre-acceptance infrastructure error with no
+  reserved ID or manager work, while unexpected registry-admission failure
+  clears the still-`prepared` record under the same locks;
+- after acceptance it atomically advances the interlock to
   `committing_submission` before a backend call, `observing_existing` before
   attachment, or `committed_submission` after manager acceptance, so
   `prepared` proves no Graft call/attachment began;
@@ -574,8 +579,8 @@ Within one worker epoch and principal key:
   recognized jobless automatic-restart/cleanup work, and the record remains
   until either the job is terminal or lifecycle-specific jobless transition
   evidence is terminal, with no scheduled retry or queued/late action able to
-  retarget; an
-  attributed stable `active-running` invocation may satisfy long-running success
+  retarget; an attributed stable `active-running` invocation may satisfy
+  long-running success
   without process termination;
 - manager response and exact reconciliation have separate five-second deadlines;
   unresolved delivery or non-terminal work after client observation ends keeps
