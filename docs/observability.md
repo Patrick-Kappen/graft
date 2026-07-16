@@ -379,9 +379,24 @@ bound to:
 - start/completion timestamps; and
 - exit code, signal, or typed manager result.
 
-After evidence loss, manager restart, journal rotation, or ambiguous attribution,
-the last result becomes `stale` or `unavailable`; it is not reconstructed from
-inactive state. The worker has no historical job-result database.
+The manager layer's `last_execution_result` field has exactly one tagged value:
+
+- `available(evidence)`;
+- `stale(evidence, reason)` with reason `manager_epoch_changed`,
+  `manifest_generation_changed`, or `source_expired`;
+- `unavailable(reason)` with reason `never_observed`, `manager_restarted`,
+  `journal_rotated`, `attribution_ambiguous`, or `backend_unavailable`;
+- `unauthorized`;
+- `unsupported`; or
+- `not_applicable(workload_state)`.
+
+Evidence contains boot ID, manager epoch, generated unit identity, invocation ID,
+lifecycle kind, typed result, optional exit code/signal, start timestamp, and
+completion timestamp. Stale evidence retains that complete original identity and
+is never rebound to the current manager or generation. After evidence loss,
+manager restart, journal rotation, or ambiguous attribution, the field uses the
+corresponding tag/reason; it is not reconstructed from inactive state. The worker
+has no historical job-result database.
 
 `Result=protocol` is preserved as typed `result_protocol`. Other initial manager
 failure codes include start timeout, stop timeout, exit code, signal, core dump,
@@ -419,11 +434,15 @@ backend query. Initial ordering is workload name ascending within the fixed
 worker scope. A normal client aggregates separate authorized endpoints and sorts
 by scope then workload name.
 
-A page cursor is bound to worker epoch, principal, authorization class,
-authorization-policy revision, manifest generation, filter, and ordering. Any
-mismatch, policy revision change, or expiry returns `page_cursor_expired`; the
-client restarts listing against the new visible set. The cursor is not a
-filesystem/backend cursor and exposes no secret content.
+Each page returns an authorization-scoped list revision that starts at one per
+worker epoch and policy revision. A page cursor is bound to worker epoch,
+principal, authorization class, authorization-policy revision, manifest
+generation, filter, ordering, and that list revision. The revision increments whenever a visible
+workload is added/removed or changes any field used by the requested filter or
+ordering. Any mismatch, relevant state change, policy revision change, or expiry
+returns `page_cursor_expired`; the client restarts listing against the new
+visible set instead of applying an old position to changed membership. The
+cursor is not a filesystem/backend cursor and exposes no secret content.
 
 ### Get status
 
@@ -548,8 +567,11 @@ characters.
 
 A bounded page returns first/last cursor and whether more records were observed
 within query bounds. Empty result is successful. Record count 1,000 is only a
-request maximum. Original message content is limited to 64 KiB and one complete
-serialized record to 96 KiB. Before adding each record, the worker accounts for
+request maximum. The complete serialized tagged message is limited to 64 KiB
+and one complete serialized record to 96 KiB. Binary input is limited to at most
+48 KiB before base64 and reduced further when tag/encoding overhead requires it.
+UTF-8 input is likewise reduced below 64 KiB when JSON escaping or tag overhead
+would exceed the encoded-message limit. Before adding each record, the worker accounts for
 the complete encoded page envelope and stops while the response still fits the
 negotiated outbound-frame limit. It returns the records that fit, `more = true`,
 and the last delivered exclusive resume cursor. A conforming record always fits
@@ -586,8 +608,9 @@ The worker does not copy logs into its own persistence layer.
 Every metric sample contains metric name from a fixed enum and exactly one
 exhaustive tagged result:
 
-- `available`: numeric value, explicit unit, source enum, source and observation
-  timestamps, age/freshness, and monotonic sample interval for a rate;
+- `available`: value `finite(integer)` or `unbounded`, explicit unit, source
+  enum, optional source timestamp, mandatory observation timestamp,
+  age/freshness, and monotonic sample interval for a rate;
 - `stale`: last typed value and its original sample metadata, never refreshed or
   presented as current;
 - `unavailable`: reason `source_absent`, `backend_unavailable`, `deadline`,
@@ -668,9 +691,9 @@ as total physical or unique usage.
 
 Each category has exactly one exhaustive tagged result:
 
-- `available`: integer value, unit `bytes` or `count`, source enum, source and
-  observation timestamps, age/freshness, visited-entry count, and resource
-  count;
+- `available`: integer value, unit `bytes` or `count`, source enum, optional
+  source timestamp, mandatory observation timestamp, age/freshness,
+  visited-entry count, and resource count;
 - `partial`: the same typed fields for the measured subset plus reason
   `time_budget`, `entry_budget`, `depth_budget`, or `resource_budget`;
 - `stale`: one prior `available` or `partial` sample with its original metadata
@@ -817,9 +840,11 @@ A client acknowledges consumed sequences under the worker API. Buffer overflow,
 slow consumer, backend loss, manifest replacement, manager epoch change, worker
 shutdown, authorization change, or worker restart is explicit.
 
-A stream-local `gap` contains last contiguous sequence and bounded reason. After
-a gap the client fetches a fresh snapshot before treating later deltas as
-complete. Worker restart creates a new epoch; reconnect cannot resume from the
+A stream-local `gap` contains last contiguous sequence and bounded reason and is
+always the final event on that stream. The worker then closes the stream; no
+later delta on it is valid. The client fetches a fresh snapshot and opens a new
+stream. This applies to every gap reason, including slow consumer and buffer
+overflow. Worker restart creates a new epoch; reconnect cannot resume from the
 old request-local sequence. Journal follow may separately resume by journal
 cursor.
 
