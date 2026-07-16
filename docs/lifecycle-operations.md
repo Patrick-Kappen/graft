@@ -396,6 +396,26 @@ The response contains no raw D-Bus values, journal records, unit properties,
 Podman output, command lines, environment values, or arbitrary backend text.
 Observability clients may follow separately authorized details through [#137].
 
+### Operation-result query
+
+After current authorization, an operation-result query returns exactly one
+tagged variant:
+
+| Variant | Meaning |
+| --- | --- |
+| `Terminal` | The current-epoch principal/ID has a retained `LifecycleTerminalResult` or `MutationTerminalError`. |
+| `InProgress` | The current-epoch principal/ID is accepted but not terminal. |
+| `NotFound` | No record for this current-epoch principal/ID was ever accepted or remains timestamp-valid. |
+| `OperationResultUnavailable` | The supplied epoch is old and its cache was lost; code is `cache_lost`. |
+
+`InProgress` contains operation/epoch identity, action, selector, accepted time,
+current typed phase, disposition only after manager-work commitment, and safe
+progress guidance; it has no terminal outcome or final state. `NotFound`
+contains current epoch, queried ID, code `not_found`, timestamp, and guidance; it
+does not reveal another principal's records. An unknown expired UUID returns the
+existing `operation_id_expired` error instead of `NotFound`. These query variants
+never submit or join lifecycle work.
+
 ### Result disposition and outcome
 
 Disposition records how manager work related to the request, independently of
@@ -584,8 +604,12 @@ follows this rule rather than ending merely because the manifest changed.
 Manager submission has a five-second response deadline. Before manager-work
 commitment, the worker writes one bounded non-secret in-flight activation
 interlock record under `/run` while holding the activation lock. The record
-remains for submitted and joined manager work until its correlated job and
-invocation are terminal; manager acceptance alone never clears it. Nix
+remains for submitted and joined manager work until the correlated manager job
+is terminal and no queued or late action can target a replacement; manager
+acceptance alone never clears it. A successful long-running operation may clear
+the record once its start/restart job is terminal and the attributed invocation
+is stably `active-running`—the service process need not exit. Finite job/setup
+completion still requires their lifecycle-specific invocation evidence. Nix
 activation checks all such records under its exclusive lock and fails closed
 without artifact replacement, manager reload, or manifest publication while any
 record remains.
@@ -707,8 +731,10 @@ A worker restart creates a new epoch and loses in-memory duplicate results. It
 does not stop workloads or manager jobs. Before accepting clients or allowing
 Nix activation, it loads every fixed-context `/run` activation interlock and
 reconciles exact unit, job, invocation, and provenance evidence. A record is
-cleared only when correlated manager work is terminal and no queued/late action
-can target a replacement; successful reconciliation is audited. Malformed,
+cleared only when its correlated manager job is terminal, no queued/late action
+can target a replacement, and lifecycle-specific evidence is proven. A stable
+attributed `active-running` invocation satisfies long-running success without
+requiring process termination; successful reconciliation is audited. Malformed,
 wrong-owner/scope, duplicate, unavailable, or ambiguous records remain
 fail-closed and keep lifecycle mutation plus Nix activation blocked. Routine
 terminal completion while the worker was down can therefore unblock startup
