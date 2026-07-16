@@ -128,7 +128,7 @@ intervals identified below. Maxima are not target values to allocate eagerly:
 | Ambiguous-submission reconciliation | 5 seconds |
 | Post-client lifecycle completion grace | 30 seconds |
 | Absolute lifecycle observation after acceptance | 10 minutes |
-| Post-terminal mutation result retention | 10 minutes |
+| Mutation result expiry | Later of server acceptance + 10 minutes, UUIDv7 timestamp + 10 minutes, or terminal completion + 10 minutes |
 
 For local Unix peers, the initial principal key is the accepted peer UID; future
 remote principals require their own authenticated key. Worker-wide accounting
