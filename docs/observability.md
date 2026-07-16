@@ -124,7 +124,7 @@ Every layer is wrapped in exactly one availability state:
 
 | State | Meaning |
 | --- | --- |
-| `fresh` | Successfully observed within that layer's freshness policy. |
+| `fresh` | Successfully observed under the versioned source rules below. |
 | `stale` | Evidence exists but identity, age, or collection race prevents treating it as current. |
 | `unavailable` | Applicable source could not be reached or queried within bounds. |
 | `unauthorized` | Current policy does not permit this layer or field group. |
@@ -134,6 +134,30 @@ Every layer is wrapped in exactly one availability state:
 These states are tagged alternatives. A layer cannot simultaneously be `fresh`
 and `unavailable`, and clients must not infer a zero/false/empty value from any
 non-fresh state.
+
+### Version 1 freshness rules
+
+Declared, resolved, materialised, generated, manager, runtime, and observed
+snapshot layers are read during the current request and are not served from an
+age-based cache. They are `fresh` only when collection completed within the
+negotiated request deadline and the post-collection generation, boot, worker,
+manager, unit, invocation, and runtime identity checks applicable to that layer
+remain equal. A changed identity or collection race with retained evidence is
+`stale`; no retained evidence is `unavailable`. Declarative artifact age alone
+does not make a current manifest layer stale.
+
+A fast metric sample is `fresh` through five seconds after observation, `stale`
+after five through 30 seconds, and `unavailable` after 30 seconds. A storage
+sample is `fresh` through five minutes, `stale` after five through ten minutes,
+and `unavailable` after ten minutes. Boundary comparisons are inclusive at the
+lower classification: exactly five seconds is fresh, exactly 30 seconds is
+stale, exactly five minutes is fresh, and exactly ten minutes is stale. Age uses
+the worker monotonic clock within one worker epoch; cached evidence from an old
+worker epoch is unavailable rather than aged.
+
+Journal records are immutable historical evidence and do not use snapshot or
+metric age classes. Their boot, manager, generation, and invocation attribution
+expresses whether they can be correlated to current state.
 
 ## Layered workload snapshot
 
@@ -280,17 +304,32 @@ Initial summary values are:
 - `runtime_mismatch`; and
 - `unknown`.
 
-Precedence is fail-closed:
+The worker evaluates this ordered first-match table. Each row maps to exactly one
+summary; later rows cannot override an earlier match.
 
-1. disabled intent plus attributable active, activating, or deactivating manager
-   state or a present/running runtime becomes `disabled_running`;
-2. disabled intent without that residual execution evidence becomes `disabled`;
-3. invalid/missing/stale materialisation or provenance;
-4. manager unavailable/identity change;
-5. loaded-unit failure or transition;
-6. runtime identity/cgroup mismatch;
-7. expected lifecycle success or quiescent state; and
-8. unknown when evidence is insufficient.
+| Order | Exact condition | Summary |
+| ---: | --- | --- |
+| 1 | Disabled intent plus attributable manager `activating`, `active`, or `deactivating`, or attributable runtime `present`/`running` | `disabled_running` |
+| 2 | Disabled intent and row 1 did not match | `disabled` |
+| 3 | Enabled intent and fresh materialised state says expected artifacts are absent | `not_materialised` |
+| 4 | Enabled intent and fresh materialised/generated evidence reports invalid artifact, failed validation, or provenance mismatch | `invalid_materialisation` |
+| 5 | Manager is applicable but its layer is `unavailable`, or its identity changed with no stable current observation | `manager_unavailable` |
+| 6 | Fresh generated/manager evidence proves a foreign source or conflicting unit shadows the expected service | `unit_shadowed` |
+| 7 | Fresh generated/manager evidence proves the expected generated service is absent or manager load state is `not-found` | `unit_missing` |
+| 8 | Fresh manager state is `failed`, or its attributable current invocation has a terminal non-success result | `failed` |
+| 9 | Fresh manager active state is `activating` | `activating` |
+| 10 | Fresh manager active state is `deactivating` | `deactivating` |
+| 11 | Fresh evidence proves expected and observed runtime identity or cgroup differ | `runtime_mismatch` |
+| 12 | Setup workload has fresh, successful, attributable manager `active-exited` evidence | `active_exited` |
+| 13 | Long-running workload has fresh attributable manager `active-running` evidence and no row 11 mismatch | `active` |
+| 14 | Fresh manager state is `inactive`, no attributable runtime is active, and no earlier terminal failure matched | `inactive` |
+| 15 | Every other combination, including stale materialisation without fresh invalid/absent evidence, unsupported manager values, or insufficient evidence | `unknown` |
+
+A finite job with fresh correlated terminal failure matches row 8; otherwise its
+fresh inactive manager state matches row 14. Historical evidence that is stale
+cannot by itself select rows 3 through 14. Authorization may hide detailed layer
+fields from a summary-only caller, but the worker applies the same table to its
+authorized internal observations rather than letting each client rederive it.
 
 `active` means manager `active-running` for a long-running workload with no
 known identity mismatch. It does not imply application health. `active_exited`
@@ -467,11 +506,12 @@ Each record contains:
 - journal monotonic timestamp when available;
 - typed priority;
 - approved source/stream classification;
-- bounded UTF-8 message;
+- bounded tagged message representation `utf8` or `base64`;
 - journal cursor;
 - original byte count;
-- truncation flag; and
-- redaction flag/classification.
+- returned pre-encoding byte count;
+- size-truncation flag; and
+- typed-metadata redaction flag/classification.
 
 `current_generation` requires a journal invocation ID equal to the current
 manager invocation observed under the requested manifest generation. A reused
@@ -487,10 +527,18 @@ systemd owner. Such records expose manager epoch as `unavailable` unless another
 approved authoritative source proves every component; the worker never combines
 current-manager components with a historical boot.
 
-Message content is untrusted display data. The worker preserves record
-boundaries, truncates at a valid UTF-8 boundary to the protocol limit, and never
-promotes message text into identity, severity, error code, or terminal structure.
-CLI/TUI clients visibly encode terminal control characters.
+Journal field values are byte sequences. A valid UTF-8 `MESSAGE` uses the
+`utf8` variant; invalid UTF-8 uses standard padded RFC 4648 `base64` over the
+returned bytes. Size truncation is applied to original bytes before encoding.
+For UTF-8, the worker backs up to the last complete code-point boundary; for
+base64, it may retain any bounded byte prefix. Encoding choice is not redaction
+or truncation, and the separate counts/flag distinguish all three cases.
+
+Message content is untrusted, potentially secret-bearing display data. The
+worker preserves record boundaries and never promotes message bytes into
+identity, severity, error code, or terminal structure. CLI/TUI clients decode
+only for terminal-safe presentation and visibly encode terminal control
+characters.
 
 ### Pagination and cursor recovery
 
@@ -538,9 +586,12 @@ exhaustive tagged result:
 - `not_applicable`: reason `workload_state`, `first_sample`, `identity_changed`,
   or `counter_reset`.
 
-The tags and reason enums are closed in each negotiated protocol version. A
-missing cgroup file is `unavailable(source_absent)`; integer conversion overflow
-is `unavailable(out_of_range)`. Unsupported metrics and denied metrics use their
+The tags and reason enums are closed in each negotiated protocol version. When
+workload state requires no cgroup, a cgroup metric is
+`not_applicable(workload_state)`. Only when that metric is applicable and the
+identity-correlated cgroup/file is unexpectedly absent is it
+`unavailable(source_absent)`. Integer conversion overflow is
+`unavailable(out_of_range)`. Unsupported metrics and denied metrics use their
 own tags. A rate without two comparable samples is `not_applicable(first_sample)`.
 Manager/runtime epoch, cgroup, or invocation change is
 `not_applicable(identity_changed)`; a counter decrease without an identity
@@ -637,7 +688,8 @@ One storage query has fixed version-1 maxima:
 
 Policy may lower these maxima. Budget exhaustion returns partial per-category
 results plus `storage_budget_exceeded`; it does not discard completed categories.
-Results may be cached for up to five minutes with exact sample time and age.
+Results may be cached for up to ten minutes with exact sample time and age; the
+fresh/stale boundaries above still apply.
 Cache keys include host/scope, principal authorization class, manifest
 generation, workload, resource identity, and relevant backend epoch.
 
@@ -771,7 +823,8 @@ never leaks retained data from a stronger prior policy.
 
 ## Redaction
 
-The worker serializes only allowlisted typed fields. It never returns:
+The worker serializes only allowlisted typed fields. Except for separately
+authorized log message content described below, typed fields never return:
 
 - secret or credential values;
 - environment values;
@@ -788,9 +841,16 @@ than private absolute paths. Container IDs, PIDs, boot IDs, invocation IDs, and
 cgroup identities are sensitive and returned only under the corresponding
 inspect/metric/log policy.
 
-Redaction happens before caching, framing, auditing, and stream buffering. Caches
-are keyed by authorization class so a stronger cached response cannot satisfy a
-weaker request.
+Version 1 does not scan or redact arbitrary journal `MESSAGE` bytes: workloads
+can write credentials that the worker cannot identify exhaustively. Log access
+therefore authorizes potentially secret-bearing workload output separately from
+status/inspect, and clients must not interpret the typed-metadata redaction flag
+as message-content sanitization. Known typed metadata is still allowlisted and
+redacted before serialization.
+
+Typed-field redaction happens before caching, framing, auditing, and stream
+buffering. Caches are keyed by authorization class so a stronger cached response
+cannot satisfy a weaker request.
 
 ## CLI output and exit status
 
@@ -826,7 +886,7 @@ authoritative over shell categories.
 
 Permitted observability state is bounded and operational:
 
-- short-lived redacted snapshot cache;
+- in-flight redacted snapshot/page assembly;
 - metric baselines for rates;
 - storage result cache;
 - page and journal cursors;
