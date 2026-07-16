@@ -67,7 +67,7 @@ inherits one bounded typed observation envelope:
 - server observation time as UTC Unix epoch milliseconds;
 - source monotonic time where the source provides it;
 - snapshot revision or stream sequence where applicable;
-- authorization/redaction class; and
+- authorization/redaction class and authorization-policy revision; and
 - freshness/completeness metadata.
 
 Clients cannot set returned host, effective UID, boot, worker epoch, manager
@@ -312,9 +312,9 @@ summary; later rows cannot override an earlier match.
 | 1 | Disabled intent plus attributable manager `activating`, `active`, or `deactivating`, or attributable runtime `present`/`running` | `disabled_running` |
 | 2 | Disabled intent and row 1 did not match | `disabled` |
 | 3 | Enabled intent and fresh materialised state says expected artifacts are absent | `not_materialised` |
-| 4 | Enabled intent and fresh materialised/generated evidence reports invalid artifact, failed validation, or provenance mismatch | `invalid_materialisation` |
-| 5 | Manager is applicable but its layer is `unavailable`, or its identity changed with no stable current observation | `manager_unavailable` |
-| 6 | Fresh generated/manager evidence proves a foreign source or conflicting unit shadows the expected service | `unit_shadowed` |
+| 4 | Fresh generated/manager evidence proves a foreign source or conflicting unit shadows the expected service | `unit_shadowed` |
+| 5 | Enabled intent and fresh materialised/generated evidence reports an invalid artifact, failed validation, or provenance mismatch other than the row 4 shadow condition | `invalid_materialisation` |
+| 6 | Manager is applicable but its layer is `unavailable`, or its identity changed with no stable current observation | `manager_unavailable` |
 | 7 | Fresh generated/manager evidence proves the expected generated service is absent or manager load state is `not-found` | `unit_missing` |
 | 8 | Fresh manager state is `failed`, or its attributable current invocation has a terminal non-success result | `failed` |
 | 9 | Fresh manager active state is `activating` | `activating` |
@@ -416,10 +416,11 @@ backend query. Initial ordering is workload name ascending within the fixed
 worker scope. A normal client aggregates separate authorized endpoints and sorts
 by scope then workload name.
 
-A page cursor is bound to worker epoch, principal, manifest generation, filter,
-and ordering. Mismatch or expiry returns `page_cursor_expired`; the client
-restarts listing. The cursor is not a filesystem/backend cursor and exposes no
-secret content.
+A page cursor is bound to worker epoch, principal, authorization class,
+authorization-policy revision, manifest generation, filter, and ordering. Any
+mismatch, policy revision change, or expiry returns `page_cursor_expired`; the
+client restarts listing against the new visible set. The cursor is not a
+filesystem/backend cursor and exposes no secret content.
 
 ### Get status
 
@@ -580,7 +581,7 @@ exhaustive tagged result:
 - `stale`: last typed value and its original sample metadata, never refreshed or
   presented as current;
 - `unavailable`: reason `source_absent`, `backend_unavailable`, `deadline`,
-  `out_of_range`, or `identity_unproven`;
+  `sample_expired`, `out_of_range`, or `identity_unproven`;
 - `unauthorized`;
 - `unsupported`; or
 - `not_applicable`: reason `workload_state`, `first_sample`, `identity_changed`,
@@ -655,6 +656,27 @@ partial/unavailable categories prevent a conforming authoritative sum. Clients
 must display categories independently and must not label client-side arithmetic
 as total physical or unique usage.
 
+Each category has exactly one exhaustive tagged result:
+
+- `available`: integer value, unit `bytes` or `count`, source enum, source and
+  observation timestamps, age/freshness, visited-entry count, and resource
+  count;
+- `partial`: the same typed fields for the measured subset plus reason
+  `time_budget`, `entry_budget`, `depth_budget`, or `resource_budget`;
+- `stale`: one prior `available` or `partial` sample with its original metadata
+  and current age;
+- `unavailable`: reason `source_absent`, `backend_unavailable`, `deadline`,
+  `sample_expired`, `identity_unproven`, or `budget_no_result`;
+- `unauthorized`;
+- `unsupported`; or
+- `not_applicable`: reason `workload_state` or `resource_absent`.
+
+A budget exhausted after measuring at least one attributable entry returns
+`partial` for that category. Exhaustion before any attributable value is
+available returns `unavailable(budget_no_result)`. Categories completed before a
+later category exhausts its budget retain `available`; one category never
+changes another category's tag.
+
 ### Immutable closure size
 
 Logical closure bytes use Nix metadata for the manifest-bound closure. They are
@@ -686,12 +708,21 @@ One storage query has fixed version-1 maxima:
 - 256 resources; and
 - one active storage query per principal.
 
-Policy may lower these maxima. Budget exhaustion returns partial per-category
-results plus `storage_budget_exceeded`; it does not discard completed categories.
-Results may be cached for up to ten minutes with exact sample time and age; the
-fresh/stale boundaries above still apply.
-Cache keys include host/scope, principal authorization class, manifest
+Policy may lower these maxima. Budget exhaustion follows the per-category tags
+above and also emits `storage_budget_exceeded`; it does not discard completed
+categories. Results may be cached for up to ten minutes with exact sample time
+and age; the fresh/stale boundaries above still apply. Cache keys include
+host/scope, principal authorization class and policy revision, manifest
 generation, workload, resource identity, and relevant backend epoch.
+
+Version-1 cache maxima are 64 entries and 4 MiB of serialized data per principal,
+1,024 entries and 64 MiB worker-wide, and 64 KiB serialized per entry. Policy may
+only lower them. An oversized result is returned but not cached. Admission first
+evicts the requesting principal's least-recently-used entries until its limits
+fit, then worker-wide least-recently-used entries until global limits fit. Equal
+last-use times are evicted by lexicographically ascending complete cache key.
+When no admissible entry remains, the result is returned uncached. Eviction never
+changes the typed query result.
 
 Storage values are not automatically included in high-frequency metric follow.
 A client explicitly refreshes storage or accepts the visible cached age.
@@ -743,9 +774,14 @@ Source timestamps remain visible.
 
 ### Snapshot revision
 
-Snapshot revision is monotone within one worker epoch and workload selector. It
-changes when the worker publishes a semantically different authorized snapshot.
-It is not durable, globally ordered, or a resume cursor after worker restart.
+Snapshot revision is monotone within one worker epoch, workload selector,
+authorization class, and authorization-policy revision. It changes when the
+worker publishes a semantically different snapshot visible to that exact scope.
+Each policy revision starts an independent revision sequence at one, so
+hidden-field changes cannot advance a weaker caller's revision. It is not
+durable, globally
+ordered, comparable across authorization scopes, or a resume cursor after worker
+restart.
 
 ### Stream gaps and recovery
 
