@@ -59,8 +59,8 @@ inherits one bounded typed observation envelope:
 - Nix-configured non-secret host identity when authorized;
 - target `system` or `user`;
 - effective UID for user scope;
-- complete structured workload selector, including manifest generation, when the
-  observation is workload-specific;
+- structured workload identity when the observation is workload-specific, with
+  manifest generation only when provenance is attributable;
 - host boot ID when applicable and authorized;
 - worker epoch;
 - manager epoch from the worker contract when applicable and correlatable;
@@ -179,9 +179,12 @@ Derived from the current manifest and installed artifacts:
 - producer/build provenance digest; and
 - current-reference validation state.
 
-A disabled workload is visible with `deploy.enable = false`; generated, manager,
-and runtime layers are normally `not_applicable` and no missing-unit diagnostic
-is invented.
+A disabled workload is visible with `deploy.enable = false`. Generated, manager,
+and runtime layers are `not_applicable` only after a bounded lookup finds no
+attributable residual manager or runtime state. Disabling does not stop existing
+work, so an attributable active unit/container remains observable without being
+adopted as current desired state. No missing-unit diagnostic is invented for a
+disabled workload.
 
 ### Generated layer
 
@@ -262,6 +265,7 @@ is not a new authority and always links to the evidence layers that produced it.
 Initial summary values are:
 
 - `disabled`;
+- `disabled_running`;
 - `not_materialised`;
 - `invalid_materialisation`;
 - `manager_unavailable`;
@@ -278,13 +282,15 @@ Initial summary values are:
 
 Precedence is fail-closed:
 
-1. disabled intent;
-2. invalid/missing/stale materialisation or provenance;
-3. manager unavailable/identity change;
-4. loaded-unit failure or transition;
-5. runtime identity/cgroup mismatch;
-6. expected lifecycle success or quiescent state; and
-7. unknown when evidence is insufficient.
+1. disabled intent plus attributable active, activating, or deactivating manager
+   state or a present/running runtime becomes `disabled_running`;
+2. disabled intent without that residual execution evidence becomes `disabled`;
+3. invalid/missing/stale materialisation or provenance;
+4. manager unavailable/identity change;
+5. loaded-unit failure or transition;
+6. runtime identity/cgroup mismatch;
+7. expected lifecycle success or quiescent state; and
+8. unknown when evidence is insufficient.
 
 `active` means manager `active-running` for a long-running workload with no
 known identity mismatch. It does not imply application health. `active_exited`
@@ -437,14 +443,23 @@ unit/boot/scope filters after seeking; a cursor can choose a position, never
 broaden records. Raw journal matches and arbitrary fields are forbidden.
 
 If both cursor and time bounds are present, the cursor establishes position and
-time bounds still filter records. Direction determines iteration, while returned
-records remain explicitly sequenced in delivery order.
+time bounds still filter records. A cursor is always exclusive: `forward`
+returns only matching records strictly after it, `backward` returns only matching
+records strictly before it, and follow resumes strictly after it. Reusing the
+last delivered cursor therefore neither duplicates that record nor changes the
+query bounds. Direction determines iteration, while returned records remain
+explicitly sequenced in delivery order.
 
 ### Log record
 
 Each record contains:
 
-- observation envelope identity;
+- observation envelope identity without an implicitly inherited manifest
+  generation;
+- requested workload selector as query context;
+- generation attribution `current_generation`, `historical_or_unknown`, or
+  `unavailable`;
+- journal invocation ID when present, otherwise explicit `unavailable`;
 - journal boot ID;
 - manager epoch observed for the unit binding when correlatable, otherwise
   explicit `unavailable`;
@@ -457,6 +472,14 @@ Each record contains:
 - original byte count;
 - truncation flag; and
 - redaction flag/classification.
+
+`current_generation` requires a journal invocation ID equal to the current
+manager invocation observed under the requested manifest generation. A reused
+unit name, matching boot, or matching timestamp is insufficient. Every other
+historical record is `historical_or_unknown`; `unavailable` is used only when an
+authorized backend failure prevents even that classification. The requested
+selector constrains the query but is not evidence that every returned record
+belongs to that generation.
 
 For a historical boot, the worker normally cannot reconstruct the complete
 manager epoch because journald does not retain its D-Bus bus UUID and unique
@@ -489,8 +512,10 @@ journald policy.
 
 ### Follow logs
 
-Follow starts from an explicit cursor or the worker-defined current tail. It uses
-worker stream sequence/backpressure. Journal rotation, boot change, manager
+Follow starts strictly after an explicit cursor. Without one, the worker first
+captures the authorized current-tail cursor as an exclusive boundary and then
+delivers only later matching records. It uses worker stream
+sequence/backpressure. Journal rotation, boot change, manager
 binding change, slow consumer, worker shutdown, or authorization change ends the
 stream with a typed reason. Reconnect uses the last journal cursor when still
 valid; request-local stream sequence alone is not a journal resume cursor.
@@ -499,22 +524,29 @@ The worker does not copy logs into its own persistence layer.
 
 ## Metrics
 
-Metric values use a common tagged sample:
+Every metric sample contains metric name from a fixed enum and exactly one
+exhaustive tagged result:
 
-- metric name from a fixed enum;
-- numeric value using an integer where the source is integral;
-- explicit unit;
-- source enum;
-- source and observation timestamps;
-- monotonic sample interval for rates;
-- age/freshness;
-- availability; and
-- optional bounded explanation code.
+- `available`: numeric value, explicit unit, source enum, source and observation
+  timestamps, age/freshness, and monotonic sample interval for a rate;
+- `stale`: last typed value and its original sample metadata, never refreshed or
+  presented as current;
+- `unavailable`: reason `source_absent`, `backend_unavailable`, `deadline`,
+  `out_of_range`, or `identity_unproven`;
+- `unauthorized`;
+- `unsupported`; or
+- `not_applicable`: reason `workload_state`, `first_sample`, `identity_changed`,
+  or `counter_reset`.
 
-Absent, unsupported, unauthorized, overflowed, reset, or unavailable values are
-not encoded as zero. Counter decreases caused by manager/runtime epoch or
-invocation change reset the rate baseline and produce `counter_reset`, never a
-negative rate.
+The tags and reason enums are closed in each negotiated protocol version. A
+missing cgroup file is `unavailable(source_absent)`; integer conversion overflow
+is `unavailable(out_of_range)`. Unsupported metrics and denied metrics use their
+own tags. A rate without two comparable samples is `not_applicable(first_sample)`.
+Manager/runtime epoch, cgroup, or invocation change is
+`not_applicable(identity_changed)`; a counter decrease without an identity
+change is `not_applicable(counter_reset)`. The cumulative counter may remain a
+separate `available` sample, and no condition is encoded as zero or a negative
+rate.
 
 ### Fast metrics
 
@@ -551,7 +583,7 @@ count.
 
 Rates require two valid samples from the same boot, manager epoch, cgroup, and
 invocation. The first sample reports cumulative value with rate
-`not_applicable`.
+`not_applicable(first_sample)`.
 
 ## Storage accounting
 
@@ -563,9 +595,14 @@ worker reports categories independently:
 - writable container layer bytes;
 - named managed-volume bytes;
 - anonymous ephemeral-volume bytes when attributable;
-- bind-source bytes as `unsupported` in version 1;
-- shared/deduplicated bytes when a backend can prove them; and
-- aggregate logical bytes with explicit double-counting semantics.
+- bind-source bytes as `unsupported` in version 1; and
+- shared/deduplicated bytes when a backend can prove them.
+
+Version 1 has no aggregate storage field. Categories may overlap through shared
+store paths, volume implementation details, or filesystem deduplication, and
+partial/unavailable categories prevent a conforming authoritative sum. Clients
+must display categories independently and must not label client-side arithmetic
+as total physical or unique usage.
 
 ### Immutable closure size
 
@@ -641,8 +678,10 @@ The worker emits only fixed event variants:
 - `gap`.
 
 Every event contains worker epoch, request-local stream sequence, observation
-time, workload identity when applicable, source enum/time, snapshot revision,
-and a bounded typed payload.
+time, source enum/time, and a bounded typed payload. Workload identity and
+snapshot revision are present only for a workload-specific event; host-wide
+manifest, backend-availability, authorization, and gap events omit both unless
+they explicitly concern one workload.
 
 Stream sequence orders delivery within one authorized stream request, not
 causality across Nix, systemd, Podman, journald, and cgroups. It starts at one
