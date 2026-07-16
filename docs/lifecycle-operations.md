@@ -412,15 +412,16 @@ After these checks, the query returns exactly one tagged variant:
 | `Terminal` | The current-epoch principal/ID has a retained `LifecycleTerminalResult` or `MutationTerminalError`. |
 | `InProgress` | The current-epoch principal/ID is accepted but not terminal. |
 | `NotFound` | No record for this current-epoch principal/ID was ever accepted, and the queried UUID remains timestamp-valid. |
-| `OperationResultUnavailable` | The supplied epoch is old and its cache was lost; code is `cache_lost`. |
+| `OperationResultUnavailable` | The supplied epoch is old and its cache was lost; code is `cache_lost`, regardless of UUID age. |
 
 `InProgress` contains operation/epoch identity, action, selector, accepted time,
 current typed phase, disposition only after manager-work commitment, and safe
 progress guidance; it has no terminal outcome or final state. `NotFound`
 contains current epoch, queried ID, code `not_found`, timestamp, and guidance; it
-does not reveal another principal's records. An unknown expired UUID returns the
-existing `operation_id_expired` error instead of `NotFound`. These query variants
-never submit or join lifecycle work.
+does not reveal another principal's records. Epoch classification takes
+precedence: old epoch always returns `cache_lost`. Only an unknown current-epoch
+UUID returns `operation_id_expired` when expired or `NotFound` while valid. These
+query variants never submit or join lifecycle work.
 
 ### Result disposition and outcome
 
@@ -653,13 +654,15 @@ ambient reload as permission to retarget.
 Operation identifiers use the exact canonical lowercase hyphenated UUIDv7 wire
 encoding defined by the
 [worker mutation identity contract](worker-api.md#mutation-identity-concurrency-and-interruption).
-Their embedded timestamp may be at most one minute ahead of server receive time
-and at most ten minutes old. The server publishes UTC Unix epoch milliseconds in
-`ServerHello` so clients can detect local skew before mutation. Every accepted
-identifier retains its immutable request while in flight and its complete
-bounded terminal result until the operation is terminal and both replay
-boundaries have closed: ten minutes since server acceptance and ten minutes
-since the UUIDv7 embedded timestamp. Retention therefore ends at the later
+Their embedded timestamp may be at most one minute ahead of the worker's
+per-epoch logical receive time and at most ten minutes old. That logical time is
+anchored to UTC wall-clock milliseconds but advances with monotonic elapsed time
+and never decreases or stalls within the epoch, as defined by the worker API.
+`ServerHello.server_time_ms`, timestamp validation, and replay expiry use the
+same value. Every accepted identifier retains its immutable request while in
+flight and its complete bounded terminal result until the operation is terminal
+and both logical-time replay boundaries have closed: ten minutes since server
+acceptance and ten minutes since the UUIDv7 embedded timestamp. Retention therefore ends at the later
 boundary, preventing a future-skewed but still-valid UUID from becoming fresh
 after eviction. A resultless tombstone cannot replace that result. A known
 identical in-flight or terminal request may still
@@ -733,9 +736,14 @@ past the absolute cutoff of ten minutes after server acceptance. At that cutoff
 the worker retains `result_unknown`, releases the client-operation
 lock/observation, and ends all callers even if interest remains. Non-terminal
 manager work keeps its separate activation interlock until terminal proof or
-explicit recovery. A manager job may continue after Graft has
-published `result_unknown`; its later completion is ordinary observed state,
-not retroactive mutation completion.
+explicit recovery. A bounded interlock reconciler remains independent of the
+immutable operation result: it reacts to manager state/job signals and polls
+retained records no more often than once every five seconds, with the same
+five-second query bound per record and worker-wide record caps. It also performs
+an on-demand pass before rejecting a new lifecycle mutation for that workload.
+Later terminal proof clears and audits the interlock but never revises retained
+`result_unknown`. Thus a manager job may finish after client observation ends
+without leaving activation blocked indefinitely.
 
 A caller must never automatically replay `restart` after `result_unknown`.
 Fresh `up` and `down` are allowed only after state refresh establishes that the
