@@ -174,19 +174,21 @@ Neither worker accepts a client field that changes row.
 | --- | --- |
 | Service | `graft-user-worker.service` |
 | Socket unit | `graft-user-worker.socket` |
+| Deferred publisher | `graft-user-generation-activate.service` |
 | Socket | `$XDG_RUNTIME_DIR/graft/user/worker.sock` |
 | Runtime directory | `$XDG_RUNTIME_DIR/graft/user` |
 | Generation pointer | `$XDG_CONFIG_HOME/graft/current` |
 | Manifest | `$XDG_CONFIG_HOME/graft/current/manifest.json` |
 | Endpoint descriptor | `$XDG_CONFIG_HOME/graft/current/endpoint.json` |
-| Activation lock | `$XDG_RUNTIME_DIR/graft/user/activation.lock` |
+| Activation lock | `$XDG_STATE_HOME/graft/activation.lock` |
+| Deferred generation pointer | `$XDG_STATE_HOME/graft/pending` |
 | Interlock directory | `$XDG_RUNTIME_DIR/graft/user/interlocks` |
 | Socket owner | owning effective UID and primary GID |
 | Service identity | owning effective UID and primary GID |
 | Audit context | owning user journal |
 
-`$XDG_RUNTIME_DIR` and `$XDG_CONFIG_HOME` above describe the Nix-installed
-account paths. For this Linux/systemd integration, `%t` must resolve to canonical
+`$XDG_RUNTIME_DIR`, `$XDG_CONFIG_HOME`, and `$XDG_STATE_HOME` above describe the
+Nix-installed account paths. For this Linux/systemd integration, `%t` must resolve to canonical
 `/run/user/<effective-uid>`; the worker validates that equality at startup. The
 worker does not trust client environment variables to resolve paths. Its service
 receives fixed expanded paths from the owning manager/Nix generation. Empty, relative, non-normalized, wrong-owner, or scope-mismatched
@@ -201,6 +203,42 @@ No option permits overriding service names, socket paths, lock paths, interlock
 paths, manager address, Podman connection, or manifest target. Stable client
 endpoint discovery uses the descriptors below, not an arbitrary privileged
 socket environment variable.
+
+### Generation ownership and readership
+
+System publication requires:
+
+```text
+/etc/graft                         0750 root graft
+/etc/graft/current                 symlink owned by root
+resolved store generation          0555 root root
+manifest.json                      0444 root root
+endpoint.json                      0444 root root
+```
+
+Symlink mode bits are ignored; ownership is checked with `lstat`. The `0750`
+parent makes the system descriptor reachable only by root and explicit `graft`
+group members even though immutable store files are non-secret/read-only. The
+worker never treats descriptor readability as socket or operation authorization.
+
+User publication requires:
+
+```text
+$XDG_CONFIG_HOME/graft             0700 <uid> <primary-gid>
+$XDG_CONFIG_HOME/graft/current     symlink owned by <uid>
+resolved store generation          0555 root:root or <uid>:<primary-gid>
+manifest.json                      0444, same owner/group as generation
+endpoint.json                      0444, same owner/group as generation
+```
+
+Root ownership is required for a multi-user Nix store; exact worker UID/primary
+GID ownership is allowed for a single-user store. Mixing owners/groups inside
+one generation, another owner, any group/other write bit, owner write bit,
+executable JSON, any ACL granting write access, or a non-store target fails
+closed. If the implementation cannot inspect effective ACL/write permissions on
+the backing filesystem, validation is unavailable and fails closed. Activation records the accepted store model
+and the worker independently revalidates it; it never chooses a model from
+client input.
 
 ## Runtime directory ownership
 
@@ -224,11 +262,24 @@ $XDG_RUNTIME_DIR/graft/user               0700 <uid> <primary-gid>
 $XDG_RUNTIME_DIR/graft/user/interlocks    0700 <uid> <primary-gid>
 ```
 
-The user lock, socket, and interlocks are `0600` and owned by that account.
-Creation rejects pre-existing symlinks, non-directories, wrong ownership, and
-broader permissions. Runtime trees disappear at runtime-directory/boot teardown;
-this does not authorize clearing ambiguous interlocks while the context still
-exists.
+The user socket and interlocks are `0600` and owned by that account. Creation
+rejects pre-existing symlinks, non-directories, wrong ownership, and broader
+permissions. Runtime trees disappear at runtime-directory/boot teardown; this
+does not authorize clearing ambiguous interlocks while the context still exists.
+
+Home Manager activation separately creates the persistent lock parent and file:
+
+```text
+$XDG_STATE_HOME/graft                  0700 <uid> <primary-gid>
+$XDG_STATE_HOME/graft/activation.lock  0600 <uid> <primary-gid>
+$XDG_STATE_HOME/graft/pending          optional symlink owned by <uid>
+```
+
+Those paths are fixed Nix-expanded account paths, not client environment input.
+Activation and worker both reject symlinks, wrong owner/type/mode, extra hard
+links, or a non-regular lock file. `pending` is the sole exception: it may be
+exactly one user-owned symlink to a validated immutable Graft generation
+directory with the same store owner/mode rules as `current`; extra chains fail.
 
 ## Socket activation
 
@@ -503,7 +554,7 @@ The concrete advisory lock files are:
 
 ```text
 /run/graft/system/activation.lock
-$XDG_RUNTIME_DIR/graft/user/activation.lock
+$XDG_STATE_HOME/graft/activation.lock
 ```
 
 The implementation uses Linux open flags that reject symlinks, validates regular
@@ -522,9 +573,10 @@ worker contract allows; it never replaces per-workload/operation locks. Lock
 acquisition has bounded deadlines and interruption handling. Failure, wrong
 ownership, wrong type, unsupported filesystem locking, or timeout fails closed.
 
-### Activation critical section
+### Online activation critical section
 
-NixOS/Home Manager activation holds the exclusive lock across this exact order:
+NixOS activation and Home Manager activation with an already available owning
+user manager hold the exclusive lock across this exact order:
 
 1. validate incoming manifest/artifact schema and context;
 2. load and validate every retained interlock;
@@ -549,6 +601,57 @@ points with integration tests rather than relying on shell command success.
 Activation does not start disabled workloads, stop workloads merely removed from
 incoming intent, clear interlocks, create a user session, enroll a controller,
 or perform lifecycle retries.
+
+### Offline user activation
+
+Home Manager activation must not create `/run/user/<uid>`, start `user@<uid>`, or
+race a manager that is starting. It chooses offline mode only after bounded
+system-manager/logind checks prove all of these simultaneously while holding the
+persistent exclusive activation lock:
+
+- `/run/user/<uid>` and its user bus are absent;
+- `user@<uid>.service` is inactive with no queued start/restart job;
+- no owning user-manager process or Graft runtime interlock directory exists;
+  and
+- the incoming generation and persistent state path already pass all static
+  validation.
+
+Offline mode does **not** modify live Quadlet references or `current`, does not
+call `daemon-reload`, and does not claim the incoming generation is active. It
+atomically replaces only `$XDG_STATE_HOME/graft/pending` with the validated
+incoming immutable generation pointer, syncs the state directory, and releases
+the lock. Repeating the same generation is idempotent; replacing a different
+pending generation is allowed only while the same offline proof still holds.
+Failure leaves the old pending/live generation unchanged.
+
+Home Manager installs `graft-user-generation-activate.service` independently of
+the generated Quadlet set. On the next natural owning user-manager start it runs
+before `graft-user-worker.socket` and before any Graft startup-activation target;
+the socket and those targets require its success. The publisher:
+
+1. takes the persistent exclusive activation lock;
+2. revalidates `pending`, the live generation, and the fresh manager epoch;
+3. proves there are no old Graft jobs, transitions, retries, cleanup, or unsafe
+   interlocks in that new runtime context;
+4. atomically installs the pending context-owned Quadlet/artifact references;
+5. requests user `daemon-reload` so Quadlet generators consume them;
+6. verifies generated services/provenance;
+7. atomically publishes `current` to the same pending generation;
+8. syncs and removes `pending` only after successful current publication;
+9. activates only the exact manifest-derived startup targets required for this
+   login/linger context; and
+10. releases the lock before worker socket or startup targets proceed.
+
+Any failure retains `pending`, leaves the last coherent `current` generation
+advertised, and keeps the worker socket/startup targets failed or blocked. It
+never falls back to old artifacts under a new descriptor. A user manager that
+starts concurrently after the offline proof cannot publish work: the installed
+publisher/socket/startup ordering and persistent lock gate Graft operation.
+
+If `/run/user/<uid>` exists, the manager/bus is ambiguous, or system-manager
+proof is unavailable, Home Manager activation fails closed rather than selecting
+offline mode. Standalone Home Manager without permission to obtain that proof
+must run while its own user manager is available; it cannot guess offline state.
 
 ### Worker submission critical section
 
@@ -832,7 +935,8 @@ never reports old work as successful merely because volatile interlocks are gone
 | --- | --- |
 | Worker binary/package metadata | Nix build/evaluation fails; no broken unit publication |
 | Runtime directory/socket creation | Worker unavailable; no fallback path/listener |
-| User manager/runtime directory | User worker unavailable; no linger/session creation |
+| User manager/runtime directory | Online user worker unavailable; verified offline activation stages `pending` without creating linger/session |
+| Deferred user publisher | `current` remains old, `pending` remains retained, and worker socket/startup targets stay blocked |
 | Manifest/reference | Discovery may report bounded installation failure; mutation denied |
 | Manifest incompatible/malformed/stale | Typed identity/materialisation failure; no backend mutation |
 | systemd manager/bus | Manager layer unavailable; lifecycle denied |
@@ -877,6 +981,9 @@ manifest, and forbidden policy weakening.
 Separate controlled tests prove observable effects for:
 
 - system and non-root user socket activation from an initially stopped worker;
+- non-lingering offline Home Manager pending publication, concurrent
+  user-manager-start races, deferred publisher success/failure/idempotence, and
+  proof-unavailable denial;
 - exact socket/path ownership and denial to unauthorized peers;
 - same-UID user access and cross-user denial;
 - UID-0 user versus system manager/runtime separation;
