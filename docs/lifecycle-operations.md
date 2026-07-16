@@ -740,12 +740,19 @@ lock/observation, and ends all callers even if interest remains. Non-terminal
 manager work keeps its separate activation interlock until terminal proof or
 explicit recovery. A bounded interlock reconciler remains independent of the
 immutable operation result: it reacts to manager state/job signals and polls
-retained records no more often than once every five seconds, with the same
-five-second query bound per record and worker-wide record caps. It also performs
-an on-demand pass before rejecting a new lifecycle mutation for that workload.
+retained records no more often than once every five seconds, with at most 16
+concurrent five-second queries. While the backend is healthy it revisits every
+retained record within two minutes even if a signal is missed, and performs an
+on-demand pass before rejecting a new lifecycle mutation for that workload.
 Later terminal proof clears and audits the interlock but never revises retained
 `result_unknown`. Thus a manager job may finish after client observation ends
 without leaving activation blocked indefinitely.
+
+Persisted interlocks are capped at 256 records, 4 KiB each, and 1 MiB aggregate
+across epochs. Startup enumerates no more than 257 directory entries before
+failing closed on excess and reads no content beyond these caps. Excess,
+malformed, or ambiguous records are never silently deleted; worker lifecycle and
+Nix activation remain blocked with bounded diagnostics.
 
 A caller must never automatically replay `restart` after `result_unknown`.
 Fresh `up` and `down` are allowed only after state refresh establishes that the
@@ -789,12 +796,21 @@ persistent operation database to manufacture that guarantee.
 
 ## CLI output and exit status
 
-Output follows the terminal response tag. Human
-`LifecycleTerminalResult` output includes explicit host/scope identity, action,
-disposition, outcome, final state, and concise typed failure guidance. Human
-`MutationTerminalError` output includes identity, action, error code, phase, and
-guidance without inventing disposition, outcome, or final state. Machine output
-serializes the same tagged union and keeps stdout free of logs. Progress and
+Output follows the actual typed response class:
+
+- human `LifecycleTerminalResult` includes identity, action, disposition,
+  outcome, final state, and concise guidance;
+- human `MutationTerminalError` includes identity, action, error code, phase, and
+  guidance without invented lifecycle fields;
+- pre-acceptance worker `Error` includes its safe code, phase, retry guidance,
+  and only identity currently authorized for disclosure;
+- a post-commitment caller deadline or cancellation returns caller-local
+  `CallerDetached` with operation identity, code `deadline` or `cancelled`, and
+  result-query guidance while shared work continues; disconnect has no response;
+- result-query variants render their defined bounded fields.
+
+Machine output serializes the corresponding explicit variant tag and fields,
+never a forced terminal-result union, and keeps stdout free of logs. Progress and
 diagnostics use their documented client channels.
 
 Initial lifecycle command exit statuses are:
@@ -845,8 +861,10 @@ This contract preserves and strengthens:
   fail closed;
 - **GRAFT-TM-02:** only three typed actions exist, with no raw systemd, Podman,
   shell, or Nix passthrough;
-- **GRAFT-TM-04:** every mutation is bound to current manifest generation,
-  workload identity, and generated-service provenance;
+- **GRAFT-TM-04:** existing explicit-source, target, identity, enablement, and
+  lifecycle constraints are preserved; the worker contract additionally binds
+  runtime mutation to current manifest generation and generated-service
+  provenance;
 - **GRAFT-TM-05:** system/rootful, non-root user/rootless, and UID-0 user/rootful
   contexts remain distinct;
 - **GRAFT-TM-06:** runtime commands do not change declarative startup intent,

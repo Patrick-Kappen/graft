@@ -110,6 +110,10 @@ intervals identified below. Maxima are not target values to allocate eagerly:
 | Active streams per principal / worker | 16 / 64 |
 | Buffered response bytes per principal / worker | 2 MiB / 16 MiB |
 | Retained mutation records per principal / worker | 256 / 1,024 |
+| Persisted activation interlocks per worker | 256 |
+| Persisted activation-interlock bytes per record / worker | 4 KiB / 1 MiB |
+| Concurrent interlock reconciliation queries | 16 |
+| Healthy-backend complete interlock sweep | 2 minutes |
 | Encoded retained lifecycle result | 32 KiB |
 | Mutation UUIDv7 timestamp window | From 10 minutes before server receive time through 1 minute after it |
 | Unacknowledged stream items per stream | 64 |
@@ -480,8 +484,10 @@ absolute cutoff without proof, the worker retains `result_unknown` and releases
 its client-operation lock. Any non-terminal manager work keeps the separate
 activation interlock that blocks reload/replacement. A bounded reconciler
 continues independently via manager signals and polling no more often than every
-five seconds, using a five-second query bound per capped record, plus an on-demand
-pass before rejecting same-workload mutation. It may clear/audit terminal
+five seconds, using at most 16 concurrent five-second queries. While the backend
+is healthy it starts a pass soon enough to revisit every retained record within
+two minutes, even when a signal is missed, plus an on-demand pass before
+rejecting same-workload mutation. It may clear/audit terminal
 interlocks but never revise immutable `result_unknown`. Deadlines do not rewrite
 systemd's workload timeout. Once
 systemd accepts a job, client cancellation or disconnect does not imply
@@ -732,10 +738,12 @@ On restart the worker:
 
 1. creates a new epoch;
 2. reloads and validates the configured manifest;
-3. loads every fixed-context `/run` activation interlock before accepting
-   clients or allowing Nix activation;
-4. rejects malformed, wrong-owner, wrong-scope, duplicate, or unverifiable
-   records closed without deleting them;
+3. enumerates at most 257 fixed-context `/run` activation-interlock directory
+   entries without reading content, then accepts at most 256 records, 4 KiB each
+   and 1 MiB aggregate, before accepting clients or allowing Nix activation;
+4. treats any excess count/bytes or malformed, wrong-owner, wrong-scope,
+   duplicate, or unverifiable record as fail-closed startup degradation without
+   deleting it or reading further unbounded content;
 5. reconnects only its fixed-context backends and reconciles each valid record
    against exact unit, optional job, invocation, transition, and provenance
    evidence;
