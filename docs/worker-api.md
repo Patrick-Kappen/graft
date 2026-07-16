@@ -115,7 +115,7 @@ intervals identified below. Maxima are not target values to allocate eagerly:
 | Concurrent interlock reconciliation queries | 16 |
 | Healthy-backend complete interlock sweep | 2 minutes |
 | Encoded retained lifecycle result | 32 KiB |
-| Mutation UUIDv7 timestamp window | From 10 minutes before server receive time through 1 minute after it |
+| Mutation UUIDv7 timestamp window | More recent than 10 minutes before logical receive time, through 1 minute after it |
 | Unacknowledged stream items per stream | 64 |
 | Workloads in one list page | 256 |
 | Historical log records requested per page | 1,000 |
@@ -499,9 +499,11 @@ is healthy it starts a pass soon enough to revisit every retained record within
 two minutes, even when a signal is missed, plus an on-demand pass before
 rejecting same-workload mutation. It may clear/audit terminal
 interlocks but never revise immutable `result_unknown`. Deadlines do not rewrite
-systemd's workload timeout. Once
-systemd accepts a job, client cancellation or disconnect does not imply
-rollback, stop, or an opposite lifecycle action.
+systemd's workload timeout. Once systemd accepts a job, client cancellation or
+disconnect does not imply rollback, stop, or an opposite lifecycle action. A
+caller-local deadline or cancellation returns typed `CallerDetached` with
+operation identity, code `deadline` or `cancelled`, and result-query guidance
+while shared work continues; a transport disconnect has no response.
 
 ## Mutation identity, concurrency, and interruption
 
@@ -525,10 +527,12 @@ work.
 UUID replay expiry all use this one logical time; durations use the same
 monotonic source. Clients generate UUIDv7 timestamps from the advertised logical
 time plus their monotonic elapsed time, not from independently adjustable wall
-time. The embedded UUIDv7 timestamp must be no more than one minute ahead of
-logical receive time and no more than ten minutes old. These fields provide correlation,
-duplicate control, expiry enforcement, and stale-epoch rejection, not
-authorization.
+time. The UUIDv7 timestamp uses the half-open interval
+`logical_now_ms - 10 minutes < uuid_timestamp_ms <= logical_now_ms + 1 minute`.
+The lower boundary is expired and the upper boundary is valid, matching record
+expiry so an evicted ID cannot become valid at the exact boundary. These fields
+provide correlation, duplicate control, expiry enforcement, and stale-epoch
+rejection, not authorization.
 
 Mutation records are keyed by worker epoch, authenticated principal key, and
 validated UUID. For local workers, that principal key contains the fixed worker
@@ -561,14 +565,22 @@ Within one worker epoch and principal key:
   `disconnected_before_commitment` through the general terminal-result retention
   boundary below, and that identifier cannot later mutate;
 - a `MutationTerminalError` contains operation/epoch identity, action, workload
-  selector, code, phase, timestamp, and retry guidance but no lifecycle
+  selector, code (including `job_changed_before_commitment`), phase, timestamp,
+  and retry guidance but no lifecycle
   disposition, outcome, manager job, invocation, or final workload state;
 - `LifecycleTerminalResult` is the distinct tagged variant for `no_change`,
   joined, or submitted manager work and owns lifecycle disposition/outcome;
+- every interlock and manager observation carries the manager epoch; epoch
+  change makes old job correlation unavailable and permits clearing only after
+  fail-closed reconciliation proves no current/late action can retarget;
 - Nix activation holds an exclusive host-policy lock across artifact changes,
-  manager reload, provenance validation, and manifest publication; worker
-  submission holds the corresponding lock while re-reading state/job evidence,
-  validating generation/provenance, and obtaining manager acceptance/rejection;
+  manager reload, provenance validation, and manifest publication; under that
+  lock it scans the union of current/incoming Graft service identities and
+  blocks when any has a queued job or activating/deactivating/automatic-restart/
+  cleanup transition, covering dependency transaction jobs independently of the
+  selected unit; worker submission holds the corresponding lock while re-reading
+  state/job evidence, validating generation/provenance, and obtaining manager
+  acceptance/rejection;
 - before accepting any non-`no_change` mutation, the worker atomically writes
   and syncs a bounded `/run` activation interlock with durable phase `prepared`;
   write/capacity failure is a generic pre-acceptance infrastructure error with no
@@ -708,6 +720,10 @@ backend response maps.
 ### systemd adapter
 
 - connects only to the worker context's manager;
+- derives a manager epoch from host boot ID, D-Bus bus UUID
+  (`org.freedesktop.DBus.GetId`), and the unique owner of
+  `org.freedesktop.systemd1`, and never compares job/object identities across
+  epochs;
 - maps manifest-issued service identity to typed unit state and jobs;
 - submits only approved behavior from
   [Local lifecycle operations](lifecycle-operations.md);
@@ -782,8 +798,8 @@ On restart the worker:
    `committing_submission` only after proving rejection/no manager work, or
    clears other phases only when their correlated job is terminal or recognized
    jobless automatic-restart/cleanup evidence is terminal, no scheduled retry or
-   queued/late action
-   can target a replacement, and lifecycle-specific proof succeeds; a stable
+   queued/late action can target a replacement, and lifecycle-specific proof
+   succeeds; a stable
    attributed `active-running` invocation does not need to exit;
 7. retains ambiguous/unavailable records, marks lifecycle degraded, and keeps
    mutation plus Nix activation blocked pending backend recovery or explicit
@@ -809,7 +825,7 @@ operation and is surfaced as degraded worker health.
 
 Audit fields include:
 
-- timestamp, worker epoch, connection and operation identifiers;
+- timestamp, worker epoch, manager epoch, connection and operation identifiers;
 - peer UID/GID/PID and available authenticated subject metadata;
 - fixed worker context and workload identity;
 - manifest generation;
@@ -910,8 +926,10 @@ operation.
   storage accounting semantics;
 - [#171]: complete search-path shadow and foreign-override detection;
 - [#241]: implementation crate boundaries and selected backend libraries;
-- [#242]: concrete paths, units, users/groups, socket modes, polkit actions,
-  hardening, idle policy, and upgrade ordering;
+- [#242]: exclusive ownership of concrete paths, units, users/groups, socket
+  modes, lock/interlock primitives, activation quiescence wiring, recovery
+  interface, polkit actions, hardening, idle policy, and upgrade ordering while
+  preserving this document's semantic requirements;
 - [#245]: enrollment, mutual authentication, remote replay protection, and
   controller authorization.
 

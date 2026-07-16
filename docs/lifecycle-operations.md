@@ -117,6 +117,24 @@ single restart transaction; Graft does not promise an unobservable transition.
 The worker does not call Podman directly as a fallback. Quadlet's generated
 service owns Podman creation, stop, and generator-defined cleanup.
 
+### Manager epoch identity
+
+Every manager observation, job, interlock, and backend call is bound to a manager
+epoch consisting of the host boot ID, the D-Bus bus UUID returned by
+`org.freedesktop.DBus.GetId`, and the unique owner of
+`org.freedesktop.systemd1`. The worker captures this tuple from its fixed manager
+connection and rechecks it at operation acceptance, manager-work commitment,
+result observation, and interlock reconciliation. Job IDs or object paths are
+never compared across manager epochs.
+
+A changed manager epoch makes old job correlation unavailable. The worker
+returns or retains `result_unknown` for same-worker operation state and
+reconciles the interlock against the new manager without claiming old completion.
+It clears only after proving the current manager has no queued, transitional,
+automatic-restart, or cleanup action for the protected identities and no old
+runtime attribution can execute against a replacement; otherwise lifecycle and
+activation remain fail closed for explicit recovery.
+
 ## State vocabulary
 
 This contract normalizes authoritative systemd state exhaustively:
@@ -383,7 +401,7 @@ terminal operation response:
 `LifecycleTerminalResult` contains bounded typed fields:
 
 - operation identifier and origin worker epoch;
-- current worker epoch;
+- current worker epoch and bound manager epoch;
 - structured workload selector, including its manifest generation;
 - lifecycle kind and requested action;
 - authorization classification;
@@ -673,10 +691,18 @@ target a replacement; manager acceptance alone never clears the record.
 A successful long-running operation may clear the record once its start/restart
 manager work is terminal and the attributed invocation is stably
 `active-running`—the service process need not exit. Finite job/setup completion
-still requires their lifecycle-specific invocation evidence. Nix
-activation checks all such records under its exclusive lock and fails closed
-without artifact replacement, manager reload, or manifest publication while any
-record remains.
+still requires their lifecycle-specific invocation evidence.
+
+Nix activation checks all interlock records under its exclusive lock and also
+performs a manager-wide quiescence scan over the union of current and incoming
+Graft-generated service identities. It permits artifact replacement and
+`daemon-reload` only when every such unit has no queued job and no activating,
+deactivating, automatic-restart, or cleanup transition. This independent scan
+covers transaction-created jobs for Graft dependencies even when systemd exposes
+no transaction identifier and the selected unit's own job is already terminal.
+Any job or transition blocks activation; foreign units are observed only when
+they are exact evidence from approved manifest relationships and are never
+claimed as Graft identities.
 
 Final-caller departure or pre-call job change clears a still-`prepared` record
 under the same operation/activation locks before returning its terminal error.
@@ -717,8 +743,9 @@ ambient reload as permission to retarget.
 Operation identifiers use the exact canonical lowercase hyphenated UUIDv7 wire
 encoding defined by the
 [worker mutation identity contract](worker-api.md#mutation-identity-concurrency-and-interruption).
-Their embedded timestamp may be at most one minute ahead of the worker's
-per-epoch logical receive time and at most ten minutes old. That logical time is
+Their embedded timestamp must satisfy the half-open interval
+`logical_now_ms - 10 minutes < uuid_timestamp_ms <= logical_now_ms + 1 minute`.
+Exactly ten minutes old is expired; exactly one minute ahead is valid. That logical time is
 exactly the epoch's UTC wall-clock anchor plus monotonic elapsed time; later wall
 readings are ignored, so it advances without decreasing or stalling through wall
 jumps/corrections. Clients derive UUIDv7 timestamps from
@@ -999,7 +1026,10 @@ the required bounded `/run` activation-interlock phase records.
 - [#171] owns complete unit shadow/override detection;
 - [#241] implements the local worker and typed API, including worker-side
   `up`/`down`/`restart` and the remaining `restart` client integration;
-- [#242] defines concrete Nix services, sockets, policy, and authorization; and
+- [#242] exclusively defines concrete Nix services, runtime paths, file
+  ownership/modes, lock/interlock primitives, activation quiescence integration,
+  administrator recovery interface, and authorization while preserving the
+  semantic safety requirements here; and
 - [#245] defines remote controller authentication and replay protection.
 
 [#136]: https://github.com/Patrick-Kappen/graft/issues/136
