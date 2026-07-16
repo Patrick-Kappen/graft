@@ -331,10 +331,12 @@ connection/request correlation, and response-format state. A fresh operation
 must use the epoch returned by the current
 `ServerHello`. Re-presenting an operation after reconnect preserves its original
 epoch so a restarted worker rejects it before backend submission. A separate
-typed operation-result query may inspect that identifier and old epoch. It
-returns a retained tagged terminal response when present, or
-`OperationResultUnavailable` with code `cache_lost` after epoch/cache loss; it
-cannot submit lifecycle work. Backend unit/action selection is worker-owned. There is no force, remove,
+typed operation-result query may inspect that identifier and epoch. After
+current authorization it returns exactly one of retained `Terminal`, current
+`InProgress`, current-epoch `NotFound`, or old-epoch
+`OperationResultUnavailable(cache_lost)`; an expired unknown UUID remains
+`operation_id_expired`. Querying never submits or joins lifecycle work. Backend
+unit/action selection is worker-owned. There is no force, remove,
 delete-data, arbitrary signal, kill, raw job mode, unit property, or Podman
 option in the initial API.
 
@@ -523,7 +525,9 @@ Within one worker epoch and principal key:
   validating generation/provenance, and obtaining manager acceptance/rejection;
 - before manager-work commitment, the worker writes a bounded `/run` in-flight
   activation interlock record; it remains for submitted or joined work until
-  correlated manager job/invocation terminality, not merely manager acceptance;
+  the correlated manager job is terminal and no queued/late action can retarget,
+  not merely manager acceptance; an attributed stable `active-running`
+  invocation may satisfy long-running success without process termination;
 - manager response and exact reconciliation have separate five-second deadlines;
   unresolved delivery or non-terminal work after client observation ends keeps
   the record so Nix activation and further workload mutation fail closed until
@@ -704,8 +708,9 @@ On restart the worker:
    records closed without deleting them;
 5. reconnects only its fixed-context backends and reconciles each valid record
    against exact unit, job, invocation, and provenance evidence;
-6. clears a record only when correlated manager work is terminal and no queued
-   or late action can target a replacement, emitting a reconciliation audit;
+6. clears a record only when the correlated manager job is terminal, no queued
+   or late action can target a replacement, and lifecycle-specific evidence is
+   proven; a stable attributed `active-running` invocation does not need to exit;
 7. retains ambiguous/unavailable records, marks lifecycle degraded, and keeps
    mutation plus Nix activation blocked pending backend recovery or explicit
    proven administrator recovery;
