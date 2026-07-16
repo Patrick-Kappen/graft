@@ -98,7 +98,7 @@ method strings or deserialize arbitrary backend types.
 This table intentionally mixes resource/deadline maxima with fixed semantic
 intervals identified below. Maxima are not target values to allocate eagerly:
 
-| Limit | Initial maximum |
+| Limit or interval | Initial value |
 | --- | ---: |
 | Inbound frame | 64 KiB |
 | Outbound frame | 256 KiB |
