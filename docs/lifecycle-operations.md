@@ -670,10 +670,12 @@ encoding defined by the
 [worker mutation identity contract](worker-api.md#mutation-identity-concurrency-and-interruption).
 Their embedded timestamp may be at most one minute ahead of the worker's
 per-epoch logical receive time and at most ten minutes old. That logical time is
-anchored to UTC wall-clock milliseconds but advances with monotonic elapsed time
-and never decreases or stalls within the epoch, as defined by the worker API.
-`ServerHello.server_time_ms`, timestamp validation, and replay expiry use the
-same value. Every accepted identifier retains its immutable request while in
+exactly the epoch's UTC wall-clock anchor plus monotonic elapsed time; later wall
+readings are ignored, so it advances without decreasing or stalling through wall
+jumps/corrections. Clients derive UUIDv7 timestamps from
+`ServerHello.server_time_ms` plus their own monotonic elapsed time rather than an
+independently adjustable wall clock. Timestamp validation and replay expiry use
+the same worker value. Every accepted identifier retains its immutable request while in
 flight and its complete bounded terminal result until the operation is terminal
 and both logical-time replay boundaries have closed: ten minutes since server
 acceptance and ten minutes since the UUIDv7 embedded timestamp. Retention therefore ends at the later
