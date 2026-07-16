@@ -573,20 +573,25 @@ Within one worker epoch and principal key:
   write/capacity failure is a generic pre-acceptance infrastructure error with no
   reserved ID or manager work, while unexpected registry-admission failure
   clears the still-`prepared` record under the same locks;
-- after acceptance it atomically advances the interlock to
-  `committing_submission` before a backend call, `observing_existing` before
-  attachment, or `committed_submission` after manager acceptance, so
-  `prepared` proves no Graft call/attachment began;
-- final departure before commitment clears `prepared` under the same locks, and
-  confirmed synchronous rejection clears `committing_submission` only after
-  proving no manager work;
+- after acceptance a single-call action uses `committing_submission`; an
+  activating-`down` uses durable `committing_cancel`,
+  `cancel_committed_stop_pending`, and `committing_stop` around its ordered
+  `CancelJob`/`StopUnit` calls; existing attachment uses `observing_existing`;
+  final acceptance uses `committed_submission`, so every phase identifies which
+  call may have mutated manager state;
+- final departure or job change before the first call clears `prepared` and
+  returns a pre-commit terminal error; after any call attempt, cancellation/stop
+  rejection is `LifecycleTerminalResult(worker_submitted, failed, submission)`;
+- restart reconciliation proves each cancel/stop boundary; a quiescent
+  `cancel_committed_stop_pending` may clear, while a non-quiescent one can be
+  adopted only by a newly authorized matching `down` that revalidates identity
+  and persists `committing_stop`; other actions/activation remain blocked;
 - correlated job identity is optional for
   recognized jobless automatic-restart/cleanup work, and the record remains
   until either the job is terminal or lifecycle-specific jobless transition
   evidence is terminal, with no scheduled retry or queued/late action able to
   retarget; an attributed stable `active-running` invocation may satisfy
-  long-running success
-  without process termination;
+  long-running success without process termination;
 - manager response and exact reconciliation have separate five-second deadlines;
   unresolved delivery or non-terminal work after client observation ends keeps
   the record so Nix activation and further workload mutation fail closed until

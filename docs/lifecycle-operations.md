@@ -95,9 +95,14 @@ The adapter chooses the concrete D-Bus method and unit identity. Clients cannot
 select or override the job mode. To abort activation, `down` first reads the
 selected service's current job identity, proves that the job belongs to exactly
 that service and is a compatible start, and cancels that verified job. It then
-submits the stop with conflict-preserving `fail` mode. A missing proof, changed
-job identity, cancellation race, or remaining incompatible transaction returns
-conflict. Graft never uses transaction-wide `replace`, which could replace jobs
+submits the stop with conflict-preserving `fail` mode. A missing proof or job
+change detected before the first `CancelJob` call commits returns retained
+`MutationTerminalError(job_changed_before_commitment)` and conflict exit status.
+Once `CancelJob` is attempted, any cancellation rejection/race or later
+`StopUnit(..., "fail")` rejection is post-commitment manager work and returns
+`LifecycleTerminalResult` with `worker_submitted`, outcome `failed`, and failure
+phase `submission`; it is not reclassified as a pre-call conflict. Graft never
+uses transaction-wide `replace`, which could replace jobs
 for dependency units pulled into the same transaction. Normal systemd effects
 from cancelling the verified selected-service job and its materialised graph are
 reported rather than described as selected-unit-only effects. `up` and
@@ -401,8 +406,8 @@ terminal operation response:
 workload selector, safe typed error code, phase, timestamp, and retry guidance.
 It deliberately has no disposition, outcome, manager job, invocation, final
 workload state, or submission timestamp. The initial codes are
-`cancelled_before_commitment`, `deadline_before_commitment`, and
-`disconnected_before_commitment`.
+`cancelled_before_commitment`, `deadline_before_commitment`,
+`disconnected_before_commitment`, and `job_changed_before_commitment`.
 
 The response contains no raw D-Bus values, journal records, unit properties,
 Podman output, command lines, environment values, or arbitrary backend text.
@@ -642,12 +647,17 @@ Manager submission has a five-second response deadline. Before manager-work
 commitment, the worker has already written the bounded non-secret in-flight
 activation interlock under `/run` as a prerequisite to ID acceptance while
 holding the activation lock. Its atomically persisted phase is one of
-`prepared`, `committing_submission`,
-`observing_existing`, or `committed_submission`. Before any backend call it
-persists `committing_submission`; before attaching to existing work it persists
-`observing_existing` with exact evidence; confirmed manager acceptance advances
-to `committed_submission`. Therefore `prepared` proves that no Graft backend
-call or attachment began.
+`prepared`, `committing_submission`, `committing_cancel`,
+`cancel_committed_stop_pending`, `committing_stop`, `observing_existing`, or
+`committed_submission`. Single-call actions persist `committing_submission`
+before their call. The two-call activating-`down` path persists
+`committing_cancel` before `CancelJob`, atomically advances to
+`cancel_committed_stop_pending` after proven cancellation, then persists
+`committing_stop` before `StopUnit`. Before attaching to existing work it
+persists `observing_existing` with exact evidence; confirmed final manager
+acceptance advances to `committed_submission`. Therefore `prepared` proves that
+no Graft backend call or attachment began, while every later phase identifies
+which call may have mutated manager state.
 
 Job identity in the record is optional because recognized automatic-restart
 delays and cleanup
@@ -668,14 +678,25 @@ activation checks all such records under its exclusive lock and fails closed
 without artifact replacement, manager reload, or manifest publication while any
 record remains.
 
-Final-caller departure before commitment clears a still-`prepared` record under
-the same operation/activation locks before returning its terminal error.
-Confirmed synchronous rejection likewise clears the `committing_submission`
-record after proving no manager work exists. A submission timeout or crash in a
-committing/committed phase triggers a further five-second manager reconciliation
+Final-caller departure or pre-call job change clears a still-`prepared` record
+under the same operation/activation locks before returning its terminal error.
+Confirmed synchronous rejection clears a committing record only after proving
+whether no manager work occurred or after retaining the required post-commitment
+failed lifecycle result. A submission timeout or crash in a committing/committed
+phase triggers a further five-second manager reconciliation
 for the exact job, unit, invocation, and operation evidence. Proven rejection
 before manager work exists clears the record and returns submission failure.
-Proven acceptance keeps the record through terminal manager completion. If
+Proven acceptance keeps the record through terminal manager completion.
+`committing_cancel` reconciliation proves whether the selected start job was
+cancelled before advancing. A recovered `cancel_committed_stop_pending` record
+clears if the workload is already quiescent with no retry/late action; otherwise
+it remains blocked but may be adopted only by a new currently authorized
+matching `down` request, which revalidates manifest/unit identity and persists
+`committing_stop` before issuing `StopUnit`. Other actions and Nix activation
+remain blocked. `committing_stop` reconciliation determines whether stop was
+accepted/rejected before any clearing.
+
+If
 reconciliation remains ambiguous, the worker retains `result_unknown`, marks its
 lifecycle backend degraded, and leaves the record in place. The same applies
 when client/grace/absolute observation ends before the manager job itself is
