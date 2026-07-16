@@ -134,13 +134,14 @@ For local Unix peers, the initial principal key is the accepted peer UID; future
 remote principals require their own authenticated key. Worker-wide accounting
 is shared by the single `Accept=no` service across all connections.
 
-The mutation UUIDv7 timestamp window, manager-submission response,
-ambiguous-submission reconciliation, post-client completion grace, absolute
-lifecycle observation, post-terminal result retention, persisted interlock
-count/byte limits, reconciliation
-concurrency, and healthy complete-sweep rows form one exact version-1 safety and
-liveness tuple, not negotiable maxima; Nix policy cannot lower or raise them
-independently or together. The server advertises effective values no larger than the other
+The outbound-frame limit and encoded retained lifecycle-result limit form a
+fixed version-1 framing tuple: a 32-KiB result plus typed envelope must fit the
+256-KiB frame, so neither is negotiable. The mutation UUIDv7 timestamp window,
+manager-submission response, ambiguous-submission reconciliation, post-client
+completion grace, absolute lifecycle observation, post-terminal result
+retention, persisted interlock count/byte limits, reconciliation concurrency,
+and healthy complete-sweep rows form another exact version-1 safety/liveness
+tuple. Nix policy cannot lower or raise either tuple independently or together. The server advertises effective values no larger than the other
 maxima, and Nix policy may lower those other values. A client cannot raise any
 value. All values are versioned protocol constants and require review before
 change. Limits are checked before reserving
