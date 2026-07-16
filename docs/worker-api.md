@@ -529,10 +529,13 @@ Within one worker epoch and principal key:
   submission holds the corresponding lock while re-reading state/job evidence,
   validating generation/provenance, and obtaining manager acceptance/rejection;
 - before manager-work commitment, the worker writes a bounded `/run` in-flight
-  activation interlock record; it remains for submitted or joined work until
-  the correlated manager job is terminal and no queued/late action can retarget,
-  not merely manager acceptance; an attributed stable `active-running`
-  invocation may satisfy long-running success without process termination;
+  activation interlock record; correlated job identity is optional for
+  recognized jobless automatic-restart/cleanup work, and the record remains
+  until either the job is terminal or lifecycle-specific jobless transition
+  evidence is terminal, with no scheduled retry or queued/late action able to
+  retarget; an
+  attributed stable `active-running` invocation may satisfy long-running success
+  without process termination;
 - manager response and exact reconciliation have separate five-second deadlines;
   unresolved delivery or non-terminal work after client observation ends keeps
   the record so Nix activation and further workload mutation fail closed until
@@ -558,9 +561,9 @@ Within one worker epoch and principal key:
 - concurrent read operations remain permitted within connection and backend
   limits; and
 - an accepted identifier's request remains while in flight, and its complete
-  bounded terminal result remains through terminal completion and until at
-  least ten minutes have passed since server acceptance, independently of the
-  UUID timestamp-validity window; and
+  bounded terminal result remains through terminal completion and the later of
+  ten minutes after server acceptance or ten minutes after the UUIDv7 embedded
+  timestamp, so a still-valid future-skewed ID cannot replay after eviction; and
 - retained mutation records are capped at 256 per principal and 1,024 per
   worker, with overload rejection instead of early eviction.
 
@@ -712,10 +715,13 @@ On restart the worker:
 4. rejects malformed, wrong-owner, wrong-scope, duplicate, or unverifiable
    records closed without deleting them;
 5. reconnects only its fixed-context backends and reconciles each valid record
-   against exact unit, job, invocation, and provenance evidence;
-6. clears a record only when the correlated manager job is terminal, no queued
-   or late action can target a replacement, and lifecycle-specific evidence is
-   proven; a stable attributed `active-running` invocation does not need to exit;
+   against exact unit, optional job, invocation, transition, and provenance
+   evidence;
+6. clears a record only when its correlated job is terminal or recognized
+   jobless automatic-restart/cleanup evidence is terminal, no scheduled retry or
+   queued/late action
+   can target a replacement, and lifecycle-specific proof succeeds; a stable
+   attributed `active-running` invocation does not need to exit;
 7. retains ambiguous/unavailable records, marks lifecycle degraded, and keeps
    mutation plus Nix activation blocked pending backend recovery or explicit
    proven administrator recovery;

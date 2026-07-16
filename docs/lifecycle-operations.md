@@ -610,13 +610,21 @@ follows this rule rather than ending merely because the manifest changed.
 
 Manager submission has a five-second response deadline. Before manager-work
 commitment, the worker writes one bounded non-secret in-flight activation
-interlock record under `/run` while holding the activation lock. The record
-remains for submitted and joined manager work until the correlated manager job
-is terminal and no queued or late action can target a replacement; manager
-acceptance alone never clears it. A successful long-running operation may clear
-the record once its start/restart job is terminal and the attributed invocation
-is stably `active-running`—the service process need not exit. Finite job/setup
-completion still requires their lifecycle-specific invocation evidence. Nix
+interlock record under `/run` while holding the activation lock. Job identity in
+the record is optional because recognized automatic-restart delays and cleanup
+may have no queued job. For work with a correlated job, that job must be
+terminal. For jobless work, lifecycle-specific transition evidence must be
+terminal: an automatic-restart sequence has left its retry substate and reached
+correlated success/failure with stable invocation/result evidence, or cleanup has
+reached quiescent `inactive`/`failed` with no job and no remaining service cgroup
+process. Every path additionally requires no scheduled automatic retry and that
+no queued or late action can
+target a replacement; manager acceptance alone never clears the record.
+
+A successful long-running operation may clear the record once its start/restart
+manager work is terminal and the attributed invocation is stably
+`active-running`—the service process need not exit. Finite job/setup completion
+still requires their lifecycle-specific invocation evidence. Nix
 activation checks all such records under its exclusive lock and fails closed
 without artifact replacement, manager reload, or manifest publication while any
 record remains.
@@ -649,10 +657,12 @@ Their embedded timestamp may be at most one minute ahead of server receive time
 and at most ten minutes old. The server publishes UTC Unix epoch milliseconds in
 `ServerHello` so clients can detect local skew before mutation. Every accepted
 identifier retains its immutable request while in flight and its complete
-bounded terminal result until both the operation is terminal and the
-ten minutes have passed since server acceptance. This retention interval is
-anchored to server acceptance, not the client-generated UUID timestamp. A
-resultless tombstone cannot replace that result. A known identical in-flight or terminal request may still
+bounded terminal result until the operation is terminal and both replay
+boundaries have closed: ten minutes since server acceptance and ten minutes
+since the UUIDv7 embedded timestamp. Retention therefore ends at the later
+boundary, preventing a future-skewed but still-valid UUID from becoming fresh
+after eviction. A resultless tombstone cannot replace that result. A known
+identical in-flight or terminal request may still
 join after its timestamp ages out and receives the same result; an unknown
 expired ID cannot start work. Entries are never evicted early and reused as
 fresh. Retained results are capped at 32 KiB each and admission is bounded to
@@ -737,11 +747,13 @@ an unknown result.
 A worker restart creates a new epoch and loses in-memory duplicate results. It
 does not stop workloads or manager jobs. Before accepting clients or allowing
 Nix activation, it loads every fixed-context `/run` activation interlock and
-reconciles exact unit, job, invocation, and provenance evidence. A record is
-cleared only when its correlated manager job is terminal, no queued/late action
-can target a replacement, and lifecycle-specific evidence is proven. A stable
-attributed `active-running` invocation satisfies long-running success without
-requiring process termination; successful reconciliation is audited. Malformed,
+reconciles exact unit, optional job, invocation, transition, and provenance
+evidence. A record is cleared only when its correlated job is terminal or its
+recognized jobless automatic-restart/cleanup transition has the terminal
+evidence defined above. Every case also requires no queued/late replacement
+action and proven lifecycle-specific evidence. A stable attributed
+`active-running` invocation satisfies long-running success without requiring
+process termination; successful reconciliation is audited. Malformed,
 wrong-owner/scope, duplicate, unavailable, or ambiguous records remain
 fail-closed and keep lifecycle mutation plus Nix activation blocked. Routine
 terminal completion while the worker was down can therefore unblock startup
