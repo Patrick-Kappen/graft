@@ -383,8 +383,8 @@ The first local control plane does not provide:
 ## Design and implementation sequence
 
 1. Approve this umbrella architecture in [#232].
-2. Specify the worker, local API, authorization, and manifest contract in
-   [#240].
+2. Approve the [Local worker and API contract](worker-api.md), including
+   authorization and manifest identity.
 3. Specify observability semantics in [#137], composing with the approved
    [local lifecycle contract](lifecycle-operations.md).
 4. Specify Nix installation, socket, service, and ownership policy in [#242].
@@ -401,7 +401,6 @@ The first local control plane does not provide:
 [#171]: https://github.com/Patrick-Kappen/graft/issues/171
 [#174]: https://github.com/Patrick-Kappen/graft/issues/174
 [#232]: https://github.com/Patrick-Kappen/graft/issues/232
-[#240]: https://github.com/Patrick-Kappen/graft/issues/240
 [#241]: https://github.com/Patrick-Kappen/graft/issues/241
 [#242]: https://github.com/Patrick-Kappen/graft/issues/242
 [#243]: https://github.com/Patrick-Kappen/graft/issues/243

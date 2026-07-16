@@ -93,9 +93,10 @@ or backend text from becoming protocol structure. The implementation must parse
 into tagged types with unknown-field rejection; it must not dispatch free-form
 method strings or deserialize arbitrary backend types.
 
-### Initial hard limits
+### Initial limits and fixed intervals
 
-These are protocol maxima, not target values to allocate eagerly:
+This table intentionally mixes resource/deadline maxima with fixed semantic
+intervals identified below. Maxima are not target values to allocate eagerly:
 
 | Limit | Initial maximum |
 | --- | ---: |
