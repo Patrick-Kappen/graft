@@ -599,9 +599,18 @@ and generated-service provenance before applying any matrix row. Decisions made
 before lock acquisition are discarded. A mismatch or changed job fails before
 acceptance rather than allowing stale `no_change`, join, cancel, or submission.
 
-The worker then uses distinct linearization points. First, operation-ID
-acceptance pins the validated generation and identity. A
-`no_change` decision completes atomically at acceptance. Otherwise a common
+The worker then uses distinct linearization points. For any action that is not
+immediate `no_change`, it atomically creates and syncs the bounded durable
+`prepared` interlock before operation-ID acceptance. Capacity, ownership, or I/O
+failure returns a pre-acceptance infrastructure error, accepts no ID, and begins
+no manager work. A crash in this pre-acceptance interval leaves a safely
+reconcilable `prepared` record. If registry acceptance unexpectedly fails after
+the write, the worker clears that still-`prepared` record under the same locks
+before returning.
+
+Operation-ID acceptance then pins the validated generation and identity. A
+`no_change` decision completes atomically at acceptance without an interlock.
+Otherwise a common
 manager-work commitment point either attaches observation to a verified existing
 job/invocation or begins a backend submission. An operation-state lock
 serializes final-caller departure against that commitment: if final departure
@@ -620,9 +629,10 @@ original attribution or terminal evidence, the pinned operation returns
 follows this rule rather than ending merely because the manifest changed.
 
 Manager submission has a five-second response deadline. Before manager-work
-commitment, the worker writes one bounded non-secret in-flight activation
-interlock record under `/run` while holding the activation lock. Its atomically
-persisted phase is one of `prepared`, `committing_submission`,
+commitment, the worker has already written the bounded non-secret in-flight
+activation interlock under `/run` as a prerequisite to ID acceptance while
+holding the activation lock. Its atomically persisted phase is one of
+`prepared`, `committing_submission`,
 `observing_existing`, or `committed_submission`. Before any backend call it
 persists `committing_submission`; before attaching to existing work it persists
 `observing_existing` with exact evidence; confirmed manager acceptance advances
