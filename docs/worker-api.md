@@ -152,9 +152,11 @@ that cannot complete a bounded handshake is closed. Existing accepted work is
 not evicted to admit newer work. Repeated admission failures are rate-limited
 and audited without creating an unbounded audit queue.
 
-A backend value too large for one item is truncated at a valid UTF-8 boundary
-and carries original-byte-count and truncation metadata. Paginated responses
-and streams must never aggregate unbounded backend output into one frame.
+A textual backend value too large for one item is truncated at a valid UTF-8
+boundary and carries original-byte-count and truncation metadata. An explicitly
+tagged binary value is truncated on original bytes before its typed encoding;
+its encoded representation is never cut in transit. Paginated responses and
+streams must never aggregate unbounded backend output into one frame.
 
 ## Connection handshake and versioning
 
