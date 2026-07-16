@@ -377,7 +377,7 @@ An accepted operation terminates as exactly one tagged response variant:
 - invocation identity when available;
 - final state, typed unit result, and operation failure phase when applicable;
 - finite-process exit code or signal when available and authorized;
-- request-start and completion timestamps;
+- operation-scoped server acceptance and completion timestamps;
 - submission timestamp when `worker_submitted`, optional observed timing for
   `existing_manager_work`, and no invented submission time for `no_change`;
 - whether dependencies affected the result;
@@ -411,7 +411,8 @@ After these checks, the query returns exactly one tagged variant:
 | --- | --- |
 | `Terminal` | The current-epoch principal/ID has a retained `LifecycleTerminalResult` or `MutationTerminalError`. |
 | `InProgress` | The current-epoch principal/ID is accepted but not terminal. |
-| `NotFound` | No record for this current-epoch principal/ID was ever accepted, and the queried UUID remains timestamp-valid. |
+| `NotFound` | No record for this current-epoch principal/ID was ever accepted, and the queried UUID remains timestamp-valid; code is `not_found`. |
+| `Expired` | The current-epoch principal/ID is unknown and its UUID timestamp is expired; code is `operation_id_expired`. |
 | `OperationResultUnavailable` | The supplied epoch is old and its cache was lost; code is `cache_lost`, regardless of UUID age. |
 
 `InProgress` contains operation/epoch identity, action, selector, accepted time,
@@ -420,8 +421,9 @@ progress guidance; it has no terminal outcome or final state. `NotFound`
 contains current epoch, queried ID, code `not_found`, timestamp, and guidance; it
 does not reveal another principal's records. Epoch classification takes
 precedence: old epoch always returns `cache_lost`. Only an unknown current-epoch
-UUID returns `operation_id_expired` when expired or `NotFound` while valid. These
-query variants never submit or join lifecycle work.
+UUID returns `Expired(operation_id_expired)` when expired or
+`NotFound(not_found)` while valid. These query variants never submit or join
+lifecycle work.
 
 ### Result disposition and outcome
 
