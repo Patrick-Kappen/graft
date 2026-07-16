@@ -704,7 +704,16 @@ an unknown result.
 ## Worker restart recovery
 
 A worker restart creates a new epoch and loses in-memory duplicate results. It
-does not stop workloads or manager jobs.
+does not stop workloads or manager jobs. Before accepting clients or allowing
+Nix activation, it loads every fixed-context `/run` activation interlock and
+reconciles exact unit, job, invocation, and provenance evidence. A record is
+cleared only when correlated manager work is terminal and no queued/late action
+can target a replacement; successful reconciliation is audited. Malformed,
+wrong-owner/scope, duplicate, unavailable, or ambiguous records remain
+fail-closed and keep lifecycle mutation plus Nix activation blocked. Routine
+terminal completion while the worker was down can therefore unblock startup
+automatically, while uncertainty still requires backend recovery or the explicit
+proven administrator recovery from [#242].
 
 A reconnect presenting an old operation epoch or expired UUIDv7 cannot submit
 lifecycle work. After worker restart has lost the operational cache, an
