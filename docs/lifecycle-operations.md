@@ -554,8 +554,8 @@ typed pre-acceptance `workload_disabled` before unit lookup or manager mutation;
 it is not reclassified as unknown, missing, or stale. Enabling it requires TOML
 plus approved Nix/Home Manager activation, never a lifecycle action.
 
-A missing, masked, not-found, shadowed, stale, generator-failed, or provenance-
-mismatched enabled service returns its typed materialisation failure. The worker does
+A missing, masked, not-found, shadowed, stale, generator-failed, or
+provenance-mismatched enabled service returns its typed materialisation failure. The worker does
 not attempt reload as repair because doing so could activate unreviewed ambient
 source changes and would hide a broken Nix activation.
 
