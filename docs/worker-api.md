@@ -402,7 +402,11 @@ limits and may return unavailable or partial states.
 - follow typed manifest, manager, runtime, and worker availability changes.
 
 Events report observations, not a reconciliation instruction. They include a
-worker-epoch identifier and monotone sequence number within that epoch.
+worker-epoch identifier and a request-local stream sequence that starts at one
+and increases by one. Authorization filtering happens before sequencing, so it
+cannot create hidden sequence holes. A new request, connection, or worker epoch
+starts a new sequence; reconnect therefore requires a fresh snapshot rather than
+resuming by sequence alone.
 
 ## Authorization
 
