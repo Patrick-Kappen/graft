@@ -100,8 +100,9 @@ it is not an atomic distributed transaction. The worker:
 2. captures worker, manager, and boot epochs;
 3. queries each authorized layer with its own bounded deadline;
 4. rechecks manifest/manager identity after collection;
-5. marks layers stale or the whole snapshot generation-changed when identity
-   changed during collection; and
+5. marks an individually raced layer `stale`, or returns whole-snapshot
+   `unavailable` with reason `manifest_generation_changed` when manifest
+   generation changed during collection; and
 6. never combines old evidence with a replacement identity as current state.
 
 Each layer has independent source and observation timestamps. `complete` means
@@ -111,12 +112,14 @@ does not claim simultaneous backend sampling.
 Snapshot completeness is exactly one of:
 
 - `complete`;
-- `partial`; or
-- `unavailable`.
+- `partial`, with each non-fresh layer carrying its own status; or
+- `unavailable`, with reason `manifest_generation_changed`,
+  `backend_unavailable`, `deadline`, or `no_authorized_data`.
 
 A partial snapshot remains useful and preserves every layer's individual status.
 An unavailable snapshot contains only safely authorized identity and typed
-failure metadata.
+failure metadata. A manifest-generation race always uses
+`unavailable(manifest_generation_changed)` and never a fourth completeness tag.
 
 ## Layer availability
 
@@ -544,7 +547,14 @@ characters.
 ### Pagination and cursor recovery
 
 A bounded page returns first/last cursor and whether more records were observed
-within query bounds. Empty result is successful.
+within query bounds. Empty result is successful. Record count 1,000 is only a
+request maximum. Original message content is limited to 64 KiB and one complete
+serialized record to 96 KiB. Before adding each record, the worker accounts for
+the complete encoded page envelope and stops while the response still fits the
+negotiated outbound-frame limit. It returns the records that fit, `more = true`,
+and the last delivered exclusive resume cursor. A conforming record always fits
+alone; the worker never emits an oversized frame or splits one record across
+pages.
 
 Cursor outcomes are:
 
@@ -690,7 +700,12 @@ misattribution.
 The worker selects writable layer and volume identities from manifest/runtime
 attribution. Clients never provide paths. Named/external volumes preserve their
 ownership classification; anonymous volumes remain ephemeral and may disappear
-with generated cleanup.
+with generated cleanup. Volume bytes are available only from an authoritative
+backend operation scoped to the proven volume identity that does not recursively
+walk a host path. A worker-side path traversal is forbidden because
+workload-controlled symlinks, nested mounts, and concurrent changes could escape
+or misattribute the volume; without a suitable backend the category is
+`unsupported`.
 
 Bind-source accounting is `unsupported` in version 1. Lexically validated bind
 sources may contain symlinks and nested mount points, so safe size accounting
@@ -729,20 +744,33 @@ A client explicitly refreshes storage or accepts the visible cached age.
 
 ## Health and readiness
 
-The model distinguishes:
+The model distinguishes `manager_ready`, `runtime_running`, and
+`application_health`. Each uses exactly one tagged result:
 
-- `manager_ready`;
-- `runtime_running`; and
-- `application_health`.
+- `available(value)` with authoritative source/observation evidence;
+- `unavailable(reason)` with `source_absent`, `backend_unavailable`, `deadline`,
+  or `identity_unproven`;
+- `unauthorized`;
+- `unsupported`; or
+- `not_applicable(reason)` with `workload_state` or `intent_absent`.
+
+Closed available values are `ready` or `not_ready` for `manager_ready`, `running`
+or `not_running` for `runtime_running`, and `healthy` or `unhealthy` for
+`application_health`. A negative value requires fresh authoritative evidence:
+manager transition/inactive/failure evidence for `not_ready`, identity-correlated
+runtime absent/exited evidence for `not_running`, and an approved health backend
+failure result for `unhealthy`. Missing evidence is `unavailable`, never a
+negative value.
 
 For the initial long-running lifecycle, conmon/systemd notify evidence may make
-`manager_ready = ready`. It does not prove application-level readiness beyond
-the materialised contract. `runtime_running` reflects identity-correlated
-runtime state. `application_health` is `unsupported` until typed health intent
-from [#146] is approved and implemented.
+`manager_ready = available(ready)`. It does not prove application-level
+readiness beyond the materialised contract. `runtime_running` reflects only
+identity-correlated runtime evidence. `application_health` is `unsupported`
+until typed health intent from [#146] is approved and implemented.
 
-For completed setup and finite job workloads, runtime-running and application
-health are normally `not_applicable`. Unsupported or absent health is never
+For completed setup and finite job workloads, runtime running and application
+health are normally `not_applicable(workload_state)`. Absent health intent is
+`not_applicable(intent_absent)`. Unsupported or missing health evidence is never
 reported as healthy.
 
 ## Events
@@ -915,8 +943,21 @@ Read-only command exit statuses are:
 
 A failed workload is observed data, not failure of the status query. A partial
 snapshot exits zero only when at least one requested applicable layer is useful;
-an entirely unavailable response uses exit 6. Typed response/error codes remain
-authoritative over shell categories.
+an entirely unavailable response uses exit 6.
+
+For follow termination, the first matching row fixes the shell status:
+
+| Precedence | Typed terminal reason | Exit |
+| ---: | --- | ---: |
+| 1 | Protocol/version incompatibility | 9 |
+| 2 | Authentication failure, authorization denial/change, or capability revoked | 3 |
+| 3 | Cursor expired, boot/unit/generation/identity mismatch, or stale selector | 4 |
+| 4 | Worker unavailable or required backend unavailable/lost | 6 |
+| 5 | Sequence gap, slow consumer, bounded-buffer overflow, clean worker shutdown, client-visible interruption, or other refresh-required stream end | 8 |
+| 6 | Requested finite follow completed normally without an error | 0 |
+
+A reason matching an earlier row never falls through to generic interruption.
+Typed response/error codes remain authoritative within these exact mappings.
 
 ## Worker state boundary
 
