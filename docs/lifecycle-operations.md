@@ -954,12 +954,12 @@ or persistent operation state.
 ## Linked work
 
 - [#136] implements the initial `up` and `down` client/runtime slice after
-  worker prerequisites; `restart` implementation requires a separate follow-up
-  slice before implementation begins;
+  worker prerequisites;
 - [#137] defines detailed status, result evidence, logs, metrics, and events;
 - [#146] owns health, readiness, watchdog, and graceful behavior;
 - [#171] owns complete unit shadow/override detection;
-- [#241] implements the local worker and typed API;
+- [#241] implements the local worker and typed API, including worker-side
+  `up`/`down`/`restart` and the remaining `restart` client integration;
 - [#242] defines concrete Nix services, sockets, policy, and authorization; and
 - [#245] defines remote controller authentication and replay protection.
 
