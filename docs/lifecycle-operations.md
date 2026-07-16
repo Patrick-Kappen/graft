@@ -987,7 +987,8 @@ After this design, [#137], and [#242] are approved:
 8. Add TUI and future controller clients only through the same typed API.
 
 No implementation slice may introduce daemon reload, direct Podman lifecycle,
-or persistent operation state.
+a persistent desired-state/result database, or any operation persistence beyond
+the required bounded `/run` activation-interlock phase records.
 
 ## Linked work
 
