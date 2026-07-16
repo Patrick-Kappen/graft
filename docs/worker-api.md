@@ -3,7 +3,8 @@
 > **Status:** approved design for future implementation. The current release
 > does not install a worker or expose runtime API commands. Lifecycle details
 > are fixed by [Local lifecycle operations](lifecycle-operations.md);
-> observability details remain in [#137], and service/socket installation
+> status, logs, metrics, and events are fixed by
+> [Runtime observability](observability.md), and service/socket installation
 > details remain in [#242].
 
 This document specifies the local worker boundary required by the
@@ -318,8 +319,9 @@ check fails. Detailed shadow detection remains coordinated with [#171].
 
 This document fixes operation shapes and boundaries. The
 [Local lifecycle operations](lifecycle-operations.md) contract defines exact
-state transitions, completion, concurrency, and interruption semantics; final
-state, metric, log, and event fields are owned by [#137].
+state transitions, completion, concurrency, and interruption semantics;
+[Runtime observability](observability.md) owns state, metric, log, storage, and
+event fields.
 
 ### Discovery and capabilities
 
@@ -380,8 +382,9 @@ Unavailable or unauthorized detail remains explicit.
 - follow future records from a cursor.
 
 The worker chooses the journal unit from manifest identity. Requests may contain
-bounded time direction, count, and approved severity/filter fields defined by
-[#137], but never a raw journal match expression. Every record identifies boot,
+bounded time direction, count, and approved priority/filter fields defined by
+[Runtime observability](observability.md), but never a raw journal match
+expression. Every record identifies boot,
 unit, timestamp, cursor, truncation, and redaction state.
 
 ### Metrics and storage
@@ -754,7 +757,7 @@ backend response maps.
 ### Storage adapter
 
 - accounts only manifest-bound rootfs, writable overlay, and managed-volume
-  resources approved by [#137];
+  resources approved by [Runtime observability](observability.md);
 - distinguishes immutable store size, writable layer size, volume size,
   unavailable data, and shared/deduplicated bytes;
 - applies time, entry, depth, and byte-accounting budgets; and
@@ -882,7 +885,7 @@ Capability classification remains:
 
 | Capability | Class | Availability |
 | --- | --- | --- |
-| Own-user observation and lifecycle | First-class | Planned in #241 after this contract, the lifecycle contract, #137, and #242 are approved |
+| Own-user observation and lifecycle | First-class | Planned in #241 after this contract, lifecycle/observability contracts, and #242 are approved |
 | System observation | Dangerous | Planned with separate host-policy authorization |
 | System lifecycle mutation | Dangerous | Planned with per-operation authorization |
 | Remote controller request | Dangerous | Planned in #245/#246 |
@@ -905,7 +908,8 @@ Implementation should remain reviewable and testable in this order:
    collision, target, and generation tests.
 3. Add a socket-activated read-only worker with manifest and mock systemd
    adapters.
-4. Add typed status/inspect and bounded logs/metrics after [#137] approval.
+4. Add typed status/inspect and bounded logs/metrics after the approved
+   [observability contract](observability.md).
 5. Add user lifecycle operations after the approved
    [local lifecycle contract](lifecycle-operations.md) and required
    observability/Nix designs.
@@ -922,8 +926,8 @@ operation.
 
 - [Local lifecycle operations](lifecycle-operations.md): exact `up`, `down`, and
   `restart` state machines and idempotent results;
-- [#137]: snapshot fields, metric formulas, log filters, cursor recovery, and
-  storage accounting semantics;
+- [Runtime observability](observability.md): snapshot fields, metric formulas,
+  log filters, cursor recovery, and storage accounting semantics;
 - [#171]: complete search-path shadow and foreign-override detection;
 - [#241]: implementation crate boundaries and selected backend libraries;
 - [#242]: exclusive ownership of concrete paths, units, users/groups, socket
@@ -933,7 +937,6 @@ operation.
 - [#245]: enrollment, mutual authentication, remote replay protection, and
   controller authorization.
 
-[#137]: https://github.com/Patrick-Kappen/graft/issues/137
 [#171]: https://github.com/Patrick-Kappen/graft/issues/171
 [#241]: https://github.com/Patrick-Kappen/graft/issues/241
 [#242]: https://github.com/Patrick-Kappen/graft/issues/242

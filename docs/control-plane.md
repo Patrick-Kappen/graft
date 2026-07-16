@@ -177,7 +177,8 @@ The first operation groups are:
 The [Local worker and API contract](worker-api.md) chooses bounded
 length-prefixed JSON framing and a typed versioned envelope. The
 [Local lifecycle operations](lifecycle-operations.md) contract fixes `up`,
-`down`, and `restart`; final observability fields remain in [#137]. The protocol
+`down`, and `restart`; the [Runtime observability contract](observability.md)
+fixes layered status, inspect, logs, metrics, storage, and events. The protocol
 rejects unknown mutation intent, validates bounds, versions explicitly, and
 returns typed errors rather than raw backend output.
 
@@ -385,7 +386,7 @@ The first local control plane does not provide:
 1. Approve this umbrella architecture in [#232].
 2. Approve the [Local worker and API contract](worker-api.md), including
    authorization and manifest identity.
-3. Specify observability semantics in [#137], composing with the approved
+3. Approve [Runtime observability](observability.md), composing with the
    [local lifecycle contract](lifecycle-operations.md).
 4. Specify Nix installation, socket, service, and ownership policy in [#242].
 5. Implement the worker-side lifecycle API and `restart` client integration in
@@ -396,7 +397,6 @@ The first local control plane does not provide:
    [#174].
 
 [#136]: https://github.com/Patrick-Kappen/graft/issues/136
-[#137]: https://github.com/Patrick-Kappen/graft/issues/137
 [#161]: https://github.com/Patrick-Kappen/graft/issues/161
 [#171]: https://github.com/Patrick-Kappen/graft/issues/171
 [#174]: https://github.com/Patrick-Kappen/graft/issues/174
