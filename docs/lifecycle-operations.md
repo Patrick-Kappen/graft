@@ -411,7 +411,7 @@ After these checks, the query returns exactly one tagged variant:
 | --- | --- |
 | `Terminal` | The current-epoch principal/ID has a retained `LifecycleTerminalResult` or `MutationTerminalError`. |
 | `InProgress` | The current-epoch principal/ID is accepted but not terminal. |
-| `NotFound` | No record for this current-epoch principal/ID was ever accepted or remains timestamp-valid. |
+| `NotFound` | No record for this current-epoch principal/ID was ever accepted, and the queried UUID remains timestamp-valid. |
 | `OperationResultUnavailable` | The supplied epoch is old and its cache was lost; code is `cache_lost`. |
 
 `InProgress` contains operation/epoch identity, action, selector, accepted time,

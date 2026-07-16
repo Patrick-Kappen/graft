@@ -129,10 +129,10 @@ For local Unix peers, the initial principal key is the accepted peer UID; future
 remote principals require their own authenticated key. Worker-wide accounting
 is shared by the single `Accept=no` service across all connections.
 
-The manager-submission response, ambiguous-submission reconciliation,
-post-client completion grace, and absolute lifecycle observation rows are exact
-version-1 semantic intervals, not negotiable maxima; Nix policy cannot lower or
-raise them. The server advertises effective values no larger than the other
+The mutation UUIDv7 timestamp window, manager-submission response,
+ambiguous-submission reconciliation, post-client completion grace, and absolute
+lifecycle observation rows are exact version-1 semantic intervals, not
+negotiable maxima; Nix policy cannot lower or raise them. The server advertises effective values no larger than the other
 maxima, and Nix policy may lower those other values. A client cannot raise any
 value. All values are versioned protocol constants and require review before
 change. Limits are checked before reserving
@@ -523,8 +523,9 @@ Within one worker epoch and principal key:
   independent interest; only final-caller deadline, cancellation, or disconnect
   suppresses both existing-work attachment and submission and retains
   `deadline_before_commitment`, `cancelled_before_commitment`, or
-  `disconnected_before_commitment` for ten minutes from server acceptance, and
-  that identifier cannot later mutate;
+  `disconnected_before_commitment` through the later of ten minutes after server
+  acceptance or ten minutes after the UUIDv7 timestamp, and that identifier
+  cannot later mutate;
 - a `MutationTerminalError` contains operation/epoch identity, action, workload
   selector, code, phase, timestamp, and retry guidance but no lifecycle
   disposition, outcome, manager job, invocation, or final workload state;
