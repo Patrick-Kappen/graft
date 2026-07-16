@@ -322,9 +322,10 @@ caller authorization. It never scans or adopts foreign units or containers.
 - `down`; and
 - `restart`.
 
-Each lifecycle mutation payload contains only action, workload identity,
-operation identifier, and origin worker epoch. Each caller attachment separately
-contains its client deadline within negotiated limits, progress preference,
+Each lifecycle mutation payload contains only action, structured workload
+selector (including generation), operation identifier, and origin worker epoch.
+Each caller attachment separately contains its client deadline within negotiated
+limits, progress preference,
 connection/request correlation, and response-format state. A fresh operation
 must use the epoch returned by the current
 `ServerHello`. Re-presenting an operation after reconnect preserves its original
@@ -444,6 +445,12 @@ record has been accepted by the configured bounded audit sink. An unavailable
 or saturated sink therefore fails system mutation closed. Any observation that
 host policy requires to be audited follows the same rule.
 
+Each caller attachment encodes `deadline_ms` as an unsigned JSON integer duration
+in milliseconds. Its monotonic timer starts when the server receives the
+complete framed `Request`; processing and admission time count against it. Zero
+is invalid, omission uses the advertised effective maximum, and a value above
+that maximum is rejected. It is never an absolute timestamp.
+
 Client deadlines bound how long the worker waits and how long ordinary response
 state is retained. Mutation duplicate records and their bounded terminal results
 are the explicit exception: they follow the deadline-independent
@@ -455,7 +462,9 @@ observes it for at most the fixed
 a fresh grace starts after the next final departure. Neither joins nor grace may
 extend observation beyond ten minutes after server acceptance. At grace or
 absolute cutoff without proof, the worker retains `result_unknown` and releases
-its operation lock. Deadlines do not rewrite systemd's workload timeout. Once
+its client-operation lock. Any non-terminal manager work keeps the separate
+activation interlock that blocks reload/replacement. Deadlines do not rewrite
+systemd's workload timeout. Once
 systemd accepts a job, client cancellation or disconnect does not imply
 rollback, stop, or an opposite lifecycle action.
 
@@ -482,8 +491,8 @@ conflicts with the first record. Every duplicate request and separate
 operation-result query is reauthorized against the current principal, workload,
 and action before any retained or in-flight result is disclosed.
 
-Immutable payload equality covers action, structured workload selector,
-manifest generation, and origin worker epoch. Per-caller connection/request
+Immutable payload equality covers action, the complete structured workload
+selector (including generation), and origin worker epoch. Per-caller connection/request
 IDs, deadlines, progress preferences, and response formatting are excluded. A
 caller may join with a new delivery deadline; changing an immutable mutation
 field conflicts.
@@ -500,8 +509,8 @@ Within one worker epoch and principal key:
   independent interest; only final-caller deadline, cancellation, or disconnect
   suppresses both existing-work attachment and submission and retains
   `deadline_before_commitment`, `cancelled_before_commitment`, or
-  `disconnected_before_commitment` for the full acceptance window, and that
-  identifier cannot later mutate;
+  `disconnected_before_commitment` for ten minutes from server acceptance, and
+  that identifier cannot later mutate;
 - a `MutationTerminalError` contains operation/epoch identity, action, workload
   selector, code, phase, timestamp, and retry guidance but no lifecycle
   disposition, outcome, manager job, invocation, or final workload state;
@@ -511,12 +520,13 @@ Within one worker epoch and principal key:
   manager reload, provenance validation, and manifest publication; worker
   submission holds the corresponding lock while re-reading state/job evidence,
   validating generation/provenance, and obtaining manager acceptance/rejection;
-- before the call, worker submission writes a bounded `/run` pending-submission
-  interlock record; manager response and exact reconciliation have separate
-  five-second deadlines;
-- unresolved ambiguous delivery retains `result_unknown`, degrades lifecycle,
-  and leaves the record so Nix activation and further workload mutation fail
-  closed until explicit proven administrator recovery from [#242];
+- before manager-work commitment, the worker writes a bounded `/run` in-flight
+  activation interlock record; it remains for submitted or joined work until
+  correlated manager job/invocation terminality, not merely manager acceptance;
+- manager response and exact reconciliation have separate five-second deadlines;
+  unresolved delivery or non-terminal work after client observation ends keeps
+  the record so Nix activation and further workload mutation fail closed until
+  terminal proof or explicit proven administrator recovery from [#242];
 - only pre-acceptance mismatches return `stale_manifest` or provenance failure,
   while post-submission publication is recorded as an in-operation change and
   cannot retarget;
@@ -539,7 +549,8 @@ Within one worker epoch and principal key:
   limits; and
 - an accepted identifier's request remains while in flight, and its complete
   bounded terminal result remains until both terminal completion and its
-  complete ten-minute acceptance window have passed; and
+  ten minutes have passed since server acceptance, independently of the UUID
+  timestamp-validity window; and
 - retained mutation records are capped at 256 per principal and 1,024 per
   worker, with overload rejection instead of early eviction.
 

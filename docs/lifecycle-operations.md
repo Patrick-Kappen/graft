@@ -61,8 +61,9 @@ create another lifecycle path.
 ## Selection and authority
 
 The client resolves an input name to a structured selector before mutation. The
-selector contains the explicit target, current manifest generation, and
-manifest-issued workload identifier required by the worker contract.
+selector contains the explicit target, workload name, current manifest
+generation, and manifest-issued workload identifier required by the worker
+contract.
 
 A normal local client may aggregate authorized system and user discovery, but:
 
@@ -366,7 +367,7 @@ An accepted operation terminates as exactly one tagged response variant:
 
 - operation identifier and origin worker epoch;
 - current worker epoch;
-- manifest generation and workload selector;
+- structured workload selector, including its manifest generation;
 - lifecycle kind and requested action;
 - authorization classification;
 - initial state;
@@ -522,8 +523,9 @@ or conflict with another principal's record. Every duplicate and every separate
 operation-result query is reauthorized against the current principal, workload,
 and action before returning any in-flight or retained result.
 
-Immutable mutation equality covers only action, structured workload selector,
-manifest generation, and origin worker epoch under the principal/UUID key.
+Immutable mutation equality covers only action, the complete structured workload
+selector (including generation), and origin worker epoch under the
+principal/UUID key.
 Caller-specific delivery state—connection and request IDs, deadline, progress
 preference, and response formatting—is excluded. A reconnect may therefore join
 the same mutation with a new deadline; changing any mutation field conflicts.
@@ -533,7 +535,7 @@ Within one worker epoch and principal key:
 - a duplicate operation identifier with the identical immutable request joins
   its retained in-flight or terminal result;
 - the same identifier with a different request is a conflict;
-- an unknown identifier outside its acceptance window returns
+- an unknown identifier outside its UUID timestamp-validity window returns
   `operation_id_expired` and can never become a fresh mutation;
 - a different lifecycle mutation while one is in flight fails admission before
   its new ID is accepted, returning `operation_in_progress` with safe
@@ -579,22 +581,30 @@ original attribution or terminal evidence, the pinned operation returns
 `result_unknown`; it never adopts the replacement workload. Lifecycle progress
 follows this rule rather than ending merely because the manifest changed.
 
-Manager submission has a five-second response deadline. Before the backend call,
-the worker writes one bounded non-secret pending-submission interlock record
-under `/run` while holding the activation lock. A timeout triggers a further
-five-second manager reconciliation for the exact job, unit, invocation, and
-operation evidence. Proven acceptance or rejection clears the record and
-produces the corresponding result.
+Manager submission has a five-second response deadline. Before manager-work
+commitment, the worker writes one bounded non-secret in-flight activation
+interlock record under `/run` while holding the activation lock. The record
+remains for submitted and joined manager work until its correlated job and
+invocation are terminal; manager acceptance alone never clears it. Nix
+activation checks all such records under its exclusive lock and fails closed
+without artifact replacement, manager reload, or manifest publication while any
+record remains.
 
-If reconciliation remains ambiguous, the worker retains `result_unknown`, marks
-its lifecycle backend degraded, and leaves the interlock record in place before
-releasing the file lock. Nix activation must check that record under its
-exclusive lock and fail closed without artifact replacement, manager reload, or
-manifest publication. Further lifecycle mutation for that workload is rejected.
-The record is operational request safety state, not desired state; [#242] must
-define an explicit administrator recovery that proves no late manager action can
-retarget a replacement before clearing it. It is never cleared by timeout,
-worker restart, or cache eviction.
+A submission timeout triggers a further five-second manager reconciliation for
+the exact job, unit, invocation, and operation evidence. Proven rejection before
+manager work exists clears the record and returns submission failure. Proven
+acceptance keeps the record through terminal manager completion. If
+reconciliation remains ambiguous, the worker retains `result_unknown`, marks its
+lifecycle backend degraded, and leaves the record in place. The same applies
+when client/grace/absolute observation ends before the manager job itself is
+terminal: Graft may release client operation state, but not the activation
+interlock.
+
+Further lifecycle mutation for that workload is rejected while the record
+remains. The record is operational request safety state, not desired state;
+[#242] must define explicit administrator recovery that stops or proves terminal
+all correlated manager work before clearing it. It is never cleared merely by
+timeout, `result_unknown`, worker restart, or cache eviction.
 
 A privileged administrator bypassing the approved activation lock or interlock
 record is outside Graft's serialization guarantee. The worker still detects
@@ -609,8 +619,9 @@ and at most ten minutes old. The server publishes UTC Unix epoch milliseconds in
 `ServerHello` so clients can detect local skew before mutation. Every accepted
 identifier retains its immutable request while in flight and its complete
 bounded terminal result until both the operation is terminal and the
-complete ten-minute acceptance window has passed. A resultless tombstone cannot
-replace that result. A known identical in-flight or terminal request may still
+ten minutes have passed since server acceptance. This retention interval is
+anchored to server acceptance, not the client-generated UUID timestamp. A
+resultless tombstone cannot replace that result. A known identical in-flight or terminal request may still
 join after its timestamp ages out and receives the same result; an unknown
 expired ID cannot start work. Entries are never evicted early and reused as
 fresh. Retained results are capped at 32 KiB each and admission is bounded to
@@ -618,6 +629,14 @@ fresh. Retained results are capped at 32 KiB each and admission is bounded to
 with `overloaded` rather than weakening duplicate protection.
 
 ## Deadlines, cancellation, and disconnects
+
+Each caller attachment encodes `deadline_ms` as an unsigned JSON integer duration
+in milliseconds. The server starts a monotonic timer when it has received the
+complete framed `Request`. Zero is invalid; omission selects the server's
+advertised effective lifecycle maximum; a value above that maximum is rejected.
+It is a duration, never an absolute client timestamp, so wall-clock skew does not
+change expiry. Parsing and admission time after complete-frame receipt count
+against it.
 
 A client deadline bounds only that caller's interest and synchronous delivery;
 it does not fix the shared operation outcome. It also does not replace
@@ -669,8 +688,10 @@ loses interest:
 The 30-second grace is independent of an unset or unbounded workload
 `TimeoutStartSec`/`TimeoutStopSec`. Rejoins cannot extend operation observation
 past the absolute cutoff of ten minutes after server acceptance. At that cutoff
-the worker retains `result_unknown`, releases the lock/observation, and ends all
-callers even if interest remains. A manager job may continue after Graft has
+the worker retains `result_unknown`, releases the client-operation
+lock/observation, and ends all callers even if interest remains. Non-terminal
+manager work keeps its separate activation interlock until terminal proof or
+explicit recovery. A manager job may continue after Graft has
 published `result_unknown`; its later completion is ordinary observed state,
 not retroactive mutation completion.
 
