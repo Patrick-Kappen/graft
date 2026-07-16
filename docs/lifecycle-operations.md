@@ -67,8 +67,9 @@ contract.
 
 A normal local client may aggregate authorized system and user discovery, but:
 
-- an unqualified name that matches more than one visible scope is ambiguous and
-  fails before authorization or mutation;
+- discovery authorization is completed before aggregation; an unqualified name
+  that matches more than one authorized visible scope is ambiguous and fails
+  before lifecycle authorization or mutation;
 - the system worker serves only target `system`;
 - a non-root user worker serves only target `user` for its own effective UID;
 - a UID-0 user worker serves target `user` for UID 0 and remains rootful;
@@ -264,16 +265,23 @@ failure reset remains deferred rather than hidden inside `down`.
 - TOML or resolved configuration;
 - Quadlet source or generated units;
 - Nix store paths, rootfs trees, or closure mounts;
-- writable overlay state;
 - bind-mount sources;
-- managed or external volumes;
+- named managed or external volumes;
 - secrets or credentials;
 - user accounts, sessions, or linger policy; or
 - unrelated containers or units.
 
 Quadlet-generated `ExecStop` and `ExecStopPost` behavior remains part of the
 already materialised unit. Graft does not add stronger Podman cleanup and never
-interprets `down` as data deletion.
+interprets `down` as deletion of durable state. Durable bind sources and
+named/external volumes keep their documented persistence semantics.
+
+The preservation guarantee does not cover ephemeral runtime state. Quadlet's
+materialised `--rm`/`podman rm -v` cleanup removes the runtime container and may
+discard its writable container layer and anonymous volumes. Anonymous volumes
+explicitly have no persistence guarantee. `down` reports these generated effects
+and does not present ephemeral overlay or anonymous-volume state as preserved
+persistent data.
 
 ## `restart` contract
 
