@@ -55,12 +55,13 @@ cannot silently combine unrelated protocol implementations.
 
 ### NixOS
 
-The existing option remains the root:
+The existing option remains the root, with one required stable host identity:
 
 ```nix
 services.graft = {
   enable = true;
   package = pkgs.graft;
+  hostId = "018f0f77-8c4d-7b2a-8e6a-4b8a7d3a1c20";
 };
 ```
 
@@ -80,12 +81,13 @@ claim these components are available early.
 
 ### Home Manager
 
-The existing option remains the root:
+The existing option remains the root, with the same stable host identity:
 
 ```nix
 programs.graft = {
   enable = true;
   package = pkgs.graft;
+  hostId = "018f0f77-8c4d-7b2a-8e6a-4b8a7d3a1c20";
 };
 ```
 
@@ -100,6 +102,26 @@ Once implemented, enabling the complete integration:
 
 Home Manager does not alter system groups, system polkit, linger, login sessions,
 or another account's manager.
+
+### Canonical host identity
+
+`hostId` is a non-secret canonical lowercase RFC 9562 UUIDv7 string and is the
+only host identity published in worker manifests/descriptors. Empty values,
+uppercase, braces, non-canonical hyphen placement, invalid hex, a version nibble
+other than `7`, a variant other than binary `10`, or trailing data fail
+evaluation. It is configured fleet identity, not a
+hostname, raw `/etc/machine-id`, boot ID, network address, or value generated at
+each evaluation.
+
+`services.graft.hostId` is required when the NixOS worker integration is enabled.
+An integrated Home Manager module inherits exactly that value through `osConfig`
+and fails evaluation if an explicit `programs.graft.hostId` differs. Standalone
+Home Manager has no NixOS source and therefore requires an explicit `hostId` when
+the user worker is enabled. Nix-generated system/user descriptors and manifests
+carry the same UUID; clients/workers refuse local aggregation or provenance
+binding when values differ. Runtime endpoint validation also compares the user
+value with the installed system descriptor when that authorized descriptor is
+present.
 
 ### Package validation
 
@@ -164,8 +186,11 @@ Neither worker accepts a client field that changes row.
 `$XDG_RUNTIME_DIR` and `$XDG_CONFIG_HOME` above describe the Nix-installed
 account paths. The worker does not trust client environment variables to resolve
 them. Its service receives fixed expanded paths from the owning manager/Nix
-generation. Empty, relative, non-normalized, wrong-owner, symlinked, or
-scope-mismatched current references fail closed.
+generation. Empty, relative, non-normalized, wrong-owner, or scope-mismatched
+current references fail closed. The configured current-reference pathname may
+be exactly one Nix-managed final symlink to an immutable regular file in the Nix
+store. Symlinked parent components, another symlink at the resolved target,
+additional chains, non-store targets, and wrong target type/owner fail closed.
 
 No option permits overriding service names, socket paths, lock paths, interlock
 paths, manager address, Podman connection, or manifest target. Stable client
@@ -558,16 +583,25 @@ Manager availability and epoch checks remain runtime worker responsibilities.
 
 ### Podman
 
-The system worker uses only the configured rootful system Podman API/runtime
-context. The user worker uses only the Podman context belonging to its effective
-UID; UID 0 remains rootful. The service definition supplies the fixed adapter
-endpoint/activation dependency. A client cannot provide URI, socket, connection
-name, container ID, or storage path.
+The system worker uses only the rootful system API endpoint
+`/run/podman/podman.sock`, owned by system `podman.socket`. Its service has fixed
+`Wants=podman.socket` and `After=podman.socket`; socket activation starts only
+that local Unix API, never a network listener.
 
-Graft may require the appropriate Podman socket/API service but does not start a
-user manager or grant cross-user runtime access. Missing/disabled/incompatible
-Podman produces typed capability/backend unavailability; it does not trigger a
-CLI fallback.
+A non-root or UID-0 user worker uses only
+`$XDG_RUNTIME_DIR/podman/podman.sock`, owned by `podman.socket` in that same user
+manager. Its service has fixed user-manager `Wants=podman.socket` and
+`After=podman.socket`. UID 0 remains rootful but still uses the UID-0 user
+manager/socket rather than `/run/podman/podman.sock`.
+
+Nix installs/enables the applicable socket unit with the worker context. A
+Podman socket start failure does not stop the worker; runtime-dependent fields
+and operations return typed unavailability. Graft does not start a user manager
+or grant cross-user runtime access. Empty, missing,
+wrong-owner, wrong-type, symlinked, non-socket, manager-mismatched, or
+incompatible endpoints make the Podman adapter unavailable. A client cannot
+provide a URI, socket, connection name, container ID, or storage path, and no CLI
+fallback is attempted.
 
 ### Journald and audit
 
@@ -642,10 +676,22 @@ a typed compatibility decision, never silently omitted by broad version checks.
 
 ## Restart, idle, and backend failure
 
-The service is socket activated and uses bounded restart-on-failure. Restart rate
-limits prevent a malformed client or backend crash loop from causing unbounded
-activation. A failed service leaves the socket managed but clients receive a
-bounded connection/protocol failure until restart succeeds.
+The service is socket activated with this fixed version-1 restart policy in both
+manager contexts:
+
+```text
+Restart=on-failure
+RestartSec=2s
+StartLimitIntervalSec=60s
+StartLimitBurst=5
+```
+
+Clean worker exit is not restarted by the service, while the socket can activate
+it again. Five failed starts within the rolling 60-second manager interval hit
+the start limit; further activation fails until systemd permits/reset-failed is
+performed under ordinary administrator policy. No worker code resets its own
+limit. A failed service leaves the socket managed but clients receive a bounded
+connection/protocol failure until a permitted restart succeeds.
 
 Every process start creates a new worker epoch. Before accepting mutation, the
 worker:
@@ -659,12 +705,13 @@ worker:
 Read-only capabilities may report partial/backend-unavailable state according to
 the observability contract. They cannot bypass unsafe records for mutation.
 
-An optional fixed idle timeout belongs to the worker implementation. Idle exit
-is allowed only when there are no connections, streams, in-flight/retained
-operations requiring observation, pending audits, active rate-limit work,
-interlocks, reconciliation work, or buffered output. Any interlock disables idle
-exit. Nix policy may disable idle exit or increase it within an advertised
-maximum; it cannot force exit while safety work remains.
+Idle exit is disabled in protocol/integration version 1 and there is no Nix
+option or advertised timeout. After first socket activation, a healthy worker
+remains active until explicit manager stop, package/generation replacement,
+manager/session teardown, clean administrative shutdown, or failure. This keeps
+reconciliation, interlock, audit, and backend-availability work resident. A
+future idle policy requires a separately reviewed contract and cannot be enabled
+by passing an extra worker argument.
 
 ## Secrets and credentials
 
@@ -777,8 +824,9 @@ NixOS and Home Manager checks cover:
 - upgrade/rollback package-manifest compatibility failures.
 
 Assertions test unknown users, duplicate workload/service IDs, empty metadata,
-wrong target/UID, missing binary, incompatible schema, oversized manifest, and
-forbidden policy weakening.
+invalid/non-canonical UUIDv7 host identity, integrated system/user host-ID
+mismatch, wrong target/UID, missing binary, incompatible schema, oversized
+manifest, and forbidden policy weakening.
 
 ### Controlled runtime checks
 
