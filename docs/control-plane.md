@@ -88,7 +88,7 @@ user/rootful contexts separate.
 The [Local worker and API contract](worker-api.md) fixes the process authority,
 manifest, transport, framing, authorization, limits, recovery, and adapter
 boundaries. Concrete socket paths, service identities, hardening, and any
-privileged cross-scope administrative operation are fixed by
+privileged cross-scope administrative operation is fixed by
 [Nix worker integration](nix-worker-integration.md).
 
 ## One local client experience
