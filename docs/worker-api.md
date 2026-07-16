@@ -169,8 +169,8 @@ operation is accepted before a successful handshake.
 - supported operation capabilities;
 - effective limits and deadline bounds;
 - current manifest generation and availability state;
-- current worker epoch and server wall-clock time as UTC Unix epoch
-  milliseconds encoded as a JSON integer; and
+- current worker epoch and `server_time_ms`, the epoch's logical receive time on
+  a UTC Unix-millisecond scale encoded as a JSON integer; and
 - one server-generated connection identifier for audit correlation.
 
 Major versions must match exactly. The selected minor version is the highest
@@ -342,8 +342,10 @@ current policy; a known record must exactly match action/selector before
 workload-sensitive disclosure, while recordless variants assert no workload
 existence. It returns exactly one of retained `Terminal`, current `InProgress`,
 current-epoch `NotFound`, or old-epoch
-`OperationResultUnavailable(cache_lost)`; an expired unknown UUID remains
-`operation_id_expired`. Querying never submits or joins lifecycle work. Backend
+`OperationResultUnavailable(cache_lost)`. Epoch classification takes precedence:
+every old epoch returns `cache_lost` regardless of UUID age. Only an unknown
+current-epoch UUID is split into `operation_id_expired` when expired or
+`NotFound` while valid. Querying never submits or joins lifecycle work. Backend
 unit/action selection is worker-owned. There is no force, remove,
 delete-data, arbitrary signal, kill, raw job mode, unit property, or Podman
 option in the initial API.
@@ -475,7 +477,11 @@ a fresh grace starts after the next final departure. Neither joins nor grace may
 extend observation beyond ten minutes after server acceptance. At grace or
 absolute cutoff without proof, the worker retains `result_unknown` and releases
 its client-operation lock. Any non-terminal manager work keeps the separate
-activation interlock that blocks reload/replacement. Deadlines do not rewrite
+activation interlock that blocks reload/replacement. A bounded reconciler
+continues independently via manager signals and polling no more often than every
+five seconds, using a five-second query bound per capped record, plus an on-demand
+pass before rejecting same-workload mutation. It may clear/audit terminal
+interlocks but never revise immutable `result_unknown`. Deadlines do not rewrite
 systemd's workload timeout. Once
 systemd accepts a job, client cancellation or disconnect does not imply
 rollback, stop, or an opposite lifecycle action.
@@ -490,10 +496,18 @@ URN prefixes, non-version-7 values, non-RFC variants, and every other alternate
 UUID representation are rejected rather than normalized. Dedupe keys use the
 validated 128-bit UUID value.
 
-The embedded UUIDv7 timestamp must be no more than one minute ahead of server
-receive time and no more than ten minutes old, compared as Unix epoch
-milliseconds. These fields provide correlation, duplicate control, expiry
-enforcement, and stale-epoch rejection, not authorization.
+At epoch creation the worker records wall-clock Unix milliseconds and a
+monotonic-clock origin. Its logical receive time is the maximum of the prior
+logical value, current wall-clock value, and epoch-origin wall time plus elapsed
+monotonic time. It therefore never decreases or stalls within an epoch even if
+the wall clock moves backward or stops. `ServerHello.server_time_ms`, UUID
+validation, server-acceptance retention, and UUID replay expiry all use this one
+logical time; durations use the monotonic clock directly.
+
+The embedded UUIDv7 timestamp must be no more than one minute ahead of logical
+receive time and no more than ten minutes old. These fields provide correlation,
+duplicate control, expiry enforcement, and stale-epoch rejection, not
+authorization.
 
 Mutation records are keyed by worker epoch, authenticated principal key, and
 validated UUID. For local workers, that principal key contains the fixed worker
