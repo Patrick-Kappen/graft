@@ -549,9 +549,9 @@ Within one worker epoch and principal key:
 - concurrent read operations remain permitted within connection and backend
   limits; and
 - an accepted identifier's request remains while in flight, and its complete
-  bounded terminal result remains until both terminal completion and its
-  ten minutes have passed since server acceptance, independently of the UUID
-  timestamp-validity window; and
+  bounded terminal result remains through terminal completion and until at
+  least ten minutes have passed since server acceptance, independently of the
+  UUID timestamp-validity window; and
 - retained mutation records are capped at 256 per principal and 1,024 per
   worker, with overload rejection instead of early eviction.
 
@@ -560,8 +560,10 @@ once mutation across restart is impossible without persistent hidden state and
 is not promised. An old-epoch result query returns the separate tagged
 `OperationResultUnavailable` response containing operation identity,
 old/current epochs, code `cache_lost`, timestamp, and refresh guidance, with no
-fabricated lifecycle result fields. A disconnect, deadline, cancellation, or
-worker crash after backend submission may return `result_unknown`. The client must query
+fabricated lifecycle result fields. A same-worker disconnect, deadline, or
+cancellation after backend submission may retain lifecycle `result_unknown`;
+a worker crash instead loses that result cache and yields
+`OperationResultUnavailable(cache_lost)` after restart. The client must query
 the current workload state and must not blindly replay a non-idempotent
 operation. The [local lifecycle contract](lifecycle-operations.md) defines
 which observed states make a new `up`, `down`, or `restart` safe.
@@ -684,7 +686,8 @@ Permitted mutable state is bounded and operational:
 - in-flight operations;
 - retained duplicate-operation results;
 - active stream windows and cursors;
-- rate-limit counters; and
+- rate-limit counters;
+- bounded `/run` in-flight activation interlocks; and
 - current worker epoch.
 
 No workload desired state or configuration is written by the worker. Structured
@@ -695,11 +698,21 @@ On restart the worker:
 
 1. creates a new epoch;
 2. reloads and validates the configured manifest;
-3. reconnects only its fixed-context backends;
-4. reconstructs observations;
-5. reports prior in-flight results as unknown if clients ask with old epoch
-   context; and
-6. requires streams to resume through a backend cursor or acknowledge a gap.
+3. loads every fixed-context `/run` activation interlock before accepting
+   clients or allowing Nix activation;
+4. rejects malformed, wrong-owner, wrong-scope, duplicate, or unverifiable
+   records closed without deleting them;
+5. reconnects only its fixed-context backends and reconciles each valid record
+   against exact unit, job, invocation, and provenance evidence;
+6. clears a record only when correlated manager work is terminal and no queued
+   or late action can target a replacement, emitting a reconciliation audit;
+7. retains ambiguous/unavailable records, marks lifecycle degraded, and keeps
+   mutation plus Nix activation blocked pending backend recovery or explicit
+   proven administrator recovery;
+8. reconstructs ordinary observations;
+9. returns `OperationResultUnavailable(cache_lost)` for old-epoch result queries,
+   independently of whether an activation interlock was safely reconciled; and
+10. requires streams to resume through a backend cursor or acknowledge a gap.
 
 Running workloads continue under systemd and Podman while the worker is absent.
 
