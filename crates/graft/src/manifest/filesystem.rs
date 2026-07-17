@@ -3,6 +3,7 @@
 use std::fs::{self, File, Metadata, OpenOptions};
 use std::io::{self, Read as _};
 use std::os::fd::AsRawFd as _;
+use std::os::unix::ffi::OsStringExt as _;
 use std::os::unix::fs::{MetadataExt as _, OpenOptionsExt as _};
 use std::path::{Component, Path, PathBuf};
 
@@ -147,37 +148,47 @@ impl ManifestLoader {
     }
 
     fn load_with_store_root(&self, store_root: &Path) -> Result<GenerationSnapshot, ManifestError> {
-        validate_no_symlink_components(&self.parent)?;
-        self.validate_parent()?;
-        let parent_file = open_nofollow(&self.parent, true)?;
+        let parent_file = open_directory_path(&self.parent)?;
+        self.validate_parent(&parent_file)?;
         validate_no_acl(&parent_file)?;
-        let current = self.parent.join("current");
-        let pointer_metadata = fs::symlink_metadata(&current).map_err(ManifestError::Filesystem)?;
-        if !pointer_metadata.file_type().is_symlink() {
+        let pointer = rustix::fs::statat(
+            &parent_file,
+            "current",
+            rustix::fs::AtFlags::SYMLINK_NOFOLLOW,
+        )
+        .map_err(errno_to_manifest)?;
+        if rustix::fs::FileType::from_raw_mode(pointer.st_mode) != rustix::fs::FileType::Symlink {
             return Err(ManifestError::FileType);
         }
         let expected_pointer_owner = match self.context {
             LoaderContext::System { .. } => (0, 0),
             LoaderContext::User { uid, gid } => (uid, gid),
         };
-        validate_owner(&pointer_metadata, expected_pointer_owner)?;
-
-        let target = fs::read_link(&current).map_err(ManifestError::Filesystem)?;
-        validate_store_target(&target, store_root)?;
-        validate_no_symlink_components(store_root)?;
-        let target_metadata = fs::symlink_metadata(&target).map_err(ManifestError::Filesystem)?;
-        if !target_metadata.is_dir() || target_metadata.file_type().is_symlink() {
-            return Err(ManifestError::FileType);
+        if (pointer.st_uid, pointer.st_gid) != expected_pointer_owner {
+            return Err(ManifestError::Ownership);
         }
 
-        let generation = open_nofollow(&target, true)?;
-        let opened_metadata = generation.metadata().map_err(ManifestError::Filesystem)?;
-        validate_no_acl(&generation)?;
-        if opened_metadata.dev() != target_metadata.dev()
-            || opened_metadata.ino() != target_metadata.ino()
-        {
+        let target_bytes = rustix::fs::readlinkat(&parent_file, "current", Vec::new())
+            .map_err(errno_to_manifest)?
+            .into_bytes();
+        let pointer_after = rustix::fs::statat(
+            &parent_file,
+            "current",
+            rustix::fs::AtFlags::SYMLINK_NOFOLLOW,
+        )
+        .map_err(errno_to_manifest)?;
+        if pointer.st_dev != pointer_after.st_dev || pointer.st_ino != pointer_after.st_ino {
             return Err(ManifestError::GenerationReference);
         }
+        let target = PathBuf::from(std::ffi::OsString::from_vec(target_bytes));
+        validate_store_target(&target, store_root)?;
+        let store = open_directory_path(store_root)?;
+        let generation_name = target
+            .file_name()
+            .ok_or(ManifestError::GenerationReference)?;
+        let generation = open_directory_child(&store, generation_name)?;
+        let opened_metadata = generation.metadata().map_err(ManifestError::Filesystem)?;
+        validate_no_acl(&generation)?;
         let owner = self.validate_generation_owner(&opened_metadata)?;
         validate_mode(&opened_metadata, 0o555)?;
         validate_entries(&descriptor_path(&generation))?;
@@ -209,9 +220,9 @@ impl ManifestLoader {
         })
     }
 
-    fn validate_parent(&self) -> Result<(), ManifestError> {
-        let metadata = fs::symlink_metadata(&self.parent).map_err(ManifestError::Filesystem)?;
-        if !metadata.is_dir() || metadata.file_type().is_symlink() {
+    fn validate_parent(&self, parent: &File) -> Result<(), ManifestError> {
+        let metadata = parent.metadata().map_err(ManifestError::Filesystem)?;
+        if !metadata.is_dir() {
             return Err(ManifestError::FileType);
         }
         validate_owner(&metadata, expected_parent_owner(self.context))?;
@@ -266,37 +277,29 @@ fn validate_loaded_context(
     Ok(())
 }
 
-fn validate_no_symlink_components(path: &Path) -> Result<(), ManifestError> {
-    let mut current = PathBuf::from("/");
+fn validate_absolute_normal_path(path: &Path) -> Result<(), ManifestError> {
+    if !path.is_absolute() {
+        return Err(ManifestError::GenerationReference);
+    }
+    let mut rebuilt = PathBuf::new();
     for component in path.components() {
         match component {
-            Component::RootDir => continue,
-            Component::Normal(component) => current.push(component),
+            Component::RootDir | Component::Normal(_) => rebuilt.push(component.as_os_str()),
             Component::Prefix(_) | Component::CurDir | Component::ParentDir => {
                 return Err(ManifestError::GenerationReference);
             }
         }
-        let metadata = fs::symlink_metadata(&current).map_err(ManifestError::Filesystem)?;
-        if metadata.file_type().is_symlink() || !metadata.is_dir() {
-            return Err(ManifestError::GenerationReference);
-        }
     }
-    Ok(())
-}
-
-fn validate_absolute_normal_path(path: &Path) -> Result<(), ManifestError> {
-    if !path.is_absolute()
-        || path
-            .components()
-            .any(|component| matches!(component, Component::CurDir | Component::ParentDir))
-    {
+    if rebuilt.as_os_str() != path.as_os_str() {
         return Err(ManifestError::GenerationReference);
     }
     Ok(())
 }
 
 fn validate_store_target(target: &Path, store_root: &Path) -> Result<(), ManifestError> {
-    if !target.is_absolute() || target.parent() != Some(store_root) {
+    validate_absolute_normal_path(target)?;
+    validate_absolute_normal_path(store_root)?;
+    if target.parent() != Some(store_root) {
         return Err(ManifestError::GenerationReference);
     }
     let Some(name) = target.file_name().and_then(|name| name.to_str()) else {
@@ -344,6 +347,35 @@ impl BTreeNames {
     }
 }
 
+fn errno_to_manifest(error: rustix::io::Errno) -> ManifestError {
+    ManifestError::Filesystem(io::Error::from_raw_os_error(error.raw_os_error()))
+}
+
+fn open_directory_path(path: &Path) -> Result<File, ManifestError> {
+    validate_absolute_normal_path(path)?;
+    let mut directory = open_nofollow(Path::new("/"), true)?;
+    for component in path.components() {
+        if let Component::Normal(name) = component {
+            directory = open_directory_child(&directory, name)?;
+        }
+    }
+    Ok(directory)
+}
+
+fn open_directory_child(directory: &File, name: &std::ffi::OsStr) -> Result<File, ManifestError> {
+    let descriptor = rustix::fs::openat(
+        directory,
+        name,
+        rustix::fs::OFlags::RDONLY
+            | rustix::fs::OFlags::CLOEXEC
+            | rustix::fs::OFlags::NOFOLLOW
+            | rustix::fs::OFlags::DIRECTORY,
+        rustix::fs::Mode::empty(),
+    )
+    .map_err(errno_to_manifest)?;
+    Ok(File::from(descriptor))
+}
+
 fn open_nofollow(path: &Path, directory: bool) -> Result<File, ManifestError> {
     let mut options = OpenOptions::new();
     options
@@ -369,9 +401,7 @@ fn open_child(directory: &File, name: &str) -> Result<File, ManifestError> {
             | rustix::fs::OFlags::NONBLOCK,
         rustix::fs::Mode::empty(),
     )
-    .map_err(|error| {
-        ManifestError::Filesystem(io::Error::from_raw_os_error(error.raw_os_error()))
-    })?;
+    .map_err(errno_to_manifest)?;
     Ok(File::from(descriptor))
 }
 
@@ -462,7 +492,7 @@ mod tests {
     use super::*;
 
     struct Fixture {
-        _temporary: TempDir,
+        temporary: TempDir,
         config_home: PathBuf,
         store_root: PathBuf,
         generation: PathBuf,
@@ -500,7 +530,7 @@ mod tests {
             symlink(&generation, parent.join("current")).unwrap();
 
             Self {
-                _temporary: temporary,
+                temporary,
                 config_home,
                 store_root,
                 generation,
@@ -595,6 +625,20 @@ mod tests {
                 .load_with_store_root(&extra_fixture.store_root),
             Err(ManifestError::UnexpectedEntry)
         ));
+    }
+
+    #[test]
+    fn user_loader_rejects_non_normal_paths_and_symlinked_ancestors() {
+        assert!(ManifestLoader::user(Path::new("/home/user//.config"), 1000, 100).is_err());
+        assert!(ManifestLoader::user(Path::new("/home/user/./.config"), 1000, 100).is_err());
+
+        let fixture = Fixture::new();
+        let alias = fixture.temporary.path().join("config-alias");
+        symlink(&fixture.config_home, &alias).unwrap();
+        let metadata = fixture.config_home.join("graft").metadata().unwrap();
+        let loader = ManifestLoader::user(&alias, metadata.uid(), metadata.gid()).unwrap();
+
+        assert!(loader.load_with_store_root(&fixture.store_root).is_err());
     }
 
     #[test]
