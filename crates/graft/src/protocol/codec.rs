@@ -1,5 +1,7 @@
 //! Direction-bounded length-prefixed JSON frame codec.
 
+use std::io;
+
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use thiserror::Error;
@@ -80,25 +82,63 @@ pub fn encode_frame<T: Serialize>(
     value: &T,
     direction: FrameDirection,
 ) -> Result<Vec<u8>, CodecError> {
-    let payload = serde_json::to_vec(value).map_err(CodecError::Encode)?;
     let maximum = direction.maximum();
-    if payload.is_empty() {
-        return Err(CodecError::ZeroLength);
+    let mut writer = BoundedFrameWriter::new(maximum);
+    if let Err(source) = serde_json::to_writer(&mut writer, value) {
+        return match writer.exceeded {
+            Some(actual) => Err(CodecError::Oversized { actual, maximum }),
+            None => Err(CodecError::Encode(source)),
+        };
     }
-    if payload.len() > maximum {
-        return Err(CodecError::Oversized {
-            actual: payload.len(),
+    writer.finish()
+}
+
+struct BoundedFrameWriter {
+    frame: Vec<u8>,
+    maximum: usize,
+    exceeded: Option<usize>,
+}
+
+impl BoundedFrameWriter {
+    fn new(maximum: usize) -> Self {
+        let mut frame = Vec::with_capacity(PREFIX_BYTES + maximum.min(4_096));
+        frame.extend_from_slice(&[0; PREFIX_BYTES]);
+        Self {
+            frame,
             maximum,
-        });
+            exceeded: None,
+        }
     }
-    let payload_length = u32::try_from(payload.len()).map_err(|_| CodecError::Oversized {
-        actual: payload.len(),
-        maximum,
-    })?;
-    let mut frame = Vec::with_capacity(PREFIX_BYTES + payload.len());
-    frame.extend_from_slice(&payload_length.to_be_bytes());
-    frame.extend_from_slice(&payload);
-    Ok(frame)
+
+    fn finish(mut self) -> Result<Vec<u8>, CodecError> {
+        let payload_length = self.frame.len() - PREFIX_BYTES;
+        if payload_length == 0 {
+            return Err(CodecError::ZeroLength);
+        }
+        let encoded_length = u32::try_from(payload_length).map_err(|_| CodecError::Oversized {
+            actual: payload_length,
+            maximum: self.maximum,
+        })?;
+        self.frame[..PREFIX_BYTES].copy_from_slice(&encoded_length.to_be_bytes());
+        Ok(self.frame)
+    }
+}
+
+impl io::Write for BoundedFrameWriter {
+    fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+        let payload_length = self.frame.len() - PREFIX_BYTES;
+        let attempted = payload_length.saturating_add(buffer.len());
+        if attempted > self.maximum {
+            self.exceeded = Some(attempted);
+            return Err(io::Error::other("encoded frame exceeds protocol limit"));
+        }
+        self.frame.extend_from_slice(buffer);
+        Ok(buffer.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
 }
 
 /// Decodes exactly one direction-bounded typed JSON frame.
