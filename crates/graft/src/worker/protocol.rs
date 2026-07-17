@@ -167,6 +167,42 @@ pub struct WorkerError {
     pub code: WorkerErrorCode,
     /// Safe bounded explanation.
     pub summary: SafeSummary,
+    /// Stable client retry guidance.
+    pub retry: RetryClassification,
+    /// Operation phase in which the error occurred.
+    pub phase: OperationPhase,
+    /// Worker epoch that produced the error.
+    pub worker_epoch: ConnectionIdentifier,
+}
+
+/// Closed client retry classifications.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RetryClassification {
+    /// Repeating the same request cannot make it valid.
+    Never,
+    /// Refresh state before deciding whether a new request is safe.
+    AfterStateRefresh,
+    /// Re-authorize before deciding whether a new request is safe.
+    AfterAuthorization,
+    /// Wait for backend recovery before issuing a new request.
+    AfterBackendRecovery,
+    /// The same idempotent request may be retried with bounded backoff.
+    SameRequestWithBackoff,
+}
+
+/// Closed operation phases represented by the server core.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OperationPhase {
+    /// The request is being admitted and validated.
+    Admission,
+    /// The typed semantic operation is being dispatched.
+    Dispatch,
+    /// The admitted operation is executing.
+    Execution,
+    /// A stream control frame or stream producer failed.
+    Stream,
 }
 
 /// Closed post-handshake error codes used by the server core.

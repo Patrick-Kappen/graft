@@ -25,8 +25,8 @@ use super::dispatcher::{
 use super::framing::{read_frame, write_frame, AsyncFrameError, PARTIAL_FRAME_TIMEOUT};
 use super::limits::{AdmissionPermit, AdmissionRegistry, ConnectionBuffer, ConnectionBufferPermit};
 use super::protocol::{
-    ClientFrame, Request, Response, ResponseResult, SemanticRequest, ServerFrame, WorkerError,
-    WorkerErrorCode,
+    ClientFrame, OperationPhase, Request, Response, ResponseResult, RetryClassification,
+    SemanticRequest, ServerFrame, WorkerError, WorkerErrorCode,
 };
 #[cfg(feature = "worker-test-fixtures")]
 use super::protocol::{StreamEnd, StreamEndReason, StreamItem};
@@ -247,7 +247,7 @@ impl Connection {
 
         let (outbound_tx, outbound_rx) = mpsc::channel(OUTBOUND_QUEUE_ITEMS);
         let writer_registry = registry.clone();
-        let writer = tokio::spawn(writer_loop(direct_writer, outbound_rx));
+        let mut writer = tokio::spawn(writer_loop(direct_writer, outbound_rx));
         let active = Arc::new(Mutex::new(BTreeMap::new()));
         let request_slots = Arc::new(Semaphore::new(
             usize::try_from(server_hello.effective_limits.concurrent_requests()).unwrap_or(1),
@@ -262,6 +262,11 @@ impl Connection {
         let mut shutting_down = false;
         loop {
             tokio::select! {
+                biased;
+                result = &mut writer => {
+                    let _ = result;
+                    break;
+                }
                 frame = read_frame::<_, ClientFrame>(&mut reader) => {
                     let Ok(frame) = frame else { break; };
                     match frame {
@@ -280,7 +285,7 @@ impl Connection {
                             connection_buffer: connection_buffer.clone(),
                             outbound: outbound_tx.clone(),
                             shutdown: shutdown.clone(),
-                        }),
+                        }).await,
                         ClientFrame::StreamAck(control) => {
                             if let Err(code) = control_request(
                                 control.server_connection_id,
@@ -291,9 +296,18 @@ impl Connection {
                                 false,
                             ) {
                                 queue_control_error(
-                                    uid, connection_id, control.request_id, code,
-                                    &writer_registry, &connection_buffer, &outbound_tx,
-                                ).await;
+                                    uid,
+                                    ConnectionEpoch {
+                                        connection_id,
+                                        worker_epoch: epoch.identifier(),
+                                    },
+                                    control.request_id,
+                                    code,
+                                    &writer_registry,
+                                    &connection_buffer,
+                                    &outbound_tx,
+                                )
+                                .await;
                             }
                         }
                         ClientFrame::Cancel(control) => {
@@ -306,9 +320,18 @@ impl Connection {
                                 true,
                             ) {
                                 queue_control_error(
-                                    uid, connection_id, control.request_id, code,
-                                    &writer_registry, &connection_buffer, &outbound_tx,
-                                ).await;
+                                    uid,
+                                    ConnectionEpoch {
+                                        connection_id,
+                                        worker_epoch: epoch.identifier(),
+                                    },
+                                    control.request_id,
+                                    code,
+                                    &writer_registry,
+                                    &connection_buffer,
+                                    &outbound_tx,
+                                )
+                                .await;
                             }
                         }
                     }
@@ -323,7 +346,9 @@ impl Connection {
         }
         cancel_all(&active, shutting_down);
         drop(outbound_tx);
-        let _ = tokio::time::timeout(Duration::from_secs(2), writer).await;
+        if !writer.is_finished() {
+            let _ = tokio::time::timeout(Duration::from_secs(2), &mut writer).await;
+        }
     }
 }
 
@@ -426,6 +451,12 @@ fn cancel_all(active: &ActiveMap, worker_shutdown: bool) {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+struct ConnectionEpoch {
+    connection_id: ConnectionIdentifier,
+    worker_epoch: ConnectionIdentifier,
+}
+
 struct RequestContext {
     request: Request,
     expected_connection: ConnectionIdentifier,
@@ -436,6 +467,7 @@ struct RequestContext {
     dispatcher: Arc<dyn SemanticDispatcher>,
     registry: AdmissionRegistry,
     request_slots: Arc<Semaphore>,
+    #[cfg_attr(not(feature = "worker-test-fixtures"), allow(dead_code))]
     stream_slots: Arc<Semaphore>,
     active: ActiveMap,
     connection_buffer: ConnectionBuffer,
@@ -453,13 +485,14 @@ const fn is_stream_operation(_operation: &SemanticRequest) -> bool {
     false
 }
 
-fn spawn_request(context: RequestContext) {
+async fn spawn_request(context: RequestContext) {
     if context.request.server_connection_id != context.expected_connection {
         send_error(
             &context,
             WorkerErrorCode::ConnectionMismatch,
             "connection identifier mismatch",
-        );
+        )
+        .await;
         return;
     }
     let deadline_ms = context
@@ -471,7 +504,8 @@ fn spawn_request(context: RequestContext) {
             &context,
             WorkerErrorCode::Deadline,
             "request deadline is invalid",
-        );
+        )
+        .await;
         return;
     }
     let deadline_at = tokio::time::Instant::now() + Duration::from_millis(deadline_ms);
@@ -480,7 +514,8 @@ fn spawn_request(context: RequestContext) {
             &context,
             WorkerErrorCode::Overloaded,
             "connection request limit reached",
-        );
+        )
+        .await;
         return;
     };
     let Some(principal_permit) = context.registry.request(context.peer.uid) else {
@@ -488,7 +523,8 @@ fn spawn_request(context: RequestContext) {
             &context,
             WorkerErrorCode::Overloaded,
             "worker request limit reached",
-        );
+        )
+        .await;
         return;
     };
     let (control_tx, control_rx) = watch::channel(ControlState {
@@ -498,27 +534,31 @@ fn spawn_request(context: RequestContext) {
     });
     let emitted = Arc::new(AtomicU64::new(0));
     let stream = is_stream_operation(&context.request.operation);
-    {
+    let conflict = {
         let Ok(mut active) = context.active.lock() else {
             return;
         };
-        if active.contains_key(&context.request.request_id) {
-            drop(active);
-            send_error(
-                &context,
-                WorkerErrorCode::RequestConflict,
-                "request identifier is already active",
-            );
-            return;
-        }
-        active.insert(
-            context.request.request_id,
-            ActiveRequest {
+        if let std::collections::btree_map::Entry::Vacant(entry) =
+            active.entry(context.request.request_id)
+        {
+            entry.insert(ActiveRequest {
                 control: control_tx,
                 emitted: emitted.clone(),
                 stream,
-            },
-        );
+            });
+            false
+        } else {
+            true
+        }
+    };
+    if conflict {
+        send_error(
+            &context,
+            WorkerErrorCode::RequestConflict,
+            "request identifier is already active",
+        )
+        .await;
+        return;
     }
     tokio::spawn(async move {
         let request_id = context.request.request_id;
@@ -625,8 +665,10 @@ async fn run_request(
                     server_connection_id: context.expected_connection,
                     request_id: context.request.request_id,
                     result: worker_error(
+                        context.epoch.identifier(),
                         WorkerErrorCode::Unsupported,
                         "semantic operation is unavailable",
+                        OperationPhase::Dispatch,
                     ),
                 }),
             )
@@ -661,19 +703,19 @@ async fn run_mock_unary(
     let mut request_shutdown = context.shutdown.clone();
     let result = tokio::select! {
         () = tokio::time::sleep(Duration::from_millis(delay_ms)) => ResponseResult::MockComplete,
-        () = tokio::time::sleep_until(deadline_at) => worker_error(WorkerErrorCode::Deadline, "request deadline elapsed"),
+        () = tokio::time::sleep_until(deadline_at) => worker_error(context.epoch.identifier(), WorkerErrorCode::Deadline, "request deadline elapsed", OperationPhase::Execution),
         changed = control.changed() => {
             let _ = changed;
             let state = *control.borrow();
             if state.worker_shutdown {
-                worker_error(WorkerErrorCode::WorkerShutdown, "worker shutdown")
+                worker_error(context.epoch.identifier(), WorkerErrorCode::WorkerShutdown, "worker shutdown", OperationPhase::Execution)
             } else {
-                worker_error(WorkerErrorCode::Cancelled, "request cancelled")
+                worker_error(context.epoch.identifier(), WorkerErrorCode::Cancelled, "request cancelled", OperationPhase::Execution)
             }
         }
         changed = request_shutdown.changed() => {
             let _ = changed;
-            worker_error(WorkerErrorCode::WorkerShutdown, "worker shutdown")
+            worker_error(context.epoch.identifier(), WorkerErrorCode::WorkerShutdown, "worker shutdown", OperationPhase::Execution)
         }
     };
     queue_frame(
@@ -702,7 +744,8 @@ async fn run_mock_stream(
             &context,
             WorkerErrorCode::Overloaded,
             "connection stream limit reached",
-        );
+        )
+        .await;
         return;
     };
     let Some(principal_stream) = context.registry.stream(context.peer.uid) else {
@@ -710,7 +753,8 @@ async fn run_mock_stream(
             &context,
             WorkerErrorCode::Overloaded,
             "worker stream limit reached",
-        );
+        )
+        .await;
         return;
     };
     let mut stream_shutdown = context.shutdown.clone();
@@ -832,43 +876,32 @@ async fn queue_request_error(
         ServerFrame::Response(Response {
             server_connection_id: context.expected_connection,
             request_id: context.request.request_id,
-            result: worker_error(code, summary),
+            result: worker_error(
+                context.epoch.identifier(),
+                code,
+                summary,
+                OperationPhase::Dispatch,
+            ),
         }),
     )
     .await;
 }
 
-fn send_error(context: &RequestContext, code: WorkerErrorCode, summary: &'static str) {
-    let frame = ServerFrame::Response(Response {
-        server_connection_id: context.expected_connection,
-        request_id: context.request.request_id,
-        result: worker_error(code, summary),
-    });
-    let context = context.clone_for_send();
-    tokio::spawn(async move {
-        queue_frame(&context, frame).await;
-    });
-}
-
-impl RequestContext {
-    fn clone_for_send(&self) -> Self {
-        Self {
-            request: self.request.clone(),
-            expected_connection: self.expected_connection,
-            peer: self.peer,
-            principal: self.principal,
-            limits: self.limits,
-            epoch: self.epoch.clone(),
-            dispatcher: self.dispatcher.clone(),
-            registry: self.registry.clone(),
-            request_slots: self.request_slots.clone(),
-            stream_slots: self.stream_slots.clone(),
-            active: self.active.clone(),
-            connection_buffer: self.connection_buffer.clone(),
-            outbound: self.outbound.clone(),
-            shutdown: self.shutdown.clone(),
-        }
-    }
+async fn send_error(context: &RequestContext, code: WorkerErrorCode, summary: &'static str) {
+    queue_frame(
+        context,
+        ServerFrame::Response(Response {
+            server_connection_id: context.expected_connection,
+            request_id: context.request.request_id,
+            result: worker_error(
+                context.epoch.identifier(),
+                code,
+                summary,
+                OperationPhase::Admission,
+            ),
+        }),
+    )
+    .await;
 }
 
 async fn queue_frame(context: &RequestContext, frame: ServerFrame) {
@@ -884,7 +917,7 @@ async fn queue_frame(context: &RequestContext, frame: ServerFrame) {
 
 async fn queue_control_error(
     uid: u32,
-    connection_id: ConnectionIdentifier,
+    identity: ConnectionEpoch,
     request_id: crate::protocol::RequestIdentifier,
     code: WorkerErrorCode,
     registry: &AdmissionRegistry,
@@ -897,9 +930,14 @@ async fn queue_control_error(
         connection_buffer,
         outbound,
         ServerFrame::Response(Response {
-            server_connection_id: connection_id,
+            server_connection_id: identity.connection_id,
             request_id,
-            result: worker_error(code, "request control frame is invalid"),
+            result: worker_error(
+                identity.worker_epoch,
+                code,
+                "request control frame is invalid",
+                OperationPhase::Stream,
+            ),
         }),
     )
     .await;
@@ -933,9 +971,33 @@ async fn queue_encoded(
         .await;
 }
 
-fn worker_error(code: WorkerErrorCode, summary: &'static str) -> ResponseResult {
+fn worker_error(
+    worker_epoch: ConnectionIdentifier,
+    code: WorkerErrorCode,
+    summary: &'static str,
+    phase: OperationPhase,
+) -> ResponseResult {
     let summary = SafeSummary::parse(summary).expect("static worker summary is valid");
-    ResponseResult::Error(WorkerError { code, summary })
+    let retry = match code {
+        WorkerErrorCode::Overloaded | WorkerErrorCode::WorkerShutdown => {
+            RetryClassification::SameRequestWithBackoff
+        }
+        WorkerErrorCode::RequestConflict | WorkerErrorCode::RequestNotFound => {
+            RetryClassification::AfterStateRefresh
+        }
+        WorkerErrorCode::ConnectionMismatch
+        | WorkerErrorCode::Deadline
+        | WorkerErrorCode::Cancelled
+        | WorkerErrorCode::InvalidAcknowledgement
+        | WorkerErrorCode::Unsupported => RetryClassification::Never,
+    };
+    ResponseResult::Error(WorkerError {
+        code,
+        summary,
+        retry,
+        phase,
+        worker_epoch,
+    })
 }
 
 fn frame_error(error: &AsyncFrameError) -> ProtocolError {

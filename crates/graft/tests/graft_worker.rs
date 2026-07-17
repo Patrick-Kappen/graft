@@ -16,8 +16,8 @@ use graft::protocol::{
 };
 #[cfg(feature = "worker-test-fixtures")]
 use graft::worker::protocol::{
-    Cancel, ClientFrame, Request, ResponseResult, SemanticRequest, ServerFrame, StreamAck,
-    StreamEndReason,
+    Cancel, ClientFrame, OperationPhase, Request, ResponseResult, RetryClassification,
+    SemanticRequest, ServerFrame, StreamAck, StreamEndReason,
 };
 use tempfile::TempDir;
 
@@ -343,7 +343,10 @@ fn real_worker_unary_deadline_and_cancellation_are_typed() {
         deadline,
         ServerFrame::Response(response)
             if matches!(&response.result, ResponseResult::Error(error)
-                if error.code == graft::worker::protocol::WorkerErrorCode::Deadline)
+                if error.code == graft::worker::protocol::WorkerErrorCode::Deadline
+                    && error.retry == RetryClassification::Never
+                    && error.phase == OperationPhase::Execution
+                    && error.worker_epoch == hello.worker_epoch)
     ));
 
     let cancel_id = RequestIdentifier::new(4).unwrap();
@@ -698,8 +701,28 @@ fn negotiated_response_byte_exhaustion_closes_connection_deterministically() {
         }),
     );
     let mut byte = [0_u8; 1];
-
     assert_eq!(stream.read(&mut byte).unwrap(), 0);
+
+    stream.set_nonblocking(true).unwrap();
+    let closed_at = Instant::now() + Duration::from_secs(1);
+    loop {
+        match stream.write(&[0_u8; 4]) {
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::BrokenPipe
+                        | std::io::ErrorKind::ConnectionReset
+                        | std::io::ErrorKind::NotConnected
+                ) =>
+            {
+                break;
+            }
+            Ok(_) | Err(_) if Instant::now() < closed_at => {
+                thread::sleep(Duration::from_millis(10));
+            }
+            result => panic!("worker retained read half after writer termination: {result:?}"),
+        }
+    }
 }
 
 #[cfg(feature = "worker-test-fixtures")]
