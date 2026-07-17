@@ -1,3 +1,5 @@
+use serde::ser::SerializeSeq as _;
+
 use graft::protocol::{
     decode_frame, encode_frame, negotiate_handshake, validate_server_hello, Capability,
     CapabilitySet, ClientComponent, ClientHandshakeFrame, ClientHello, CodecError,
@@ -102,6 +104,22 @@ fn codec_accepts_exact_inbound_limit_and_rejects_one_extra_byte() {
             actual,
             maximum: MAX_INBOUND_FRAME_BYTES
         } if actual == MAX_INBOUND_FRAME_BYTES + 1
+    ));
+}
+
+#[test]
+fn bounded_encoder_stops_incremental_serialization_at_directional_limit() {
+    let value = RepeatedItems(100_000);
+
+    let error = encode_frame(&value, FrameDirection::ClientToServer)
+        .expect_err("incremental serialization must stop at the inbound limit");
+
+    assert!(matches!(
+        error,
+        CodecError::Oversized {
+            actual,
+            maximum: MAX_INBOUND_FRAME_BYTES
+        } if actual > MAX_INBOUND_FRAME_BYTES
     ));
 }
 
@@ -347,6 +365,21 @@ fn codec_error_does_not_echo_malformed_payload() {
 
     assert!(!diagnostic.contains("credential"));
     assert!(!diagnostic.contains("do-not-echo"));
+}
+
+struct RepeatedItems(usize);
+
+impl serde::Serialize for RepeatedItems {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut sequence = serializer.serialize_seq(None)?;
+        for _ in 0..self.0 {
+            sequence.serialize_element("x")?;
+        }
+        sequence.end()
+    }
 }
 
 fn raw_frame(payload: &[u8]) -> Vec<u8> {
