@@ -62,6 +62,9 @@ pub enum ServerError {
     /// Activated listener setup failed.
     #[error("failed to configure activated listener")]
     Listener(#[source] io::Error),
+    /// Process shutdown signal registration failed.
+    #[error("failed to register process shutdown signals")]
+    Signal(#[source] io::Error),
     /// Activated listener encountered a persistent accept failure.
     #[error("activated listener accept failed")]
     Accept(#[source] io::Error),
@@ -83,8 +86,18 @@ pub async fn serve(
     let listener = UnixListener::from_std(listener).map_err(ServerError::Listener)?;
     let epoch = Arc::new(WorkerEpoch::new().map_err(|_| ServerError::Epoch)?);
     let registry = AdmissionRegistry::default();
+    let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        .map_err(ServerError::Signal)?;
+    let mut interrupt = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())
+        .map_err(ServerError::Signal)?;
     let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
-    tokio::spawn(wait_for_shutdown(shutdown_tx));
+    tokio::spawn(async move {
+        tokio::select! {
+            _ = terminate.recv() => {}
+            _ = interrupt.recv() => {}
+        }
+        let _ = shutdown_tx.send(true);
+    });
     let mut connections = tokio::task::JoinSet::new();
 
     loop {
@@ -151,27 +164,6 @@ pub async fn serve(
     Ok(())
 }
 
-async fn wait_for_shutdown(sender: watch::Sender<bool>) {
-    #[cfg(unix)]
-    {
-        let Ok(mut terminate) =
-            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-        else {
-            return;
-        };
-        let Ok(mut interrupt) =
-            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())
-        else {
-            return;
-        };
-        tokio::select! {
-            _ = terminate.recv() => {}
-            _ = interrupt.recv() => {}
-        }
-        let _ = sender.send(true);
-    }
-}
-
 struct Connection {
     stream: UnixStream,
     peer: PeerCredentials,
@@ -204,8 +196,9 @@ impl Connection {
             return;
         };
         let (mut reader, mut direct_writer) = tokio::io::split(stream);
-        let hello = tokio::time::timeout(
-            HANDSHAKE_TIMEOUT,
+        let handshake_deadline = tokio::time::Instant::now() + HANDSHAKE_TIMEOUT;
+        let hello = tokio::time::timeout_at(
+            handshake_deadline,
             read_frame::<_, ClientHandshakeFrame>(&mut reader),
         )
         .await;
@@ -214,7 +207,11 @@ impl Connection {
             Ok(Err(error)) => {
                 if registry.rejection(uid) {
                     let frame = ServerHandshakeFrame::ProtocolError(frame_error(&error));
-                    let _ = write_frame(&mut direct_writer, &frame).await;
+                    let _ = tokio::time::timeout_at(
+                        handshake_deadline,
+                        write_frame(&mut direct_writer, &frame),
+                    )
+                    .await;
                 }
                 return;
             }
@@ -223,8 +220,6 @@ impl Connection {
                 return;
             }
         };
-        drop(handshake_permit);
-
         let Ok(connection_id) = ConnectionIdentifier::from_uuid(uuid::Uuid::now_v7()) else {
             return;
         };
@@ -247,20 +242,29 @@ impl Connection {
             Err(error) => {
                 if registry.rejection(uid) {
                     let frame = ServerHandshakeFrame::ProtocolError(handshake_error(&error));
-                    let _ = write_frame(&mut direct_writer, &frame).await;
+                    let _ = tokio::time::timeout_at(
+                        handshake_deadline,
+                        write_frame(&mut direct_writer, &frame),
+                    )
+                    .await;
                 }
                 return;
             }
         };
-        if write_frame(
-            &mut direct_writer,
-            &ServerHandshakeFrame::ServerHello(server_hello.clone()),
-        )
-        .await
-        .is_err()
-        {
+        if !matches!(
+            tokio::time::timeout_at(
+                handshake_deadline,
+                write_frame(
+                    &mut direct_writer,
+                    &ServerHandshakeFrame::ServerHello(server_hello.clone()),
+                ),
+            )
+            .await,
+            Ok(Ok(()))
+        ) {
             return;
         }
+        drop(handshake_permit);
 
         let (outbound_tx, outbound_rx) = mpsc::channel(OUTBOUND_QUEUE_ITEMS);
         let (connection_close_tx, connection_close_rx) = watch::channel(false);

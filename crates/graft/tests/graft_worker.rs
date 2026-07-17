@@ -350,7 +350,20 @@ fn real_worker_process_dispatches_typed_mock_unary_request() {
 fn real_worker_stream_sequences_acknowledgements_and_cancellation() {
     let worker = spawn_worker();
     let mut stream = connect(&worker.socket_path);
-    let hello = handshake(&mut stream);
+    let maxima = EffectiveLimits::protocol_maxima();
+    let limits = EffectiveLimits::new(
+        maxima.concurrent_requests(),
+        maxima.active_streams(),
+        maxima.buffered_response_bytes(),
+        1,
+        maxima.workloads_per_page(),
+        maxima.log_records_per_page(),
+        maxima.encoded_log_message_bytes(),
+        maxima.unary_deadline_ms(),
+        maxima.lifecycle_deadline_ms(),
+    )
+    .unwrap();
+    let hello = handshake_with_limits(&mut stream, limits);
     let request_id = RequestIdentifier::new(2).unwrap();
     send_client_frame(
         &mut stream,
@@ -371,7 +384,7 @@ fn real_worker_stream_sequences_acknowledgements_and_cancellation() {
         &ClientFrame::StreamAck(StreamAck {
             server_connection_id: hello.server_connection_id,
             request_id,
-            sequence: 1,
+            sequence: 0,
         }),
     );
     send_client_frame(
@@ -621,7 +634,20 @@ fn duplicate_request_and_wrong_connection_identifiers_fail_typed() {
 fn invalid_stream_acknowledgement_returns_typed_error_and_stops_interest() {
     let worker = spawn_worker();
     let mut stream = connect(&worker.socket_path);
-    let hello = handshake(&mut stream);
+    let maxima = EffectiveLimits::protocol_maxima();
+    let limits = EffectiveLimits::new(
+        maxima.concurrent_requests(),
+        maxima.active_streams(),
+        maxima.buffered_response_bytes(),
+        1,
+        maxima.workloads_per_page(),
+        maxima.log_records_per_page(),
+        maxima.encoded_log_message_bytes(),
+        maxima.unary_deadline_ms(),
+        maxima.lifecycle_deadline_ms(),
+    )
+    .unwrap();
+    let hello = handshake_with_limits(&mut stream, limits);
     let request_id = RequestIdentifier::new(11).unwrap();
     send_client_frame(
         &mut stream,
