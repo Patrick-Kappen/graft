@@ -63,7 +63,7 @@ fn workload(name: &str, identity: char) -> Value {
         "name":name,
         "target":"system",
         "enabled":true,
-        "lifecycle":"service",
+        "lifecycle":"long_running",
         "startupIntent":"manager_target",
         "sourceIdentity":format!("{name}.toml"),
         "sourceDigest":digest,
@@ -170,6 +170,23 @@ fn endpoint_rejects_wrong_address_digest_context_and_manifest_binding() {
 }
 
 #[test]
+fn lifecycle_and_startup_intent_are_independent_typed_axes() {
+    for (lifecycle, startup) in [
+        ("long_running", "disabled"),
+        ("job", "manager_target"),
+        ("setup", "disabled"),
+    ] {
+        let (mut manifest, _) = pair("system");
+        let mut record = workload("alpha", 'a');
+        record["lifecycle"] = lifecycle.into();
+        record["startupIntent"] = startup.into();
+        set_workloads(&mut manifest, vec![record]);
+
+        assert!(Manifest::from_json(&serde_json::to_vec(&manifest).unwrap()).is_ok());
+    }
+}
+
+#[test]
 fn workload_records_are_typed_readable_and_require_canonical_unique_order() {
     let (mut valid, _) = pair("system");
     set_workloads(
@@ -243,8 +260,22 @@ fn manifest_rejects_context_schema_api_count_and_workload_mismatches() {
     set_workloads(&mut unit_mismatch, vec![wrong_service]);
     assert!(matches!(
         Manifest::from_json(&serde_json::to_vec(&unit_mismatch).unwrap()),
-        Err(ManifestError::WorkloadUnitMismatch)
+        Err(ManifestError::WorkloadIdentityMismatch)
     ));
+    let (mut source_mismatch, _) = pair("system");
+    let mut wrong_source = workload("alpha", 'a');
+    wrong_source["sourceIdentity"] = "beta.toml".into();
+    set_workloads(&mut source_mismatch, vec![wrong_source]);
+    let (mut container_mismatch, _) = pair("system");
+    let mut wrong_container = workload("alpha", 'a');
+    wrong_container["containerName"] = "delta".into();
+    set_workloads(&mut container_mismatch, vec![wrong_container]);
+    for mismatch in [source_mismatch, container_mismatch] {
+        assert!(matches!(
+            Manifest::from_json(&serde_json::to_vec(&mismatch).unwrap()),
+            Err(ManifestError::WorkloadIdentityMismatch)
+        ));
+    }
     let (mut unsupported_workload_api, _) = pair("system");
     unsupported_workload_api["workerApiRange"]["max_minor"] = 1.into();
     let mut future_workload = workload("alpha", 'a');

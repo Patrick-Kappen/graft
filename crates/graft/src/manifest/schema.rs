@@ -54,6 +54,20 @@ pub struct ProducerIdentity {
 }
 
 impl ProducerIdentity {
+    /// Creates a validated installed-package producer identity.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when any producer component violates manifest bounds.
+    pub fn new(name: &str, version: &str, build_id: &str) -> Result<Self, ManifestError> {
+        Ok(Self {
+            name: BoundedIdentifier::new(name).ok_or(ManifestError::InvalidProducerIdentity)?,
+            version: BoundedText::new(version).ok_or(ManifestError::InvalidProducerIdentity)?,
+            build_id: BoundedIdentifier::new(build_id)
+                .ok_or(ManifestError::InvalidProducerIdentity)?,
+        })
+    }
+
     /// Returns the producer package name.
     #[must_use]
     pub fn name(&self) -> &str {
@@ -144,12 +158,12 @@ impl<'de> Deserialize<'de> for Sha256Identity {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkloadLifecycle {
-    /// A long-running service.
-    Service,
-    /// A finite startup job.
-    StartupJob,
-    /// A timer-triggered job.
-    TimerJob,
+    /// A continuously available process.
+    LongRunning,
+    /// A finite repeatable process that becomes inactive after success.
+    Job,
+    /// A finite process that remains active/exited after success.
+    Setup,
 }
 
 /// Declarative startup intent.
@@ -160,8 +174,6 @@ pub enum StartupIntent {
     Disabled,
     /// Start with the context's manager target.
     ManagerTarget,
-    /// Start only through a timer.
-    Timer,
 }
 
 /// Lifecycle operation supported by one workload.
@@ -548,10 +560,15 @@ impl WorkloadRecord {
         if self.target != target {
             return Err(ManifestError::ContextMismatch);
         }
-        if self.quadlet_source_unit.0.strip_suffix(".container")
-            != self.generated_service.0.strip_suffix(".service")
+        let source_stem = self.source_identity.0.strip_suffix(".toml");
+        let quadlet_stem = self.quadlet_source_unit.0.strip_suffix(".container");
+        let service_stem = self.generated_service.0.strip_suffix(".service");
+        if source_stem != Some(self.name.0.as_str())
+            || quadlet_stem != Some(self.name.0.as_str())
+            || service_stem != Some(self.name.0.as_str())
+            || self.container_name != self.name
         {
-            return Err(ManifestError::WorkloadUnitMismatch);
+            return Err(ManifestError::WorkloadIdentityMismatch);
         }
         if self.dependency_services.len() > MAX_WORKLOAD_DEPENDENCIES
             || !strictly_sorted_unique(&self.dependency_services)
@@ -808,9 +825,8 @@ fn strictly_sorted_unique<T: Ord>(values: &[T]) -> bool {
 #[serde(transparent)]
 struct WorkloadName(String);
 
-impl<'de> Deserialize<'de> for WorkloadName {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let value = String::deserialize(deserializer)?;
+impl WorkloadName {
+    fn new(value: &str) -> Option<Self> {
         let mut bytes = value.bytes();
         if value.len() > MAX_MANIFEST_STRING_BYTES
             || !bytes
@@ -818,9 +834,16 @@ impl<'de> Deserialize<'de> for WorkloadName {
                 .is_some_and(|byte| byte.is_ascii_alphanumeric())
             || !bytes.all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
         {
-            return Err(serde::de::Error::custom("invalid workload name"));
+            return None;
         }
-        Ok(Self(value))
+        Some(Self(value.to_owned()))
+    }
+}
+
+impl<'de> Deserialize<'de> for WorkloadName {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Self::new(&value).ok_or_else(|| serde::de::Error::custom("invalid workload name"))
     }
 }
 
@@ -828,18 +851,24 @@ impl<'de> Deserialize<'de> for WorkloadName {
 #[serde(transparent)]
 struct BoundedIdentifier(String);
 
-impl<'de> Deserialize<'de> for BoundedIdentifier {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let value = String::deserialize(deserializer)?;
+impl BoundedIdentifier {
+    fn new(value: &str) -> Option<Self> {
         if value.is_empty()
             || value.len() > MAX_MANIFEST_STRING_BYTES
             || !value.bytes().all(|byte| {
                 byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'@')
             })
         {
-            return Err(serde::de::Error::custom("invalid bounded identifier"));
+            return None;
         }
-        Ok(Self(value))
+        Some(Self(value.to_owned()))
+    }
+}
+
+impl<'de> Deserialize<'de> for BoundedIdentifier {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Self::new(&value).ok_or_else(|| serde::de::Error::custom("invalid bounded identifier"))
     }
 }
 
@@ -847,16 +876,22 @@ impl<'de> Deserialize<'de> for BoundedIdentifier {
 #[serde(transparent)]
 struct BoundedText(String);
 
-impl<'de> Deserialize<'de> for BoundedText {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let value = String::deserialize(deserializer)?;
+impl BoundedText {
+    fn new(value: &str) -> Option<Self> {
         if value.is_empty()
             || value.len() > MAX_MANIFEST_STRING_BYTES
             || value.chars().any(char::is_control)
         {
-            return Err(serde::de::Error::custom("invalid bounded text"));
+            return None;
         }
-        Ok(Self(value))
+        Some(Self(value.to_owned()))
+    }
+}
+
+impl<'de> Deserialize<'de> for BoundedText {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Self::new(&value).ok_or_else(|| serde::de::Error::custom("invalid bounded text"))
     }
 }
 
@@ -866,12 +901,14 @@ struct SourceUnitName(String);
 
 impl<'de> Deserialize<'de> for SourceUnitName {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let value = BoundedIdentifier::deserialize(deserializer)?.0;
-        if !value.ends_with(".container") {
+        let value = String::deserialize(deserializer)?;
+        let Some(stem) = value.strip_suffix(".container") else {
             return Err(serde::de::Error::custom(
                 "source unit must end in .container",
             ));
-        }
+        };
+        WorkloadName::new(stem)
+            .ok_or_else(|| serde::de::Error::custom("invalid source-unit stem"))?;
         Ok(Self(value))
     }
 }
@@ -882,12 +919,14 @@ struct ServiceUnitName(String);
 
 impl<'de> Deserialize<'de> for ServiceUnitName {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let value = BoundedIdentifier::deserialize(deserializer)?.0;
-        if !value.ends_with(".service") {
+        let value = String::deserialize(deserializer)?;
+        let Some(stem) = value.strip_suffix(".service") else {
             return Err(serde::de::Error::custom(
                 "service unit must end in .service",
             ));
-        }
+        };
+        WorkloadName::new(stem)
+            .ok_or_else(|| serde::de::Error::custom("invalid service-unit stem"))?;
         Ok(Self(value))
     }
 }

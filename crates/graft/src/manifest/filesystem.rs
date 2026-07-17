@@ -10,7 +10,10 @@ use std::path::{Component, Path, PathBuf};
 use crate::protocol::{ManagerKind, WorkerTarget};
 
 use super::schema::validate_pair;
-use super::{EndpointDescriptor, Manifest, ManifestError, MAX_ENDPOINT_BYTES, MAX_MANIFEST_BYTES};
+use super::{
+    EndpointDescriptor, Manifest, ManifestError, ProducerIdentity, MAX_ENDPOINT_BYTES,
+    MAX_MANIFEST_BYTES,
+};
 
 const SYSTEM_PARENT: &str = "/etc/graft";
 const STORE_ROOT: &str = "/nix/store";
@@ -101,6 +104,7 @@ impl GenerationSnapshot {
 pub struct ManifestLoader {
     parent: PathBuf,
     context: LoaderContext,
+    installed_producer: ProducerIdentity,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -114,10 +118,11 @@ impl ManifestLoader {
     ///
     /// `graft_gid` is the Nix-resolved GID of the fixed `graft` readership group.
     #[must_use]
-    pub fn system(graft_gid: u32) -> Self {
+    pub fn system(graft_gid: u32, installed_producer: ProducerIdentity) -> Self {
         Self {
             parent: PathBuf::from(SYSTEM_PARENT),
             context: LoaderContext::System { graft_gid },
+            installed_producer,
         }
     }
 
@@ -129,11 +134,17 @@ impl ManifestLoader {
     /// # Errors
     ///
     /// Returns an error for a relative or non-normalized config-home path.
-    pub fn user(config_home: &Path, uid: u32, gid: u32) -> Result<Self, ManifestError> {
+    pub fn user(
+        config_home: &Path,
+        uid: u32,
+        gid: u32,
+        installed_producer: ProducerIdentity,
+    ) -> Result<Self, ManifestError> {
         validate_absolute_normal_path(config_home)?;
         Ok(Self {
             parent: config_home.join("graft"),
             context: LoaderContext::User { uid, gid },
+            installed_producer,
         })
     }
 
@@ -205,6 +216,9 @@ impl ManifestLoader {
         let endpoint = EndpointDescriptor::from_json(&endpoint_bytes)?;
         validate_pair(&manifest, &endpoint)?;
         validate_loaded_context(&manifest, self.context)?;
+        if manifest.producer() != &self.installed_producer {
+            return Err(ManifestError::InstalledProducerMismatch);
+        }
 
         Ok(GenerationSnapshot {
             generation,
@@ -511,8 +525,13 @@ mod tests {
             chmod(&parent, 0o700);
 
             let metadata = parent.metadata().unwrap();
-            let loader =
-                ManifestLoader::user(&config_home, metadata.uid(), metadata.gid()).unwrap();
+            let loader = ManifestLoader::user(
+                &config_home,
+                metadata.uid(),
+                metadata.gid(),
+                installed_producer(),
+            )
+            .unwrap();
             let (manifest, endpoint) = documents();
             fs::write(
                 generation.join("manifest.json"),
@@ -629,14 +648,28 @@ mod tests {
 
     #[test]
     fn user_loader_rejects_non_normal_paths_and_symlinked_ancestors() {
-        assert!(ManifestLoader::user(Path::new("/home/user//.config"), 1000, 100).is_err());
-        assert!(ManifestLoader::user(Path::new("/home/user/./.config"), 1000, 100).is_err());
+        assert!(ManifestLoader::user(
+            Path::new("/home/user//.config"),
+            1000,
+            100,
+            installed_producer()
+        )
+        .is_err());
+        assert!(ManifestLoader::user(
+            Path::new("/home/user/./.config"),
+            1000,
+            100,
+            installed_producer()
+        )
+        .is_err());
 
         let fixture = Fixture::new();
         let alias = fixture.temporary.path().join("config-alias");
         symlink(&fixture.config_home, &alias).unwrap();
         let metadata = fixture.config_home.join("graft").metadata().unwrap();
-        let loader = ManifestLoader::user(&alias, metadata.uid(), metadata.gid()).unwrap();
+        let loader =
+            ManifestLoader::user(&alias, metadata.uid(), metadata.gid(), installed_producer())
+                .unwrap();
 
         assert!(loader.load_with_store_root(&fixture.store_root).is_err());
     }
@@ -677,6 +710,44 @@ mod tests {
                 .loader
                 .load_with_store_root(&mismatch_fixture.store_root),
             Err(ManifestError::DescriptorMismatch)
+        ));
+    }
+
+    #[test]
+    fn loader_rejects_generation_from_another_installed_producer() {
+        let fixture = Fixture::new();
+        chmod(&fixture.generation, 0o755);
+        chmod(&fixture.generation.join("manifest.json"), 0o644);
+        chmod(&fixture.generation.join("endpoint.json"), 0o644);
+        let (mut manifest, mut endpoint) = documents();
+        manifest["producer"]["buildId"] = "other-build".into();
+        manifest.as_object_mut().unwrap().remove("generationId");
+        manifest.as_object_mut().unwrap().remove("manifestDigest");
+        let manifest_digest = digest(&manifest);
+        manifest["generationId"] = manifest_digest.clone().into();
+        manifest["manifestDigest"] = manifest_digest.clone().into();
+        endpoint["producer"]["buildId"] = "other-build".into();
+        endpoint["generationId"] = manifest_digest.clone().into();
+        endpoint["manifestDigest"] = manifest_digest.into();
+        endpoint.as_object_mut().unwrap().remove("endpointDigest");
+        endpoint["endpointDigest"] = digest(&endpoint).into();
+        fs::write(
+            fixture.generation.join("manifest.json"),
+            serde_json::to_vec(&manifest).unwrap(),
+        )
+        .unwrap();
+        fs::write(
+            fixture.generation.join("endpoint.json"),
+            serde_json::to_vec(&endpoint).unwrap(),
+        )
+        .unwrap();
+        chmod(&fixture.generation.join("manifest.json"), 0o444);
+        chmod(&fixture.generation.join("endpoint.json"), 0o444);
+        chmod(&fixture.generation, 0o555);
+
+        assert!(matches!(
+            fixture.loader.load_with_store_root(&fixture.store_root),
+            Err(ManifestError::InstalledProducerMismatch)
         ));
     }
 
@@ -768,6 +839,10 @@ mod tests {
         )
         .is_err());
         assert!(select_owner(LoaderContext::System { graft_gid: 42 }, (1000, 100)).is_err());
+    }
+
+    fn installed_producer() -> ProducerIdentity {
+        ProducerIdentity::new("graft", "0.3.0-alpha.1", "test-build").unwrap()
     }
 
     fn documents() -> (Value, Value) {
