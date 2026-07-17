@@ -38,9 +38,16 @@ impl WorkerLimits {
 }
 
 /// Shared bounded admission registry keyed by peer UID.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct AdmissionRegistry {
     state: Arc<Mutex<AdmissionState>>,
+    buffered_bytes_per_principal: usize,
+}
+
+impl Default for AdmissionRegistry {
+    fn default() -> Self {
+        Self::with_buffered_bytes_per_principal(WorkerLimits::BUFFERED_BYTES_PER_PRINCIPAL)
+    }
 }
 
 #[derive(Debug, Default)]
@@ -77,6 +84,15 @@ enum Resource {
 }
 
 impl AdmissionRegistry {
+    /// Creates shared accounting with a configured per-principal byte ceiling.
+    #[must_use]
+    pub fn with_buffered_bytes_per_principal(maximum: usize) -> Self {
+        Self {
+            state: Arc::new(Mutex::new(AdmissionState::default())),
+            buffered_bytes_per_principal: maximum.min(WorkerLimits::BUFFERED_BYTES_PER_PRINCIPAL),
+        }
+    }
+
     /// Returns whether this principal is below both rejection-rate limits.
     #[must_use]
     pub fn admission_allowed(&self, uid: u32) -> bool {
@@ -148,7 +164,12 @@ impl AdmissionRegistry {
     fn reserve(&self, uid: u32, resource: Resource) -> Option<AdmissionPermit> {
         let mut state = self.state.lock().ok()?;
         let principal = state.principals.get(&uid).copied().unwrap_or_default();
-        if !fits(state.totals, principal, resource) {
+        if !fits(
+            state.totals,
+            principal,
+            resource,
+            self.buffered_bytes_per_principal,
+        ) {
             return None;
         }
         increment(&mut state.totals, resource);
@@ -234,7 +255,12 @@ impl Drop for AdmissionPermit {
     }
 }
 
-fn fits(total: Usage, principal: Usage, resource: Resource) -> bool {
+fn fits(
+    total: Usage,
+    principal: Usage,
+    resource: Resource,
+    buffered_bytes_per_principal: usize,
+) -> bool {
     match resource {
         Resource::Connection => {
             principal.connections < WorkerLimits::CONNECTIONS_PER_PRINCIPAL
@@ -253,8 +279,7 @@ fn fits(total: Usage, principal: Usage, resource: Resource) -> bool {
                 && total.streams < WorkerLimits::STREAMS_WORKER
         }
         Resource::BufferedBytes(bytes) => {
-            principal.buffered_bytes.saturating_add(bytes)
-                <= WorkerLimits::BUFFERED_BYTES_PER_PRINCIPAL
+            principal.buffered_bytes.saturating_add(bytes) <= buffered_bytes_per_principal
                 && total.buffered_bytes.saturating_add(bytes) <= WorkerLimits::BUFFERED_BYTES_WORKER
         }
     }
@@ -424,5 +449,12 @@ mod tests {
         assert!(registry.buffered_bytes(1000, 1).is_none());
         drop(permit);
         assert!(registry.buffered_bytes(1000, 1).is_some());
+
+        let configured = AdmissionRegistry::with_buffered_bytes_per_principal(10);
+        let configured_permit = configured.buffered_bytes(1000, 10).unwrap();
+        assert!(configured.buffered_bytes(1000, 1).is_none());
+        assert!(configured.buffered_bytes(1001, 1).is_some());
+        drop(configured_permit);
+        assert!(configured.buffered_bytes(1000, 1).is_some());
     }
 }

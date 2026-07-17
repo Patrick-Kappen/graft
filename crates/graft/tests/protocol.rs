@@ -67,6 +67,10 @@ fn exact_two_pass_encoding_matches_bounded_encoder() {
 
     assert_eq!(length, expected.len());
     assert_eq!(exact, expected);
+    assert!(matches!(
+        encode_frame_exact(&frame, FrameDirection::ClientToServer, usize::MAX),
+        Err(CodecError::Oversized { .. })
+    ));
 }
 
 #[test]

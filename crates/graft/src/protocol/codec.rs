@@ -131,6 +131,13 @@ pub fn encode_frame_exact<T: Serialize>(
     expected_length: usize,
 ) -> Result<Vec<u8>, CodecError> {
     let maximum = direction.maximum();
+    let maximum_frame_length = PREFIX_BYTES + maximum;
+    if expected_length > maximum_frame_length {
+        return Err(CodecError::Oversized {
+            actual: expected_length.saturating_sub(PREFIX_BYTES),
+            maximum,
+        });
+    }
     let mut writer = BoundedFrameWriter::new(maximum, expected_length);
     if let Err(source) = serde_json::to_writer(&mut writer, value) {
         return match writer.exceeded {

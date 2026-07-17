@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use tokio::io::{AsyncWriteExt as _, WriteHalf};
 use tokio::net::{UnixListener, UnixStream};
-use tokio::sync::{mpsc, watch, Notify, Semaphore};
+use tokio::sync::{mpsc, oneshot, watch, Notify, Semaphore};
 
 use crate::protocol::{
     encode_frame_exact, encoded_frame_len, negotiate_handshake, CapabilitySet,
@@ -91,7 +91,9 @@ pub async fn serve(
         .map_err(ServerError::Listener)?;
     let listener = UnixListener::from_std(listener).map_err(ServerError::Listener)?;
     let epoch = Arc::new(WorkerEpoch::new().map_err(|_| ServerError::Epoch)?);
-    let registry = AdmissionRegistry::default();
+    let registry = AdmissionRegistry::with_buffered_bytes_per_principal(
+        usize::try_from(config.limits.buffered_response_bytes()).unwrap_or(usize::MAX),
+    );
     let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
         .map_err(ServerError::Signal)?;
     let mut interrupt = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())
@@ -437,6 +439,8 @@ enum Outbound {
         completion: Option<Arc<Notify>>,
         terminal_release: Option<TerminalRelease>,
     },
+    #[cfg_attr(not(feature = "worker-test-fixtures"), allow(dead_code))]
+    Barrier { completion: oneshot::Sender<()> },
 }
 
 #[allow(clippy::too_many_lines)]
@@ -464,7 +468,15 @@ async fn writer_loop(
             guard,
             completion,
             terminal_release,
-        } = outbound;
+        } = outbound
+        else {
+            let Outbound::Barrier { completion } = outbound else {
+                unreachable!();
+            };
+            let _ = completion.send(());
+            continue;
+        };
+        let is_terminal = terminal_release.is_some();
         if let Some(release) = terminal_release {
             if let Ok(mut active) = release.active.lock() {
                 active.remove(&release.request_id);
@@ -551,7 +563,9 @@ async fn writer_loop(
         }
         drop(connection_permit);
         drop(principal_permit);
-        if matches!(outcome, WriteOutcome::Failed) {
+        if matches!(outcome, WriteOutcome::Failed)
+            || (is_terminal && matches!(outcome, WriteOutcome::Skipped))
+        {
             break;
         }
     }
@@ -1102,6 +1116,11 @@ async fn run_mock_stream(
         )
         .await;
     }
+    if !await_output_barrier(&context).await {
+        let _ = context.connection_close.send(true);
+        return;
+    }
+    let final_sequence = progress.delivered.load(Ordering::Acquire);
     queue_frame(
         &context,
         ServerFrame::StreamEnd(StreamEnd {
@@ -1109,7 +1128,7 @@ async fn run_mock_stream(
             request_id: context.request.request_id,
             worker_epoch: context.epoch.identifier(),
             reason,
-            final_sequence: sequence,
+            final_sequence,
         }),
         (reason == StreamEndReason::Completed).then(|| OutputGuard {
             deadline_at,
@@ -1121,6 +1140,25 @@ async fn run_mock_stream(
     .await;
     drop(principal_stream);
     drop(connection_stream);
+}
+
+#[cfg(feature = "worker-test-fixtures")]
+async fn await_output_barrier(context: &RequestContext) -> bool {
+    let (completion, completed) = oneshot::channel();
+    let barrier = Outbound::Barrier { completion };
+    let barrier_deadline = tokio::time::Instant::now() + PARTIAL_FRAME_TIMEOUT;
+    if tokio::select! {
+        biased;
+        result = context.outbound.send(barrier) => result.is_err(),
+        () = tokio::time::sleep_until(barrier_deadline) => true,
+    } {
+        return false;
+    }
+    tokio::select! {
+        biased;
+        result = completed => result.is_ok(),
+        () = tokio::time::sleep_until(barrier_deadline) => false,
+    }
 }
 
 async fn queue_request_error(
@@ -1533,6 +1571,53 @@ mod tests {
         writer_task.await.unwrap();
         assert!(registry.buffered_bytes(1000, 1).is_some());
         assert!(connection_buffer.reserve(1).is_some());
+    }
+
+    #[tokio::test]
+    async fn skipped_terminal_frame_closes_instead_of_draining_later_output() {
+        let registry = AdmissionRegistry::default();
+        let connection_buffer = ConnectionBuffer::new(1);
+        let (server, _client) = UnixStream::pair().unwrap();
+        let (_reader, writer) = tokio::io::split(server);
+        let (outbound_tx, outbound_rx) = mpsc::channel(2);
+        let (_close_tx, close_rx) = watch::channel(false);
+        let (_control_tx, control) = watch::channel(ControlState {
+            cancelled: false,
+            worker_shutdown: false,
+            acknowledged: 0,
+            pending_acknowledgement: 0,
+        });
+        let (_shutdown_tx, shutdown) = watch::channel(false);
+        let request_id = RequestIdentifier::new(1).unwrap();
+        let writer_task = tokio::spawn(writer_loop(writer, outbound_rx, close_rx));
+        outbound_tx
+            .send(Outbound::Frame {
+                bytes: vec![0],
+                principal_permit: registry.buffered_bytes(1000, 1).unwrap(),
+                connection_permit: connection_buffer.reserve(1).unwrap(),
+                guard: Some(OutputGuard {
+                    deadline_at: tokio::time::Instant::now(),
+                    control,
+                    shutdown,
+                    publication: None,
+                }),
+                completion: None,
+                terminal_release: Some(TerminalRelease {
+                    active: Arc::new(Mutex::new(BTreeMap::new())),
+                    request_id,
+                }),
+            })
+            .await
+            .unwrap();
+        let (completion, completed) = oneshot::channel();
+        outbound_tx
+            .send(Outbound::Barrier { completion })
+            .await
+            .unwrap();
+
+        writer_task.await.unwrap();
+
+        assert!(completed.await.is_err());
     }
 
     #[tokio::test]
