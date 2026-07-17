@@ -210,6 +210,7 @@ After negotiation, every JSON payload is one tagged frame variant:
 | `ServerHello` | server to client | Fix worker context and negotiated contract. |
 | `Request` | client to server | Start or join one typed unary or streaming operation. |
 | `Response` | server to client | Return one unary success or typed error. |
+| `ControlError` | server to client | Report a typed failure for `StreamAck` or `Cancel` without itself terminating the request. |
 | `StreamItem` | server to client | Return one sequenced bounded stream item. |
 | `StreamAck` | client to server | Advance per-stream backpressure window. |
 | `StreamEnd` | server to client | End with a typed reason and final cursor. |
@@ -223,6 +224,15 @@ integers encoded within JSON's interoperable integer range. Starting a new
 `Request` with an identifier that is already active is a conflict; `StreamAck`
 and `Cancel` reuse the active request identifier they target. Stream sequence
 numbers start at one and increase by one within a request.
+
+`ControlError` is non-terminal: it does not release the request identifier and
+clients must not treat it as a unary `Response`. It identifies the rejected
+control frame's request and carries the same closed typed worker-error metadata.
+A control-policy transition is separate from that diagnostic. In particular,
+an invalid acknowledgement cancels interest and is followed, in order, by the
+request's sole terminal `StreamEnd`; a rejected control frame that cannot target
+an active stream has no stream lifecycle to terminate. Only `Response` and
+`StreamEnd` are terminal request envelopes.
 
 A lifecycle `Request` separates an immutable mutation payload from per-request
 delivery metadata. The payload is shared for duplicate identity; delivery

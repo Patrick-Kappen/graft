@@ -744,28 +744,6 @@ async fn spawn_request(context: RequestContext) {
         .await;
         return;
     }
-    let deadline_maximum = match operation_deadline_class(&context.request.operation) {
-        OperationDeadlineClass::Unary => context.limits.unary_deadline_ms(),
-        OperationDeadlineClass::Lifecycle => context.limits.lifecycle_deadline_ms(),
-    };
-    let deadline_ms = context.request.deadline_ms.unwrap_or(deadline_maximum);
-    if deadline_ms == 0 || deadline_ms > deadline_maximum {
-        send_error(
-            &context,
-            WorkerErrorCode::Deadline,
-            "request deadline is invalid",
-        )
-        .await;
-        return;
-    }
-    let deadline_at = context.received_at + Duration::from_millis(deadline_ms);
-    {
-        let Ok(mut request_deadline) = context.request_deadline.lock() else {
-            let _ = context.connection_close.send(true);
-            return;
-        };
-        *request_deadline = Some(deadline_at);
-    }
     let (control_tx, control_rx) = watch::channel(ControlState {
         cancelled: false,
         worker_shutdown: false,
@@ -803,6 +781,34 @@ async fn spawn_request(context: RequestContext) {
         )
         .await;
         return;
+    }
+    let deadline_maximum = match operation_deadline_class(&context.request.operation) {
+        OperationDeadlineClass::Unary => context.limits.unary_deadline_ms(),
+        OperationDeadlineClass::Lifecycle => context.limits.lifecycle_deadline_ms(),
+    };
+    let deadline_ms = context.request.deadline_ms.unwrap_or(deadline_maximum);
+    if deadline_ms == 0 || deadline_ms > deadline_maximum {
+        if let Ok(mut active) = context.active.lock() {
+            active.remove(&context.request.request_id);
+        }
+        send_error(
+            &context,
+            WorkerErrorCode::Deadline,
+            "request deadline is invalid",
+        )
+        .await;
+        return;
+    }
+    let deadline_at = context.received_at + Duration::from_millis(deadline_ms);
+    {
+        let Ok(mut request_deadline) = context.request_deadline.lock() else {
+            if let Ok(mut active) = context.active.lock() {
+                active.remove(&context.request.request_id);
+            }
+            let _ = context.connection_close.send(true);
+            return;
+        };
+        *request_deadline = Some(deadline_at);
     }
     let Ok(connection_permit) = context.request_slots.clone().try_acquire_owned() else {
         if let Ok(mut active) = context.active.lock() {

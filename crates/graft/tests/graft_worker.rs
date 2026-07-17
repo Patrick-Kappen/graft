@@ -797,12 +797,12 @@ fn duplicate_request_and_wrong_connection_identifiers_fail_typed() {
             operation: SemanticRequest::MockUnary { delay_ms: 0 },
         }),
     );
-    let invalid = read_server_frame::<ServerFrame>(&mut stream);
+    let invalid_duplicate = read_server_frame::<ServerFrame>(&mut stream);
     assert!(matches!(
-        invalid,
+        invalid_duplicate,
         ServerFrame::Response(response)
             if matches!(&response.result, ResponseResult::Error(error)
-                if error.code == graft::worker::protocol::WorkerErrorCode::Deadline)
+                if error.code == graft::worker::protocol::WorkerErrorCode::RequestConflict)
     ));
 
     send_client_frame(&mut stream, &request);
