@@ -442,14 +442,52 @@ async fn writer_loop(
             guard,
             completion,
         } = outbound;
-        let written = tokio::select! {
-            biased;
-            changed = connection_close.changed() => {
-                let _ = changed;
-                false
+        let mut write_guard = guard.clone();
+        let guard_expired = write_guard.as_ref().is_some_and(|guard| {
+            tokio::time::Instant::now() >= guard.deadline_at
+                || *guard.shutdown.borrow()
+                || guard.control.borrow().cancelled
+                || guard.control.borrow().worker_shutdown
+        });
+        let write = tokio::time::timeout(PARTIAL_FRAME_TIMEOUT, writer.write_all(&bytes));
+        tokio::pin!(write);
+        let written = if guard_expired {
+            false
+        } else if let Some(guard) = write_guard.as_mut() {
+            let mut control_open = true;
+            loop {
+                tokio::select! {
+                    biased;
+                    changed = connection_close.changed() => {
+                        let _ = changed;
+                        break false;
+                    }
+                    () = tokio::time::sleep_until(guard.deadline_at) => break false,
+                    changed = guard.shutdown.changed() => {
+                        let _ = changed;
+                        break false;
+                    }
+                    changed = guard.control.changed(), if control_open => {
+                        if changed.is_err() {
+                            control_open = false;
+                        } else {
+                            let state = *guard.control.borrow();
+                            if state.cancelled || state.worker_shutdown {
+                                break false;
+                            }
+                        }
+                    }
+                    result = &mut write => break matches!(result, Ok(Ok(()))),
+                }
             }
-            result = tokio::time::timeout(PARTIAL_FRAME_TIMEOUT, writer.write_all(&bytes)) => {
-                matches!(result, Ok(Ok(())))
+        } else {
+            tokio::select! {
+                biased;
+                changed = connection_close.changed() => {
+                    let _ = changed;
+                    false
+                }
+                result = &mut write => matches!(result, Ok(Ok(()))),
             }
         };
         if written {
@@ -460,16 +498,14 @@ async fn writer_loop(
                 publication
                     .delivered
                     .store(publication.sequence, Ordering::Release);
-                let current = *publication.control.borrow();
-                if current.pending_acknowledgement != 0
-                    && current.pending_acknowledgement <= publication.sequence
-                {
-                    let _ = publication.control.send(ControlState {
-                        acknowledged: current.pending_acknowledgement,
-                        pending_acknowledgement: 0,
-                        ..current
-                    });
-                }
+                publication.control.send_modify(|state| {
+                    if state.pending_acknowledgement != 0
+                        && state.pending_acknowledgement <= publication.sequence
+                    {
+                        state.acknowledged = state.acknowledged.max(state.pending_acknowledgement);
+                        state.pending_acknowledgement = 0;
+                    }
+                });
             }
         }
         if let Some(completion) = completion {
@@ -531,10 +567,7 @@ fn control_request(
     };
     let current = *control.borrow();
     if cancel {
-        let _ = control.send(ControlState {
-            cancelled: true,
-            ..current
-        });
+        control.send_modify(|state| state.cancelled = true);
         return Ok(());
     }
     let Some(sequence) = sequence else {
@@ -542,22 +575,23 @@ fn control_request(
     };
     let acknowledgement_floor = current.acknowledged.max(current.pending_acknowledgement);
     if !stream || sequence < acknowledgement_floor || sequence > produced.load(Ordering::Acquire) {
-        let _ = control.send(ControlState {
-            cancelled: true,
-            ..current
-        });
+        control.send_modify(|state| state.cancelled = true);
         return Err(WorkerErrorCode::InvalidAcknowledgement);
     }
     if sequence <= delivered.load(Ordering::Acquire) {
-        let _ = control.send(ControlState {
-            acknowledged: sequence,
-            ..current
-        });
+        control.send_modify(|state| state.acknowledged = state.acknowledged.max(sequence));
     } else {
-        let _ = control.send(ControlState {
-            pending_acknowledgement: sequence,
-            ..current
+        control.send_modify(|state| {
+            state.pending_acknowledgement = state.pending_acknowledgement.max(sequence);
         });
+        if sequence <= delivered.load(Ordering::Acquire) {
+            control.send_modify(|state| {
+                state.acknowledged = state.acknowledged.max(sequence);
+                if state.pending_acknowledgement <= state.acknowledged {
+                    state.pending_acknowledgement = 0;
+                }
+            });
+        }
     }
     Ok(())
 }
@@ -565,11 +599,9 @@ fn control_request(
 fn cancel_all(active: &ActiveMap, worker_shutdown: bool) {
     if let Ok(active) = active.lock() {
         for request in active.values() {
-            let current = *request.control.borrow();
-            let _ = request.control.send(ControlState {
-                cancelled: !worker_shutdown,
-                worker_shutdown,
-                ..current
+            request.control.send_modify(|state| {
+                state.cancelled = !worker_shutdown;
+                state.worker_shutdown = worker_shutdown;
             });
             request.completion.notify_one();
         }
@@ -1124,6 +1156,10 @@ async fn queue_control_error(
     connection_buffer: &ConnectionBuffer,
     output: (&mpsc::Sender<Outbound>, &watch::Sender<bool>),
 ) {
+    if !registry.rejection(uid) {
+        let _ = output.1.send(true);
+        return;
+    }
     queue_encoded(
         uid,
         registry,
