@@ -538,6 +538,42 @@ fn real_worker_unary_deadline_and_cancellation_are_typed() {
                 if error.code == graft::worker::protocol::WorkerErrorCode::Deadline)
     ));
 
+    send_client_frame(
+        &mut stream,
+        &ClientFrame::Request(Request {
+            server_connection_id: hello.server_connection_id,
+            request_id: RequestIdentifier::new(15).unwrap(),
+            deadline_ms: Some(10),
+            operation: SemanticRequest::MockUnary { delay_ms: u64::MAX },
+        }),
+    );
+    let oversized_delay = read_server_frame::<ServerFrame>(&mut stream);
+    assert!(matches!(
+        oversized_delay,
+        ServerFrame::Response(response)
+            if matches!(&response.result, ResponseResult::Error(error)
+                if error.code == graft::worker::protocol::WorkerErrorCode::Deadline)
+    ));
+
+    send_client_frame(
+        &mut stream,
+        &ClientFrame::Request(Request {
+            server_connection_id: hello.server_connection_id,
+            request_id: RequestIdentifier::new(16).unwrap(),
+            deadline_ms: Some(10),
+            operation: SemanticRequest::MockStream {
+                items: 1,
+                interval_ms: u64::MAX,
+            },
+        }),
+    );
+    let oversized_interval = read_server_frame::<ServerFrame>(&mut stream);
+    assert!(matches!(
+        oversized_interval,
+        ServerFrame::StreamEnd(end)
+            if end.reason == StreamEndReason::Deadline && end.final_sequence == 0
+    ));
+
     let cancel_id = RequestIdentifier::new(4).unwrap();
     send_client_frame(
         &mut stream,

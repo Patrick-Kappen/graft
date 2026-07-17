@@ -323,7 +323,7 @@ impl Connection {
                             outbound: outbound_tx.clone(),
                             connection_close: connection_close_tx.clone(),
                             completion: Arc::new(Notify::new()),
-                            owns_request_id: false,
+                            terminal_lease: Arc::new(Mutex::new(None)),
                             shutdown: shutdown.clone(),
                         }).await,
                         ClientFrame::StreamAck(control) => {
@@ -414,14 +414,29 @@ struct OutputGuard {
     publication: Option<DeliveryPublication>,
 }
 
-struct TerminalRelease {
+struct RequestLease {
     active: ActiveMap,
     request_id: crate::protocol::RequestIdentifier,
+    completion: Arc<Notify>,
+    identifier_released: bool,
 }
 
-struct TerminalOutput {
-    completion: Arc<Notify>,
-    release: TerminalRelease,
+impl RequestLease {
+    fn release_identifier(&mut self) {
+        if !self.identifier_released {
+            if let Ok(mut active) = self.active.lock() {
+                active.remove(&self.request_id);
+            }
+            self.identifier_released = true;
+        }
+    }
+}
+
+impl Drop for RequestLease {
+    fn drop(&mut self) {
+        self.release_identifier();
+        self.completion.notify_one();
+    }
 }
 
 enum WriteOutcome {
@@ -436,8 +451,7 @@ enum Outbound {
         principal_permit: AdmissionPermit,
         connection_permit: ConnectionBufferPermit,
         guard: Option<OutputGuard>,
-        completion: Option<Arc<Notify>>,
-        terminal_release: Option<TerminalRelease>,
+        terminal_lease: Option<RequestLease>,
     },
     #[cfg_attr(not(feature = "worker-test-fixtures"), allow(dead_code))]
     Barrier { completion: oneshot::Sender<()> },
@@ -466,8 +480,7 @@ async fn writer_loop(
             principal_permit,
             connection_permit,
             guard,
-            completion,
-            terminal_release,
+            mut terminal_lease,
         } = outbound
         else {
             let Outbound::Barrier { completion } = outbound else {
@@ -476,11 +489,9 @@ async fn writer_loop(
             let _ = completion.send(());
             continue;
         };
-        let is_terminal = terminal_release.is_some();
-        if let Some(release) = terminal_release {
-            if let Ok(mut active) = release.active.lock() {
-                active.remove(&release.request_id);
-            }
+        let is_terminal = terminal_lease.is_some();
+        if let Some(lease) = terminal_lease.as_mut() {
+            lease.release_identifier();
         }
         let mut write_guard = guard.clone();
         let guard_expired = write_guard.as_ref().is_some_and(|guard| {
@@ -558,9 +569,7 @@ async fn writer_loop(
                 });
             }
         }
-        if let Some(completion) = completion {
-            completion.notify_one();
-        }
+        drop(terminal_lease);
         drop(connection_permit);
         drop(principal_permit);
         if matches!(outcome, WriteOutcome::Failed)
@@ -684,7 +693,7 @@ struct RequestContext {
     outbound: mpsc::Sender<Outbound>,
     connection_close: watch::Sender<bool>,
     completion: Arc<Notify>,
-    owns_request_id: bool,
+    terminal_lease: Arc<Mutex<Option<RequestLease>>>,
     shutdown: watch::Receiver<bool>,
 }
 
@@ -718,7 +727,7 @@ const fn is_stream_operation(_operation: &SemanticRequest) -> bool {
 }
 
 #[allow(clippy::too_many_lines)]
-async fn spawn_request(mut context: RequestContext) {
+async fn spawn_request(context: RequestContext) {
     if !context.registry.admission_allowed(context.peer.uid) {
         let _ = context.connection_close.send(true);
         return;
@@ -809,7 +818,20 @@ async fn spawn_request(mut context: RequestContext) {
         .await;
         return;
     };
-    context.owns_request_id = true;
+    let lease = RequestLease {
+        active: context.active.clone(),
+        request_id: context.request.request_id,
+        completion: context.completion.clone(),
+        identifier_released: false,
+    };
+    let Ok(mut terminal_lease) = context.terminal_lease.lock() else {
+        if let Ok(mut active) = context.active.lock() {
+            active.remove(&context.request.request_id);
+        }
+        return;
+    };
+    *terminal_lease = Some(lease);
+    drop(terminal_lease);
     tokio::spawn(async move {
         let completion = context.completion.clone();
         run_request(
@@ -979,6 +1001,10 @@ async fn run_mock_unary(
     delay_ms: u64,
 ) {
     let mut request_shutdown = context.shutdown.clone();
+    let completion_at = tokio::time::Instant::now()
+        .checked_add(Duration::from_millis(delay_ms))
+        .unwrap_or(deadline_at)
+        .min(deadline_at);
     let result = tokio::select! {
         biased;
         () = tokio::time::sleep_until(deadline_at) => worker_error(context.epoch.identifier(), WorkerErrorCode::Deadline, "request deadline elapsed", OperationPhase::Execution),
@@ -995,7 +1021,7 @@ async fn run_mock_unary(
             let _ = changed;
             worker_error(context.epoch.identifier(), WorkerErrorCode::WorkerShutdown, "worker shutdown", OperationPhase::Execution)
         }
-        () = tokio::time::sleep(Duration::from_millis(delay_ms)) => {
+        () = tokio::time::sleep_until(completion_at) => {
             if tokio::time::Instant::now() >= deadline_at {
                 worker_error(context.epoch.identifier(), WorkerErrorCode::Deadline, "request deadline elapsed", OperationPhase::Execution)
             } else {
@@ -1097,10 +1123,22 @@ async fn run_mock_stream(
             reason = StreamEndReason::Cancelled;
             break;
         }
-        let item_at = tokio::time::Instant::now() + Duration::from_millis(interval_ms);
+        let item_at = tokio::time::Instant::now()
+            .checked_add(Duration::from_millis(interval_ms))
+            .unwrap_or(deadline_at)
+            .min(deadline_at);
         loop {
             tokio::select! {
-                () = tokio::time::sleep_until(item_at) => break,
+                biased;
+                () = tokio::time::sleep_until(deadline_at) => {
+                    reason = StreamEndReason::Deadline;
+                    break 'items;
+                }
+                changed = stream_shutdown.changed() => {
+                    let _ = changed;
+                    reason = StreamEndReason::WorkerShutdown;
+                    break 'items;
+                }
                 changed = control.changed() => {
                     let _ = changed;
                     if control.borrow().worker_shutdown {
@@ -1112,14 +1150,12 @@ async fn run_mock_stream(
                         break 'items;
                     }
                 }
-                changed = stream_shutdown.changed() => {
-                    let _ = changed;
-                    reason = StreamEndReason::WorkerShutdown;
-                    break 'items;
-                }
-                () = tokio::time::sleep_until(deadline_at) => {
-                    reason = StreamEndReason::Deadline;
-                    break 'items;
+                () = tokio::time::sleep_until(item_at) => {
+                    if tokio::time::Instant::now() >= deadline_at {
+                        reason = StreamEndReason::Deadline;
+                        break 'items;
+                    }
+                    break;
                 }
             }
         }
@@ -1241,15 +1277,15 @@ async fn send_error(context: &RequestContext, code: WorkerErrorCode, summary: &'
 }
 
 async fn queue_frame(context: &RequestContext, frame: ServerFrame, guard: Option<OutputGuard>) {
-    let terminal = (context.owns_request_id
-        && matches!(&frame, ServerFrame::Response(_) | ServerFrame::StreamEnd(_)))
-    .then(|| TerminalOutput {
-        completion: context.completion.clone(),
-        release: TerminalRelease {
-            active: context.active.clone(),
-            request_id: context.request.request_id,
-        },
-    });
+    let terminal_lease = if matches!(&frame, ServerFrame::Response(_) | ServerFrame::StreamEnd(_)) {
+        let Ok(mut lease) = context.terminal_lease.lock() else {
+            let _ = context.connection_close.send(true);
+            return;
+        };
+        lease.take()
+    } else {
+        None
+    };
     queue_encoded(
         context.peer.uid,
         &context.registry,
@@ -1257,7 +1293,7 @@ async fn queue_frame(context: &RequestContext, frame: ServerFrame, guard: Option
         (&context.outbound, &context.connection_close),
         frame,
         guard,
-        terminal,
+        terminal_lease,
     )
     .await;
 }
@@ -1309,52 +1345,32 @@ async fn queue_encoded(
     output: (&mpsc::Sender<Outbound>, &watch::Sender<bool>),
     frame: ServerFrame,
     guard: Option<OutputGuard>,
-    terminal: Option<TerminalOutput>,
+    terminal_lease: Option<RequestLease>,
 ) {
-    let completion_on_failure = terminal
-        .as_ref()
-        .map(|terminal| terminal.completion.clone());
     let Ok(encoded_length) = encoded_frame_len(&frame, FrameDirection::ServerToClient) else {
-        if let Some(completion) = completion_on_failure {
-            completion.notify_one();
-        }
         let _ = output.1.send(true);
         return;
     };
     let Some(connection_permit) = connection_buffer.reserve(encoded_length) else {
-        if let Some(completion) = completion_on_failure {
-            completion.notify_one();
-        }
         let _ = output.1.send(true);
         return;
     };
     let Some(principal_permit) = registry.buffered_bytes(uid, encoded_length) else {
-        if let Some(completion) = completion_on_failure {
-            completion.notify_one();
-        }
         let _ = output.1.send(true);
         return;
     };
     let Ok(bytes) = encode_frame_exact(&frame, FrameDirection::ServerToClient, encoded_length)
     else {
-        if let Some(completion) = completion_on_failure {
-            completion.notify_one();
-        }
         let _ = output.1.send(true);
         return;
     };
     let mut enqueue_guard = guard.clone();
-    let (completion, terminal_release) = match terminal {
-        Some(terminal) => (Some(terminal.completion), Some(terminal.release)),
-        None => (None, None),
-    };
     let frame = Outbound::Frame {
         bytes,
         principal_permit,
         connection_permit,
         guard,
-        completion,
-        terminal_release,
+        terminal_lease,
     };
     let reserve = output.0.reserve();
     tokio::pin!(reserve);
@@ -1387,14 +1403,9 @@ async fn queue_encoded(
                 }
             }
         }
-        if let Some(completion) = completion_on_failure {
-            completion.notify_one();
-        }
         let _ = output.1.send(true);
     } else if let Ok(permit) = reserve.await {
         permit.send(frame);
-    } else if let Some(completion) = completion_on_failure {
-        completion.notify_one();
     }
 }
 
@@ -1611,8 +1622,7 @@ mod tests {
                 principal_permit,
                 connection_permit,
                 guard: None,
-                completion: None,
-                terminal_release: None,
+                terminal_lease: None,
             })
             .await
             .unwrap();
@@ -1623,6 +1633,55 @@ mod tests {
 
         close_tx.send(true).unwrap();
         writer_task.await.unwrap();
+        assert!(registry.buffered_bytes(1000, 1).is_some());
+        assert!(connection_buffer.reserve(1).is_some());
+    }
+
+    #[tokio::test]
+    async fn dropped_terminal_output_finalizes_request_lease() {
+        let registry = AdmissionRegistry::default();
+        let connection_buffer = ConnectionBuffer::new(1);
+        let request_id = RequestIdentifier::new(1).unwrap();
+        let completion = Arc::new(Notify::new());
+        let (control, _receiver) = watch::channel(ControlState {
+            cancelled: false,
+            worker_shutdown: false,
+            acknowledged: 0,
+            pending_acknowledgement: 0,
+        });
+        let active = Arc::new(Mutex::new(BTreeMap::from([(
+            request_id,
+            ActiveRequest {
+                control,
+                produced: Arc::new(AtomicU64::new(0)),
+                delivered: Arc::new(AtomicU64::new(0)),
+                completion: completion.clone(),
+                stream: false,
+            },
+        )])));
+        let (outbound_tx, outbound_rx) = mpsc::channel(1);
+        outbound_tx
+            .send(Outbound::Frame {
+                bytes: vec![0],
+                principal_permit: registry.buffered_bytes(1000, 1).unwrap(),
+                connection_permit: connection_buffer.reserve(1).unwrap(),
+                guard: None,
+                terminal_lease: Some(RequestLease {
+                    active: active.clone(),
+                    request_id,
+                    completion: completion.clone(),
+                    identifier_released: false,
+                }),
+            })
+            .await
+            .unwrap();
+
+        drop(outbound_rx);
+        tokio::time::timeout(Duration::from_millis(100), completion.notified())
+            .await
+            .unwrap();
+
+        assert!(!active.lock().unwrap().contains_key(&request_id));
         assert!(registry.buffered_bytes(1000, 1).is_some());
         assert!(connection_buffer.reserve(1).is_some());
     }
@@ -1655,10 +1714,11 @@ mod tests {
                     shutdown,
                     publication: None,
                 }),
-                completion: None,
-                terminal_release: Some(TerminalRelease {
+                terminal_lease: Some(RequestLease {
                     active: Arc::new(Mutex::new(BTreeMap::new())),
                     request_id,
+                    completion: Arc::new(Notify::new()),
+                    identifier_released: false,
                 }),
             })
             .await
@@ -1686,8 +1746,7 @@ mod tests {
                 principal_permit: registry.buffered_bytes(1000, 1).unwrap(),
                 connection_permit: connection_buffer.reserve(1).unwrap(),
                 guard: None,
-                completion: None,
-                terminal_release: None,
+                terminal_lease: None,
             })
             .await
             .unwrap();
