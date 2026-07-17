@@ -95,7 +95,10 @@ impl<'de> Deserialize<'de> for HostIdentifier {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let raw = String::deserialize(deserializer)?;
         let parsed = Uuid::parse_str(&raw).map_err(serde::de::Error::custom)?;
-        if parsed.get_version_num() != 7 || parsed.hyphenated().to_string() != raw {
+        if parsed.get_version_num() != 7
+            || parsed.get_variant() != uuid::Variant::RFC4122
+            || parsed.hyphenated().to_string() != raw
+        {
             return Err(serde::de::Error::custom(
                 "host identifier must be a canonical lowercase UUIDv7",
             ));
@@ -555,6 +558,7 @@ impl WorkloadRecord {
         if self.required_worker_api.major() != worker_api_range.major()
             || self.required_worker_api.min_minor() < worker_api_range.min_minor()
             || self.required_worker_api.max_minor() > worker_api_range.max_minor()
+            || self.required_worker_api.min_minor() > PROTOCOL_MAX_MINOR
         {
             return Err(ManifestError::ApiCompatibility);
         }
@@ -718,6 +722,9 @@ impl EndpointDescriptor {
         }
         validate_context(self.target, self.manager)?;
         validate_api_compatibility(self.worker_api_range)?;
+        if self.generation_id != self.manifest_digest {
+            return Err(ManifestError::DescriptorMismatch);
+        }
         if !matches!(
             (self.target, &self.socket_address),
             (WorkerTarget::System, EndpointAddress::AbsoluteSystem(_))

@@ -104,17 +104,19 @@ pub struct ManifestLoader {
 
 #[derive(Debug, Clone, Copy)]
 enum LoaderContext {
-    System,
+    System { graft_gid: u32 },
     User { uid: u32, gid: u32 },
 }
 
 impl ManifestLoader {
     /// Creates the fixed system-worker loader for `/etc/graft/current`.
+    ///
+    /// `graft_gid` is the Nix-resolved GID of the fixed `graft` readership group.
     #[must_use]
-    pub fn system() -> Self {
+    pub fn system(graft_gid: u32) -> Self {
         Self {
             parent: PathBuf::from(SYSTEM_PARENT),
-            context: LoaderContext::System,
+            context: LoaderContext::System { graft_gid },
         }
     }
 
@@ -155,7 +157,7 @@ impl ManifestLoader {
             return Err(ManifestError::FileType);
         }
         let expected_pointer_owner = match self.context {
-            LoaderContext::System => (0, 0),
+            LoaderContext::System { .. } => (0, 0),
             LoaderContext::User { uid, gid } => (uid, gid),
         };
         validate_owner(&pointer_metadata, expected_pointer_owner)?;
@@ -201,7 +203,7 @@ impl ManifestLoader {
             endpoint,
             owner,
             bound_user_uid: match self.context {
-                LoaderContext::System => None,
+                LoaderContext::System { .. } => None,
                 LoaderContext::User { uid, .. } => Some(uid),
             },
         })
@@ -212,16 +214,12 @@ impl ManifestLoader {
         if !metadata.is_dir() || metadata.file_type().is_symlink() {
             return Err(ManifestError::FileType);
         }
-        match self.context {
-            LoaderContext::System => {
-                validate_owner(&metadata, (0, 0))?;
-                validate_mode(&metadata, 0o750)
-            }
-            LoaderContext::User { uid, gid } => {
-                validate_owner(&metadata, (uid, gid))?;
-                validate_mode(&metadata, 0o700)
-            }
-        }
+        validate_owner(&metadata, expected_parent_owner(self.context))?;
+        let expected_mode = match self.context {
+            LoaderContext::System { .. } => 0o750,
+            LoaderContext::User { .. } => 0o700,
+        };
+        validate_mode(&metadata, expected_mode)
     }
 
     fn validate_generation_owner(
@@ -232,18 +230,25 @@ impl ManifestLoader {
     }
 }
 
+const fn expected_parent_owner(context: LoaderContext) -> (u32, u32) {
+    match context {
+        LoaderContext::System { graft_gid } => (0, graft_gid),
+        LoaderContext::User { uid, gid } => (uid, gid),
+    }
+}
+
 fn select_owner(
     context: LoaderContext,
     actual: (u32, u32),
 ) -> Result<GenerationOwner, ManifestError> {
     match context {
-        LoaderContext::System | LoaderContext::User { .. } if actual == (0, 0) => {
+        LoaderContext::System { .. } | LoaderContext::User { .. } if actual == (0, 0) => {
             Ok(GenerationOwner::MultiUser)
         }
         LoaderContext::User { uid, gid } if actual == (uid, gid) => {
             Ok(GenerationOwner::SingleUser { uid, gid })
         }
-        LoaderContext::System | LoaderContext::User { .. } => Err(ManifestError::Ownership),
+        LoaderContext::System { .. } | LoaderContext::User { .. } => Err(ManifestError::Ownership),
     }
 }
 
@@ -252,7 +257,7 @@ fn validate_loaded_context(
     context: LoaderContext,
 ) -> Result<(), ManifestError> {
     let expected = match context {
-        LoaderContext::System => (WorkerTarget::System, ManagerKind::System),
+        LoaderContext::System { .. } => (WorkerTarget::System, ManagerKind::System),
         LoaderContext::User { .. } => (WorkerTarget::User, ManagerKind::User),
     };
     if (manifest.target(), manifest.manager()) != expected {
@@ -358,7 +363,10 @@ fn open_child(directory: &File, name: &str) -> Result<File, ManifestError> {
     let descriptor = rustix::fs::openat(
         directory,
         name,
-        rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::CLOEXEC | rustix::fs::OFlags::NOFOLLOW,
+        rustix::fs::OFlags::RDONLY
+            | rustix::fs::OFlags::CLOEXEC
+            | rustix::fs::OFlags::NOFOLLOW
+            | rustix::fs::OFlags::NONBLOCK,
         rustix::fs::Mode::empty(),
     )
     .map_err(|error| {
@@ -418,9 +426,13 @@ fn contains_posix_acl(attributes: &[u8]) -> bool {
     })
 }
 
+fn bounded_capacity(current_length: u64, maximum: u64) -> Result<usize, ManifestError> {
+    usize::try_from(current_length.min(maximum)).map_err(|_| ManifestError::DocumentTooLarge)
+}
+
 fn read_bounded(file: &File, maximum: u64) -> Result<Vec<u8>, ManifestError> {
-    let capacity = usize::try_from(file.metadata().map_err(ManifestError::Filesystem)?.len())
-        .map_err(|_| ManifestError::DocumentTooLarge)?;
+    let current_length = file.metadata().map_err(ManifestError::Filesystem)?.len();
+    let capacity = bounded_capacity(current_length, maximum)?;
     let mut bytes = Vec::with_capacity(capacity);
     file.try_clone()
         .map_err(ManifestError::Filesystem)?
@@ -547,6 +559,23 @@ mod tests {
             .load_with_store_root(&symlink_fixture.store_root)
             .is_err());
 
+        let fifo_fixture = Fixture::new();
+        chmod(&fifo_fixture.generation, 0o755);
+        fs::remove_file(fifo_fixture.generation.join("manifest.json")).unwrap();
+        rustix::fs::mkfifoat(
+            rustix::fs::CWD,
+            fifo_fixture.generation.join("manifest.json"),
+            rustix::fs::Mode::RUSR | rustix::fs::Mode::RGRP | rustix::fs::Mode::ROTH,
+        )
+        .unwrap();
+        chmod(&fifo_fixture.generation, 0o555);
+        assert!(matches!(
+            fifo_fixture
+                .loader
+                .load_with_store_root(&fifo_fixture.store_root),
+            Err(ManifestError::FileType)
+        ));
+
         let mode_fixture = Fixture::new();
         chmod(&mode_fixture.generation.join("manifest.json"), 0o644);
         assert!(matches!(
@@ -609,6 +638,10 @@ mod tests {
 
     #[test]
     fn loader_rejects_empty_and_oversized_documents_before_parsing() {
+        assert_eq!(
+            bounded_capacity(u64::MAX, MAX_MANIFEST_BYTES).unwrap(),
+            1_048_576
+        );
         let empty_fixture = Fixture::new();
         fs::set_permissions(&empty_fixture.generation, fs::Permissions::from_mode(0o755)).unwrap();
         chmod(&empty_fixture.generation.join("manifest.json"), 0o644);
@@ -650,7 +683,11 @@ mod tests {
     #[test]
     fn owner_policy_distinguishes_multi_user_single_user_and_foreign_store() {
         assert_eq!(
-            select_owner(LoaderContext::System, (0, 0)).unwrap(),
+            expected_parent_owner(LoaderContext::System { graft_gid: 42 }),
+            (0, 42)
+        );
+        assert_eq!(
+            select_owner(LoaderContext::System { graft_gid: 42 }, (0, 0)).unwrap(),
             GenerationOwner::MultiUser
         );
         assert_eq!(
@@ -686,7 +723,7 @@ mod tests {
             (1001, 100)
         )
         .is_err());
-        assert!(select_owner(LoaderContext::System, (1000, 100)).is_err());
+        assert!(select_owner(LoaderContext::System { graft_gid: 42 }, (1000, 100)).is_err());
     }
 
     fn documents() -> (Value, Value) {

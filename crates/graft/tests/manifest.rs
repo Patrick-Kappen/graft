@@ -51,6 +51,11 @@ fn pair(target: &str) -> (Value, Value) {
     (manifest, endpoint)
 }
 
+fn resign_endpoint(endpoint: &mut Value) {
+    endpoint.as_object_mut().unwrap().remove("endpointDigest");
+    endpoint["endpointDigest"] = digest(endpoint).into();
+}
+
 fn workload(name: &str, identity: char) -> Value {
     let digest = identity.to_string().repeat(64);
     json!({
@@ -153,13 +158,14 @@ fn endpoint_rejects_wrong_address_digest_context_and_manifest_binding() {
     wrong_digest["endpointDigest"] = "0".repeat(64).into();
     let (manifest, mut other_generation) = pair("system");
     other_generation["manifestDigest"] = "1".repeat(64).into();
+    resign_endpoint(&mut other_generation);
 
     assert!(EndpointDescriptor::from_json(&serde_json::to_vec(&wrong_address).unwrap()).is_err());
     assert!(EndpointDescriptor::from_json(&serde_json::to_vec(&wrong_digest).unwrap()).is_err());
 
     let manifest = Manifest::from_json(&serde_json::to_vec(&manifest).unwrap()).unwrap();
     let endpoint = EndpointDescriptor::from_json(&serde_json::to_vec(&other_generation).unwrap());
-    assert!(endpoint.is_err());
+    assert!(matches!(endpoint, Err(ManifestError::DescriptorMismatch)));
     assert_eq!(manifest.workloads().len(), 0);
 }
 
@@ -217,8 +223,22 @@ fn manifest_rejects_context_schema_api_count_and_workload_mismatches() {
     let mut wrong_path = workload("alpha", 'a');
     wrong_path["rootfsStorePath"] = "/tmp/not-store".into();
     set_workloads(&mut store_path, vec![wrong_path]);
+    let (mut unsupported_workload_api, _) = pair("system");
+    unsupported_workload_api["workerApiRange"]["max_minor"] = 1.into();
+    let mut future_workload = workload("alpha", 'a');
+    future_workload["requiredWorkerApi"]["min_minor"] = 1.into();
+    future_workload["requiredWorkerApi"]["max_minor"] = 1.into();
+    set_workloads(&mut unsupported_workload_api, vec![future_workload]);
 
-    for invalid in [context, schema, api, count, workload_target, store_path] {
+    for invalid in [
+        context,
+        schema,
+        api,
+        count,
+        workload_target,
+        store_path,
+        unsupported_workload_api,
+    ] {
         assert!(Manifest::from_json(&serde_json::to_vec(&invalid).unwrap()).is_err());
     }
 }
@@ -244,11 +264,17 @@ fn parser_rejects_noncanonical_json_bytes_and_duplicate_fields() {
 fn identifiers_reject_noncanonical_uuid_and_digest_encodings() {
     let (mut uppercase_uuid, _) = pair("system");
     uppercase_uuid["hostId"] = HOST_ID.to_uppercase().into();
+    let (mut wrong_variant, _) = pair("system");
+    wrong_variant["hostId"] = "018f0f77-8c4d-7b2a-0e6a-4b8a7d3a1c20".into();
     let (mut uppercase_digest, _) = pair("system");
     uppercase_digest["manifestDigest"] = "A".repeat(64).into();
 
     assert!(matches!(
         Manifest::from_json(&serde_json::to_vec(&uppercase_uuid).unwrap()),
+        Err(ManifestError::ManifestJson(_))
+    ));
+    assert!(matches!(
+        Manifest::from_json(&serde_json::to_vec(&wrong_variant).unwrap()),
         Err(ManifestError::ManifestJson(_))
     ));
     assert!(matches!(
