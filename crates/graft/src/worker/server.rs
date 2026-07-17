@@ -246,8 +246,9 @@ impl Connection {
         }
 
         let (outbound_tx, outbound_rx) = mpsc::channel(OUTBOUND_QUEUE_ITEMS);
+        let (connection_close_tx, connection_close_rx) = watch::channel(false);
         let writer_registry = registry.clone();
-        let mut writer = tokio::spawn(writer_loop(direct_writer, outbound_rx));
+        let mut writer = tokio::spawn(writer_loop(direct_writer, outbound_rx, connection_close_rx));
         let active = Arc::new(Mutex::new(BTreeMap::new()));
         let request_slots = Arc::new(Semaphore::new(
             usize::try_from(server_hello.effective_limits.concurrent_requests()).unwrap_or(1),
@@ -284,6 +285,7 @@ impl Connection {
                             active: active.clone(),
                             connection_buffer: connection_buffer.clone(),
                             outbound: outbound_tx.clone(),
+                            connection_close: connection_close_tx.clone(),
                             shutdown: shutdown.clone(),
                         }).await,
                         ClientFrame::StreamAck(control) => {
@@ -305,7 +307,7 @@ impl Connection {
                                     code,
                                     &writer_registry,
                                     &connection_buffer,
-                                    &outbound_tx,
+                                    (&outbound_tx, &connection_close_tx),
                                 )
                                 .await;
                             }
@@ -329,7 +331,7 @@ impl Connection {
                                     code,
                                     &writer_registry,
                                     &connection_buffer,
-                                    &outbound_tx,
+                                    (&outbound_tx, &connection_close_tx),
                                 )
                                 .await;
                             }
@@ -357,28 +359,93 @@ impl Connection {
     }
 }
 
+#[derive(Clone)]
+struct OutputGuard {
+    deadline_at: tokio::time::Instant,
+    control: watch::Receiver<ControlState>,
+    shutdown: watch::Receiver<bool>,
+}
+
 enum Outbound {
     Frame {
         bytes: Vec<u8>,
-        _principal_permit: AdmissionPermit,
-        _connection_permit: ConnectionBufferPermit,
+        principal_permit: AdmissionPermit,
+        connection_permit: ConnectionBufferPermit,
+        guard: Option<OutputGuard>,
     },
-    Close,
 }
 
-async fn writer_loop(mut writer: WriteHalf<UnixStream>, mut receiver: mpsc::Receiver<Outbound>) {
-    while let Some(outbound) = receiver.recv().await {
-        let Outbound::Frame { bytes, .. } = outbound else {
-            let _ = writer.shutdown().await;
-            break;
+async fn writer_loop(
+    mut writer: WriteHalf<UnixStream>,
+    mut receiver: mpsc::Receiver<Outbound>,
+    mut connection_close: watch::Receiver<bool>,
+) {
+    loop {
+        let outbound = tokio::select! {
+            biased;
+            changed = connection_close.changed() => {
+                let _ = changed;
+                break;
+            }
+            outbound = receiver.recv() => {
+                let Some(outbound) = outbound else { break; };
+                outbound
+            }
         };
-        if !matches!(
-            tokio::time::timeout(PARTIAL_FRAME_TIMEOUT, writer.write_all(&bytes)).await,
-            Ok(Ok(()))
-        ) {
+        let Outbound::Frame {
+            bytes,
+            principal_permit,
+            connection_permit,
+            mut guard,
+        } = outbound;
+        let write = writer.write_all(&bytes);
+        tokio::pin!(write);
+        let written = if let Some(guard) = guard.as_mut() {
+            let mut control_open = true;
+            loop {
+                tokio::select! {
+                    biased;
+                    changed = connection_close.changed() => {
+                        let _ = changed;
+                        break false;
+                    }
+                    () = tokio::time::sleep_until(guard.deadline_at) => break false,
+                    changed = guard.shutdown.changed() => {
+                        let _ = changed;
+                        break false;
+                    }
+                    changed = guard.control.changed(), if control_open => {
+                        if changed.is_err() {
+                            control_open = false;
+                        } else {
+                            let state = *guard.control.borrow();
+                            if state.cancelled || state.worker_shutdown {
+                                break false;
+                            }
+                        }
+                    }
+                    result = &mut write => break result.is_ok(),
+                }
+            }
+        } else {
+            tokio::select! {
+                biased;
+                changed = connection_close.changed() => {
+                    let _ = changed;
+                    false
+                }
+                result = tokio::time::timeout(PARTIAL_FRAME_TIMEOUT, &mut write) => {
+                    matches!(result, Ok(Ok(())))
+                }
+            }
+        };
+        drop(connection_permit);
+        drop(principal_permit);
+        if !written {
             break;
         }
     }
+    let _ = writer.shutdown().await;
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -477,6 +544,7 @@ struct RequestContext {
     active: ActiveMap,
     connection_buffer: ConnectionBuffer,
     outbound: mpsc::Sender<Outbound>,
+    connection_close: watch::Sender<bool>,
     shutdown: watch::Receiver<bool>,
 }
 
@@ -676,6 +744,7 @@ async fn run_request(
                         OperationPhase::Dispatch,
                     ),
                 }),
+                None,
             )
             .await;
         }
@@ -723,6 +792,11 @@ async fn run_mock_unary(
             worker_error(context.epoch.identifier(), WorkerErrorCode::WorkerShutdown, "worker shutdown", OperationPhase::Execution)
         }
     };
+    let guard = matches!(result, ResponseResult::MockComplete).then(|| OutputGuard {
+        deadline_at,
+        control: control.clone(),
+        shutdown: context.shutdown.clone(),
+    });
     queue_frame(
         context,
         ServerFrame::Response(Response {
@@ -730,6 +804,7 @@ async fn run_mock_unary(
             request_id: context.request.request_id,
             result,
         }),
+        guard,
     )
     .await;
 }
@@ -853,6 +928,11 @@ async fn run_mock_stream(
                 sequence,
                 mock_value: value,
             }),
+            Some(OutputGuard {
+                deadline_at,
+                control: control.clone(),
+                shutdown: context.shutdown.clone(),
+            }),
         )
         .await;
     }
@@ -864,6 +944,11 @@ async fn run_mock_stream(
             worker_epoch: context.epoch.identifier(),
             reason,
             final_sequence: sequence,
+        }),
+        (reason == StreamEndReason::Completed).then(|| OutputGuard {
+            deadline_at,
+            control: control.clone(),
+            shutdown: context.shutdown.clone(),
         }),
     )
     .await;
@@ -888,6 +973,7 @@ async fn queue_request_error(
                 OperationPhase::Dispatch,
             ),
         }),
+        None,
     )
     .await;
 }
@@ -905,17 +991,20 @@ async fn send_error(context: &RequestContext, code: WorkerErrorCode, summary: &'
                 OperationPhase::Admission,
             ),
         }),
+        None,
     )
     .await;
 }
 
-async fn queue_frame(context: &RequestContext, frame: ServerFrame) {
+async fn queue_frame(context: &RequestContext, frame: ServerFrame, guard: Option<OutputGuard>) {
     queue_encoded(
         context.peer.uid,
         &context.registry,
         &context.connection_buffer,
         &context.outbound,
+        &context.connection_close,
         frame,
+        guard,
     )
     .await;
 }
@@ -927,13 +1016,14 @@ async fn queue_control_error(
     code: WorkerErrorCode,
     registry: &AdmissionRegistry,
     connection_buffer: &ConnectionBuffer,
-    outbound: &mpsc::Sender<Outbound>,
+    output: (&mpsc::Sender<Outbound>, &watch::Sender<bool>),
 ) {
     queue_encoded(
         uid,
         registry,
         connection_buffer,
-        outbound,
+        output.0,
+        output.1,
         ServerFrame::Response(Response {
             server_connection_id: identity.connection_id,
             request_id,
@@ -944,6 +1034,7 @@ async fn queue_control_error(
                 OperationPhase::Stream,
             ),
         }),
+        None,
     )
     .await;
 }
@@ -953,27 +1044,64 @@ async fn queue_encoded(
     registry: &AdmissionRegistry,
     connection_buffer: &ConnectionBuffer,
     outbound: &mpsc::Sender<Outbound>,
+    connection_close: &watch::Sender<bool>,
     frame: ServerFrame,
+    guard: Option<OutputGuard>,
 ) {
     let Ok(bytes) = encode_frame(&frame, FrameDirection::ServerToClient) else {
-        let _ = outbound.send(Outbound::Close).await;
+        let _ = connection_close.send(true);
         return;
     };
     let Some(connection_permit) = connection_buffer.reserve(bytes.len()) else {
-        let _ = outbound.send(Outbound::Close).await;
+        let _ = connection_close.send(true);
         return;
     };
     let Some(principal_permit) = registry.buffered_bytes(uid, bytes.len()) else {
-        let _ = outbound.send(Outbound::Close).await;
+        let _ = connection_close.send(true);
         return;
     };
-    let _ = outbound
-        .send(Outbound::Frame {
-            bytes,
-            _principal_permit: principal_permit,
-            _connection_permit: connection_permit,
-        })
-        .await;
+    let mut enqueue_guard = guard.clone();
+    let frame = Outbound::Frame {
+        bytes,
+        principal_permit,
+        connection_permit,
+        guard,
+    };
+    let reserve = outbound.reserve();
+    tokio::pin!(reserve);
+    if let Some(guard) = enqueue_guard.as_mut() {
+        let mut control_open = true;
+        loop {
+            tokio::select! {
+                biased;
+                () = tokio::time::sleep_until(guard.deadline_at) => break,
+                changed = guard.shutdown.changed() => {
+                    let _ = changed;
+                    break;
+                }
+                changed = guard.control.changed(), if control_open => {
+                    if changed.is_err() {
+                        control_open = false;
+                    } else {
+                        let state = *guard.control.borrow();
+                        if state.cancelled || state.worker_shutdown {
+                            break;
+                        }
+                    }
+                }
+                permit = &mut reserve => {
+                    if let Ok(permit) = permit {
+                        permit.send(frame);
+                        return;
+                    }
+                    break;
+                }
+            }
+        }
+        let _ = connection_close.send(true);
+    } else if let Ok(permit) = reserve.await {
+        permit.send(frame);
+    }
 }
 
 fn worker_error(
@@ -1044,6 +1172,7 @@ mod tests {
 
     use crate::protocol::{RequestIdentifier, WorkerTarget};
 
+    use super::super::limits::WorkerLimits;
     use super::*;
 
     #[derive(Debug)]
@@ -1057,6 +1186,89 @@ mod tests {
         ) -> Pin<Box<dyn Future<Output = DispatchPlan> + Send + 'a>> {
             Box::pin(std::future::pending())
         }
+    }
+
+    #[tokio::test]
+    async fn writer_holds_byte_permits_until_blocked_write_terminates() {
+        let registry = AdmissionRegistry::default();
+        let connection_buffer = ConnectionBuffer::new(WorkerLimits::BUFFERED_BYTES_PER_PRINCIPAL);
+        let principal_permit = registry
+            .buffered_bytes(1000, WorkerLimits::BUFFERED_BYTES_PER_PRINCIPAL)
+            .unwrap();
+        let connection_permit = connection_buffer
+            .reserve(WorkerLimits::BUFFERED_BYTES_PER_PRINCIPAL)
+            .unwrap();
+        let (server, _client) = UnixStream::pair().unwrap();
+        let (_reader, writer) = tokio::io::split(server);
+        let (outbound_tx, outbound_rx) = mpsc::channel(1);
+        let (close_tx, close_rx) = watch::channel(false);
+        let writer_task = tokio::spawn(writer_loop(writer, outbound_rx, close_rx));
+        outbound_tx
+            .send(Outbound::Frame {
+                bytes: vec![0_u8; WorkerLimits::BUFFERED_BYTES_PER_PRINCIPAL],
+                principal_permit,
+                connection_permit,
+                guard: None,
+            })
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(10)).await;
+
+        assert!(registry.buffered_bytes(1000, 1).is_none());
+        assert!(connection_buffer.reserve(1).is_none());
+
+        close_tx.send(true).unwrap();
+        writer_task.await.unwrap();
+        assert!(registry.buffered_bytes(1000, 1).is_some());
+        assert!(connection_buffer.reserve(1).is_some());
+    }
+
+    #[tokio::test]
+    async fn guarded_enqueue_closes_connection_at_absolute_deadline() {
+        let registry = AdmissionRegistry::default();
+        let connection_buffer = ConnectionBuffer::new(4096);
+        let (outbound_tx, mut outbound_rx) = mpsc::channel(1);
+        let (close_tx, mut close_rx) = watch::channel(false);
+        outbound_tx
+            .send(Outbound::Frame {
+                bytes: vec![0],
+                principal_permit: registry.buffered_bytes(1000, 1).unwrap(),
+                connection_permit: connection_buffer.reserve(1).unwrap(),
+                guard: None,
+            })
+            .await
+            .unwrap();
+        let (_control_tx, control) = watch::channel(ControlState {
+            cancelled: false,
+            worker_shutdown: false,
+            acknowledged: 0,
+        });
+        let (_shutdown_tx, shutdown) = watch::channel(false);
+        let identifier =
+            ConnectionIdentifier::parse("018f0f77-8c4d-7b2a-8e6a-4b8a7d3a1c20").unwrap();
+
+        queue_encoded(
+            1000,
+            &registry,
+            &connection_buffer,
+            &outbound_tx,
+            &close_tx,
+            ServerFrame::Response(Response {
+                server_connection_id: identifier,
+                request_id: RequestIdentifier::new(1).unwrap(),
+                result: ResponseResult::MockComplete,
+            }),
+            Some(OutputGuard {
+                deadline_at: tokio::time::Instant::now() + Duration::from_millis(10),
+                control,
+                shutdown,
+            }),
+        )
+        .await;
+
+        close_rx.changed().await.unwrap();
+        assert!(*close_rx.borrow());
+        assert!(outbound_rx.try_recv().is_ok());
     }
 
     #[tokio::test]
