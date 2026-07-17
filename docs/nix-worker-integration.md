@@ -452,11 +452,16 @@ The manifest envelope contains:
 - deterministic workload count; and
 - sorted workload records.
 
-Version 1 canonical JSON is UTF-8, compact JSON with no insignificant
-whitespace, lexicographically sorted object keys, contract-ordered arrays,
-standard JSON string escaping, and no floating-point values. A verifier rejects
-input bytes that are not this unique representation. It applies SHA-256 with
-this non-circular rule:
+Version 1 canonical JSON is the integer-only subset of RFC 8785 JSON
+Canonicalization Scheme (JCS): UTF-8 compact JSON with no insignificant
+whitespace, RFC 8785 object-key ordering (all version-1 schema keys are fixed
+ASCII), and contract-ordered arrays. Strings escape quotation mark, reverse
+solidus, backspace, tab, newline, form feed, and carriage return as `\"`, `\\`,
+`\b`, `\t`, `\n`, `\f`, and `\r`; other U+0000 through U+001F characters use
+lowercase `\u00xx`. Solidus remains literal and all other Unicode is literal
+UTF-8. Floating-point values are forbidden. A verifier rejects input bytes that
+are not this unique representation. It applies SHA-256 with this non-circular
+rule:
 
 1. remove top-level `generationId` and `manifestDigest` from the manifest;
 2. canonicalize the remaining manifest, which already includes producer

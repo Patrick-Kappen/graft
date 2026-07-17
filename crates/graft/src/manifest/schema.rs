@@ -290,6 +290,9 @@ impl Manifest {
     /// Returns an error for malformed JSON, incompatible schema/context,
     /// nondeterministic records, invalid cardinality, or digest mismatch.
     pub fn from_json(bytes: &[u8]) -> Result<Self, ManifestError> {
+        if u64::try_from(bytes.len()).map_or(true, |length| length > super::MAX_MANIFEST_BYTES) {
+            return Err(ManifestError::DocumentTooLarge);
+        }
         let manifest: Self = serde_json::from_slice(bytes).map_err(ManifestError::ManifestJson)?;
         manifest.validate()?;
         if canonical::to_canonical_json(&manifest)? != bytes {
@@ -545,6 +548,11 @@ impl WorkloadRecord {
         if self.target != target {
             return Err(ManifestError::ContextMismatch);
         }
+        if self.quadlet_source_unit.0.strip_suffix(".container")
+            != self.generated_service.0.strip_suffix(".service")
+        {
+            return Err(ManifestError::WorkloadUnitMismatch);
+        }
         if self.dependency_services.len() > MAX_WORKLOAD_DEPENDENCIES
             || !strictly_sorted_unique(&self.dependency_services)
             || !strictly_sorted_unique(&self.lifecycle_capabilities)
@@ -654,6 +662,9 @@ impl EndpointDescriptor {
     /// Returns an error for malformed JSON, incompatible schema/context/address,
     /// or endpoint digest mismatch.
     pub fn from_json(bytes: &[u8]) -> Result<Self, ManifestError> {
+        if u64::try_from(bytes.len()).map_or(true, |length| length > super::MAX_ENDPOINT_BYTES) {
+            return Err(ManifestError::DocumentTooLarge);
+        }
         let endpoint: Self = serde_json::from_slice(bytes).map_err(ManifestError::EndpointJson)?;
         endpoint.validate()?;
         if canonical::to_canonical_json(&endpoint)? != bytes {
