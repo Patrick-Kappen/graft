@@ -197,10 +197,46 @@ impl EffectiveLimits {
         self.active_streams
     }
 
+    /// Returns the maximum buffered response bytes for the principal.
+    #[must_use]
+    pub const fn buffered_response_bytes(self) -> u32 {
+        self.buffered_response_bytes
+    }
+
+    /// Returns the maximum unacknowledged items in one stream.
+    #[must_use]
+    pub const fn unacknowledged_stream_items(self) -> u32 {
+        self.unacknowledged_stream_items
+    }
+
+    /// Returns the maximum workloads in one list page.
+    #[must_use]
+    pub const fn workloads_per_page(self) -> u32 {
+        self.workloads_per_page
+    }
+
+    /// Returns the maximum historical log records in one page.
+    #[must_use]
+    pub const fn log_records_per_page(self) -> u32 {
+        self.log_records_per_page
+    }
+
+    /// Returns the maximum encoded log-message bytes in one item.
+    #[must_use]
+    pub const fn encoded_log_message_bytes(self) -> u32 {
+        self.encoded_log_message_bytes
+    }
+
     /// Returns the unary deadline bound in milliseconds.
     #[must_use]
     pub const fn unary_deadline_ms(self) -> u64 {
         self.unary_deadline_ms
+    }
+
+    /// Returns the lifecycle deadline bound in milliseconds.
+    #[must_use]
+    pub const fn lifecycle_deadline_ms(self) -> u64 {
+        self.lifecycle_deadline_ms
     }
 
     /// Returns whether every limit is no greater than the corresponding bound.

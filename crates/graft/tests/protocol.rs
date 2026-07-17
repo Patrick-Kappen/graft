@@ -259,7 +259,19 @@ fn negotiation_selects_highest_minor_and_intersects_limits() {
     assert!(selected.capabilities.contains(Capability::Metrics));
     assert_eq!(selected.effective_limits.concurrent_requests(), 8);
     assert_eq!(selected.effective_limits.active_streams(), 4);
+    assert_eq!(
+        selected.effective_limits.buffered_response_bytes(),
+        1_048_576
+    );
+    assert_eq!(selected.effective_limits.unacknowledged_stream_items(), 32);
+    assert_eq!(selected.effective_limits.workloads_per_page(), 50);
+    assert_eq!(selected.effective_limits.log_records_per_page(), 500);
+    assert_eq!(
+        selected.effective_limits.encoded_log_message_bytes(),
+        32_768
+    );
     assert_eq!(selected.effective_limits.unary_deadline_ms(), 30_000);
+    assert_eq!(selected.effective_limits.lifecycle_deadline_ms(), 120_000);
 }
 
 #[test]
