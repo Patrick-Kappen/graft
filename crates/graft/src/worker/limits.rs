@@ -84,9 +84,11 @@ impl AdmissionRegistry {
             return false;
         };
         refresh_rejections(&mut state.rejections, Instant::now());
+        let principal = state.rejections.principals.get(&uid).copied();
         state.rejections.total < WorkerLimits::REJECTIONS_WORKER
-            && state.rejections.principals.get(&uid).copied().unwrap_or(0)
-                < WorkerLimits::REJECTIONS_PER_PRINCIPAL
+            && principal.unwrap_or(0) < WorkerLimits::REJECTIONS_PER_PRINCIPAL
+            && (principal.is_some()
+                || state.rejections.principals.len() < WorkerLimits::CONNECTIONS_WORKER)
     }
 
     /// Records one admission failure if its bounded rate window has capacity.
@@ -379,6 +381,13 @@ mod tests {
         assert!(!principal_registry.rejection(1000));
         assert!(!principal_registry.admission_allowed(1000));
         assert!(principal_registry.admission_allowed(1001));
+
+        let key_registry = AdmissionRegistry::default();
+        for uid in 0..u32::try_from(WorkerLimits::CONNECTIONS_WORKER).unwrap() {
+            assert!(key_registry.rejection(uid));
+        }
+        assert!(!key_registry.admission_allowed(10_000));
+        assert!(!key_registry.rejection(10_000));
 
         let worker_registry = AdmissionRegistry::default();
         for index in 0..WorkerLimits::REJECTIONS_WORKER {

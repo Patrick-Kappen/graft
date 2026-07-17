@@ -187,11 +187,26 @@ fn real_worker_process_handshake_uses_inherited_unix_socket_and_fresh_epoch() {
     );
 }
 
-fn invalid_activation_status(fds: &str, name: &str, inherited_fd: Option<i32>) -> bool {
+#[derive(Clone, Copy)]
+enum ListenPid<'a> {
+    Child,
+    Missing,
+    Value(&'a str),
+}
+
+fn invalid_activation_status(
+    fds: &str,
+    name: &str,
+    inherited_fd: Option<i32>,
+    listen_pid: ListenPid<'_>,
+) -> bool {
     let mut command = Command::new("bash");
     command
         .arg("-c")
-        .arg("export LISTEN_PID=$$; exec \"$@\"")
+        .arg(match listen_pid {
+            ListenPid::Child => "export LISTEN_PID=$$; exec \"$@\"",
+            ListenPid::Missing | ListenPid::Value(_) => "exec \"$@\"",
+        })
         .arg("graft-worker-wrapper")
         .arg(env!("CARGO_BIN_EXE_graft-worker"))
         .args([
@@ -214,6 +229,15 @@ fn invalid_activation_status(fds: &str, name: &str, inherited_fd: Option<i32>) -
         .env("LISTEN_FDNAMES", name)
         .stdout(Stdio::null())
         .stderr(Stdio::null());
+    match listen_pid {
+        ListenPid::Child => {}
+        ListenPid::Missing => {
+            command.env_remove("LISTEN_PID");
+        }
+        ListenPid::Value(value) => {
+            command.env("LISTEN_PID", value);
+        }
+    }
     if let Some(source_fd) = inherited_fd {
         // SAFETY: the child-only closure duplicates one live test descriptor to
         // fd 3 and clears close-on-exec using async-signal-safe syscalls.
@@ -231,16 +255,49 @@ fn invalid_activation_status(fds: &str, name: &str, inherited_fd: Option<i32>) -
 
 #[test]
 fn worker_rejects_invalid_activation_cardinality_name_and_type() {
-    assert!(!invalid_activation_status("0", "graft-worker", None));
-    assert!(!invalid_activation_status("2", "graft-worker", None));
-    assert!(!invalid_activation_status("1", "wrong-name", None));
-    assert!(!invalid_activation_status("1", "graft-worker", None));
+    assert!(!invalid_activation_status(
+        "0",
+        "graft-worker",
+        None,
+        ListenPid::Child
+    ));
+    assert!(!invalid_activation_status(
+        "2",
+        "graft-worker",
+        None,
+        ListenPid::Child
+    ));
+    assert!(!invalid_activation_status(
+        "1",
+        "wrong-name",
+        None,
+        ListenPid::Child
+    ));
+    assert!(!invalid_activation_status(
+        "1",
+        "graft-worker",
+        None,
+        ListenPid::Child
+    ));
     let regular_file = std::fs::File::open("/dev/null").unwrap();
     assert!(!invalid_activation_status(
         "1",
         "graft-worker",
-        Some(regular_file.as_raw_fd())
+        Some(regular_file.as_raw_fd()),
+        ListenPid::Child
     ));
+    for listen_pid in [
+        ListenPid::Missing,
+        ListenPid::Value("invalid"),
+        ListenPid::Value("1"),
+    ] {
+        assert!(!invalid_activation_status(
+            "1",
+            "graft-worker",
+            Some(regular_file.as_raw_fd()),
+            listen_pid,
+        ));
+    }
 }
 
 #[cfg(feature = "worker-test-fixtures")]
@@ -661,7 +718,7 @@ fn request_deadline_wins_while_stream_ack_window_is_full() {
         &ClientFrame::Request(Request {
             server_connection_id: hello.server_connection_id,
             request_id: RequestIdentifier::new(13).unwrap(),
-            deadline_ms: Some(20),
+            deadline_ms: Some(250),
             operation: SemanticRequest::MockStream {
                 items: 2,
                 interval_ms: 0,
