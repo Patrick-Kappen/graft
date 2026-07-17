@@ -79,6 +79,9 @@ pub enum ManifestError {
     /// A workload identity is duplicated.
     #[error("manifest contains duplicate workload identity")]
     DuplicateWorkloadIdentity,
+    /// A workload's source and generated unit stems differ.
+    #[error("workload Quadlet source and generated service identities do not correspond")]
+    WorkloadUnitMismatch,
     /// A bounded workload collection is invalid.
     #[error("manifest workload collection is unsorted, duplicated, or oversized")]
     WorkloadCollection,

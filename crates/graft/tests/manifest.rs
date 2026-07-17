@@ -223,6 +223,14 @@ fn manifest_rejects_context_schema_api_count_and_workload_mismatches() {
     let mut wrong_path = workload("alpha", 'a');
     wrong_path["rootfsStorePath"] = "/tmp/not-store".into();
     set_workloads(&mut store_path, vec![wrong_path]);
+    let (mut unit_mismatch, _) = pair("system");
+    let mut wrong_service = workload("alpha", 'a');
+    wrong_service["generatedService"] = "sshd.service".into();
+    set_workloads(&mut unit_mismatch, vec![wrong_service]);
+    assert!(matches!(
+        Manifest::from_json(&serde_json::to_vec(&unit_mismatch).unwrap()),
+        Err(ManifestError::WorkloadUnitMismatch)
+    ));
     let (mut unsupported_workload_api, _) = pair("system");
     unsupported_workload_api["workerApiRange"]["max_minor"] = 1.into();
     let mut future_workload = workload("alpha", 'a');
@@ -241,6 +249,21 @@ fn manifest_rejects_context_schema_api_count_and_workload_mismatches() {
     ] {
         assert!(Manifest::from_json(&serde_json::to_vec(&invalid).unwrap()).is_err());
     }
+}
+
+#[test]
+fn public_parsers_reject_oversized_input_before_json_decoding() {
+    let manifest = vec![b'x'; usize::try_from(graft::manifest::MAX_MANIFEST_BYTES).unwrap() + 1];
+    let endpoint = vec![b'x'; usize::try_from(graft::manifest::MAX_ENDPOINT_BYTES).unwrap() + 1];
+
+    assert!(matches!(
+        Manifest::from_json(&manifest),
+        Err(ManifestError::DocumentTooLarge)
+    ));
+    assert!(matches!(
+        EndpointDescriptor::from_json(&endpoint),
+        Err(ManifestError::DocumentTooLarge)
+    ));
 }
 
 #[test]

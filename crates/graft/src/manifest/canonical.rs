@@ -39,3 +39,22 @@ fn reject_floats(value: &Value) -> Result<(), ManifestError> {
         Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => Ok(()),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn canonical_strings_follow_the_rfc_8785_escape_subset() {
+        let value = json!({"text": "\"\\\u{0008}\t\n\u{000c}\r\0\u{001f}/é"});
+
+        let encoded = to_canonical_json(&value).unwrap();
+
+        assert_eq!(
+            encoded,
+            r#"{"text":"\"\\\b\t\n\f\r\u0000\u001f/é"}"#.as_bytes()
+        );
+    }
+}
