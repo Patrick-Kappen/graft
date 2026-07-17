@@ -290,9 +290,11 @@ Accept=no
 RemoveOnStop=yes
 ```
 
-The owning manager passes exactly one activated descriptor to one worker. The
-worker rejects zero, multiple, wrong-type, or unexpected-name descriptors. It
-does not bind a fallback path.
+The owning manager passes exactly one activated descriptor named
+`graft-worker` to one worker. The worker requires `LISTEN_PID` for its own
+process, `LISTEN_FDS=1`, `LISTEN_FDNAMES=graft-worker`, and descriptor 3 as a
+listening Unix stream socket. It rejects zero, multiple, wrong-type, or
+unexpected-name descriptors and does not bind a fallback path.
 
 The socket unit may start independently. The service starts on the first
 connection and accepts all peers itself so worker-wide limits remain shared. A
