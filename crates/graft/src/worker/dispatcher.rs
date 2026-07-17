@@ -102,7 +102,8 @@ impl SemanticDispatcher for MockDispatcher {
         Box::pin(async move {
             match request {
                 SemanticRequest::Reserved => DispatchPlan::Unsupported,
-                SemanticRequest::MockUnary { delay_ms } => DispatchPlan::MockUnary {
+                SemanticRequest::MockUnary { delay_ms }
+                | SemanticRequest::MockLifecycle { delay_ms } => DispatchPlan::MockUnary {
                     delay_ms: *delay_ms,
                 },
                 SemanticRequest::MockStream { items, interval_ms } => DispatchPlan::MockStream {

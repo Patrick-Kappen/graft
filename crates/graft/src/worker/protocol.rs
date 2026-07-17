@@ -77,6 +77,12 @@ pub enum SemanticRequest {
         /// Milliseconds to wait before responding.
         delay_ms: u64,
     },
+    /// Deterministic fixture lifecycle-class response.
+    #[cfg(feature = "worker-test-fixtures")]
+    MockLifecycle {
+        /// Milliseconds to wait before responding.
+        delay_ms: u64,
+    },
     /// Deterministic fixture stream.
     #[cfg(feature = "worker-test-fixtures")]
     MockStream {

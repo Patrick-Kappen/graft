@@ -394,6 +394,46 @@ fn real_worker_process_dispatches_typed_mock_unary_request() {
 
 #[cfg(feature = "worker-test-fixtures")]
 #[test]
+fn lifecycle_operations_use_the_negotiated_lifecycle_deadline_class() {
+    let worker = spawn_worker();
+    let mut stream = connect(&worker.socket_path);
+    let maxima = EffectiveLimits::protocol_maxima();
+    let limits = EffectiveLimits::new(
+        maxima.concurrent_requests(),
+        maxima.active_streams(),
+        maxima.buffered_response_bytes(),
+        maxima.unacknowledged_stream_items(),
+        maxima.workloads_per_page(),
+        maxima.log_records_per_page(),
+        maxima.encoded_log_message_bytes(),
+        100,
+        1_000,
+    )
+    .unwrap();
+    let hello = handshake_with_limits(&mut stream, limits);
+    let request_id = RequestIdentifier::new(2).unwrap();
+    send_client_frame(
+        &mut stream,
+        &ClientFrame::Request(Request {
+            server_connection_id: hello.server_connection_id,
+            request_id,
+            deadline_ms: Some(500),
+            operation: SemanticRequest::MockLifecycle { delay_ms: 150 },
+        }),
+    );
+
+    let terminal = read_server_frame::<ServerFrame>(&mut stream);
+
+    assert!(matches!(
+        terminal,
+        ServerFrame::Response(response)
+            if response.request_id == request_id
+                && response.result == ResponseResult::MockComplete
+    ));
+}
+
+#[cfg(feature = "worker-test-fixtures")]
+#[test]
 fn real_worker_stream_sequences_acknowledgements_and_cancellation() {
     let worker = spawn_worker();
     let mut stream = connect(&worker.socket_path);

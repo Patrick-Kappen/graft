@@ -688,6 +688,25 @@ struct RequestContext {
     shutdown: watch::Receiver<bool>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OperationDeadlineClass {
+    Unary,
+    #[cfg_attr(not(feature = "worker-test-fixtures"), allow(dead_code))]
+    Lifecycle,
+}
+
+const fn operation_deadline_class(operation: &SemanticRequest) -> OperationDeadlineClass {
+    match operation {
+        SemanticRequest::Reserved => OperationDeadlineClass::Unary,
+        #[cfg(feature = "worker-test-fixtures")]
+        SemanticRequest::MockUnary { .. } | SemanticRequest::MockStream { .. } => {
+            OperationDeadlineClass::Unary
+        }
+        #[cfg(feature = "worker-test-fixtures")]
+        SemanticRequest::MockLifecycle { .. } => OperationDeadlineClass::Lifecycle,
+    }
+}
+
 #[cfg(feature = "worker-test-fixtures")]
 const fn is_stream_operation(operation: &SemanticRequest) -> bool {
     matches!(operation, SemanticRequest::MockStream { .. })
@@ -713,11 +732,12 @@ async fn spawn_request(mut context: RequestContext) {
         .await;
         return;
     }
-    let deadline_ms = context
-        .request
-        .deadline_ms
-        .unwrap_or(context.limits.unary_deadline_ms());
-    if deadline_ms == 0 || deadline_ms > context.limits.unary_deadline_ms() {
+    let deadline_maximum = match operation_deadline_class(&context.request.operation) {
+        OperationDeadlineClass::Unary => context.limits.unary_deadline_ms(),
+        OperationDeadlineClass::Lifecycle => context.limits.lifecycle_deadline_ms(),
+    };
+    let deadline_ms = context.request.deadline_ms.unwrap_or(deadline_maximum);
+    if deadline_ms == 0 || deadline_ms > deadline_maximum {
         send_error(
             &context,
             WorkerErrorCode::Deadline,
@@ -966,12 +986,6 @@ async fn run_mock_unary(
             worker_error(context.epoch.identifier(), WorkerErrorCode::WorkerShutdown, "worker shutdown", OperationPhase::Execution)
         }
     };
-    let guard = matches!(result, ResponseResult::MockComplete).then(|| OutputGuard {
-        deadline_at,
-        control: control.clone(),
-        shutdown: context.shutdown.clone(),
-        publication: None,
-    });
     queue_frame(
         context,
         ServerFrame::Response(Response {
@@ -979,7 +993,7 @@ async fn run_mock_unary(
             request_id: context.request.request_id,
             result,
         }),
-        guard,
+        None,
     )
     .await;
 }
@@ -1121,6 +1135,15 @@ async fn run_mock_stream(
         return;
     }
     let final_sequence = progress.delivered.load(Ordering::Acquire);
+    if reason == StreamEndReason::Completed {
+        if tokio::time::Instant::now() >= deadline_at {
+            reason = StreamEndReason::Deadline;
+        } else if *context.shutdown.borrow() || control.borrow().worker_shutdown {
+            reason = StreamEndReason::WorkerShutdown;
+        } else if control.borrow().cancelled {
+            reason = StreamEndReason::Cancelled;
+        }
+    }
     queue_frame(
         &context,
         ServerFrame::StreamEnd(StreamEnd {
@@ -1130,12 +1153,7 @@ async fn run_mock_stream(
             reason,
             final_sequence,
         }),
-        (reason == StreamEndReason::Completed).then(|| OutputGuard {
-            deadline_at,
-            control: control.clone(),
-            shutdown: context.shutdown.clone(),
-            publication: None,
-        }),
+        None,
     )
     .await;
     drop(principal_stream);
