@@ -79,12 +79,18 @@ pub enum ManifestError {
     /// A workload identity is duplicated.
     #[error("manifest contains duplicate workload identity")]
     DuplicateWorkloadIdentity,
-    /// A workload's source and generated unit stems differ.
-    #[error("workload Quadlet source and generated service identities do not correspond")]
-    WorkloadUnitMismatch,
+    /// A workload's source, unit, name, and container identities differ.
+    #[error("workload source, unit, name, and container identities do not correspond")]
+    WorkloadIdentityMismatch,
     /// A bounded workload collection is invalid.
     #[error("manifest workload collection is unsorted, duplicated, or oversized")]
     WorkloadCollection,
+    /// An installed producer identity is malformed.
+    #[error("installed producer identity is invalid")]
+    InvalidProducerIdentity,
+    /// The generation producer does not match the installed worker package.
+    #[error("generation producer does not match installed worker producer")]
+    InstalledProducerMismatch,
     /// Workload producer requirements do not match the envelope.
     #[error("workload producer requirement does not match manifest producer")]
     ProducerMismatch,
