@@ -22,9 +22,9 @@ use super::clock::WorkerEpoch;
 use super::dispatcher::{
     DispatchContext, DispatchPlan, PeerCredentials, PrincipalKey, SemanticDispatcher,
 };
-use super::framing::{
-    read_frame, read_frame_with_timestamp, write_frame, AsyncFrameError, PARTIAL_FRAME_TIMEOUT,
-};
+#[cfg(feature = "worker-test-fixtures")]
+use super::framing::PARTIAL_FRAME_TIMEOUT;
+use super::framing::{read_frame, read_frame_with_timestamp, write_frame, AsyncFrameError};
 use super::limits::{AdmissionPermit, AdmissionRegistry, ConnectionBuffer, ConnectionBufferPermit};
 use super::protocol::{
     ClientFrame, ControlError, OperationPhase, Request, Response, ResponseResult,
@@ -35,6 +35,7 @@ use super::protocol::{StreamEnd, StreamEndReason, StreamItem};
 
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 const OUTBOUND_QUEUE_ITEMS: usize = 64;
+const TERMINAL_DELIVERY_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Fixed server configuration supplied by installed policy.
 #[derive(Debug, Clone)]
@@ -324,6 +325,7 @@ impl Connection {
                             connection_close: connection_close_tx.clone(),
                             completion: Arc::new(Notify::new()),
                             terminal_lease: Arc::new(Mutex::new(None)),
+                            request_deadline: Arc::new(Mutex::new(None)),
                             shutdown: shutdown.clone(),
                         }).await,
                         ClientFrame::StreamAck(control) => {
@@ -451,6 +453,7 @@ enum Outbound {
         principal_permit: AdmissionPermit,
         connection_permit: ConnectionBufferPermit,
         guard: Option<OutputGuard>,
+        delivery_deadline: tokio::time::Instant,
         terminal_lease: Option<RequestLease>,
     },
     #[cfg_attr(not(feature = "worker-test-fixtures"), allow(dead_code))]
@@ -480,6 +483,7 @@ async fn writer_loop(
             principal_permit,
             connection_permit,
             guard,
+            delivery_deadline,
             mut terminal_lease,
         } = outbound
         else {
@@ -500,9 +504,11 @@ async fn writer_loop(
                 || guard.control.borrow().cancelled
                 || guard.control.borrow().worker_shutdown
         });
-        let write = tokio::time::timeout(PARTIAL_FRAME_TIMEOUT, writer.write_all(&bytes));
+        let write = tokio::time::timeout_at(delivery_deadline, writer.write_all(&bytes));
         tokio::pin!(write);
-        let outcome = if guard_expired {
+        let outcome = if tokio::time::Instant::now() >= delivery_deadline {
+            WriteOutcome::Failed
+        } else if guard_expired {
             WriteOutcome::Skipped
         } else if let Some(guard) = write_guard.as_mut() {
             let mut control_open = true;
@@ -544,6 +550,7 @@ async fn writer_loop(
                     let _ = changed;
                     WriteOutcome::Failed
                 }
+                () = tokio::time::sleep_until(delivery_deadline) => WriteOutcome::Failed,
                 result = &mut write => if matches!(result, Ok(Ok(()))) {
                     WriteOutcome::Written
                 } else {
@@ -694,6 +701,7 @@ struct RequestContext {
     connection_close: watch::Sender<bool>,
     completion: Arc<Notify>,
     terminal_lease: Arc<Mutex<Option<RequestLease>>>,
+    request_deadline: Arc<Mutex<Option<tokio::time::Instant>>>,
     shutdown: watch::Receiver<bool>,
 }
 
@@ -756,6 +764,13 @@ async fn spawn_request(context: RequestContext) {
         return;
     }
     let deadline_at = context.received_at + Duration::from_millis(deadline_ms);
+    {
+        let Ok(mut request_deadline) = context.request_deadline.lock() else {
+            let _ = context.connection_close.send(true);
+            return;
+        };
+        *request_deadline = Some(deadline_at);
+    }
     let (control_tx, control_rx) = watch::channel(ControlState {
         cancelled: false,
         worker_shutdown: false,
@@ -1286,14 +1301,32 @@ async fn queue_frame(context: &RequestContext, frame: ServerFrame, guard: Option
     } else {
         None
     };
+    let now = tokio::time::Instant::now();
+    let fixed_deadline = now + TERMINAL_DELIVERY_TIMEOUT;
+    let request_deadline = context
+        .request_deadline
+        .lock()
+        .ok()
+        .and_then(|deadline| *deadline);
+    let delivery_deadline = guard.as_ref().map_or_else(
+        || {
+            request_deadline
+                .filter(|deadline| *deadline > now)
+                .map_or(fixed_deadline, |deadline| deadline.min(fixed_deadline))
+        },
+        |output_guard| output_guard.deadline_at.min(fixed_deadline),
+    );
     queue_encoded(
         context.peer.uid,
         &context.registry,
         &context.connection_buffer,
         (&context.outbound, &context.connection_close),
-        frame,
-        guard,
-        terminal_lease,
+        QueuedFrame {
+            frame,
+            guard,
+            delivery_deadline,
+            terminal_lease,
+        },
     )
     .await;
 }
@@ -1316,26 +1349,36 @@ async fn queue_control_error(
         registry,
         connection_buffer,
         output,
-        ServerFrame::ControlError(ControlError {
-            server_connection_id: identity.connection_id,
-            request_id,
-            error: WorkerError {
-                code,
-                summary: SafeSummary::parse("request control frame is invalid")
-                    .expect("fixed control summary is valid"),
-                retry: if code == WorkerErrorCode::RequestNotFound {
-                    RetryClassification::AfterStateRefresh
-                } else {
-                    RetryClassification::Never
+        QueuedFrame {
+            frame: ServerFrame::ControlError(ControlError {
+                server_connection_id: identity.connection_id,
+                request_id,
+                error: WorkerError {
+                    code,
+                    summary: SafeSummary::parse("request control frame is invalid")
+                        .expect("fixed control summary is valid"),
+                    retry: if code == WorkerErrorCode::RequestNotFound {
+                        RetryClassification::AfterStateRefresh
+                    } else {
+                        RetryClassification::Never
+                    },
+                    phase: OperationPhase::Stream,
+                    worker_epoch: identity.worker_epoch,
                 },
-                phase: OperationPhase::Stream,
-                worker_epoch: identity.worker_epoch,
-            },
-        }),
-        None,
-        None,
+            }),
+            guard: None,
+            delivery_deadline: tokio::time::Instant::now() + TERMINAL_DELIVERY_TIMEOUT,
+            terminal_lease: None,
+        },
     )
     .await;
+}
+
+struct QueuedFrame {
+    frame: ServerFrame,
+    guard: Option<OutputGuard>,
+    delivery_deadline: tokio::time::Instant,
+    terminal_lease: Option<RequestLease>,
 }
 
 async fn queue_encoded(
@@ -1343,10 +1386,14 @@ async fn queue_encoded(
     registry: &AdmissionRegistry,
     connection_buffer: &ConnectionBuffer,
     output: (&mpsc::Sender<Outbound>, &watch::Sender<bool>),
-    frame: ServerFrame,
-    guard: Option<OutputGuard>,
-    terminal_lease: Option<RequestLease>,
+    queued: QueuedFrame,
 ) {
+    let QueuedFrame {
+        frame,
+        guard,
+        delivery_deadline,
+        terminal_lease,
+    } = queued;
     let Ok(encoded_length) = encoded_frame_len(&frame, FrameDirection::ServerToClient) else {
         let _ = output.1.send(true);
         return;
@@ -1370,6 +1417,7 @@ async fn queue_encoded(
         principal_permit,
         connection_permit,
         guard,
+        delivery_deadline,
         terminal_lease,
     };
     let reserve = output.0.reserve();
@@ -1379,7 +1427,7 @@ async fn queue_encoded(
         loop {
             tokio::select! {
                 biased;
-                () = tokio::time::sleep_until(guard.deadline_at) => break,
+                () = tokio::time::sleep_until(delivery_deadline) => break,
                 changed = guard.shutdown.changed() => {
                     let _ = changed;
                     break;
@@ -1404,8 +1452,20 @@ async fn queue_encoded(
             }
         }
         let _ = output.1.send(true);
-    } else if let Ok(permit) = reserve.await {
-        permit.send(frame);
+    } else {
+        tokio::select! {
+            biased;
+            () = tokio::time::sleep_until(delivery_deadline) => {
+                let _ = output.1.send(true);
+            }
+            permit = &mut reserve => {
+                if let Ok(permit) = permit {
+                    permit.send(frame);
+                } else {
+                    let _ = output.1.send(true);
+                }
+            }
+        }
     }
 }
 
@@ -1622,6 +1682,7 @@ mod tests {
                 principal_permit,
                 connection_permit,
                 guard: None,
+                delivery_deadline: tokio::time::Instant::now() + PARTIAL_FRAME_TIMEOUT,
                 terminal_lease: None,
             })
             .await
@@ -1666,6 +1727,7 @@ mod tests {
                 principal_permit: registry.buffered_bytes(1000, 1).unwrap(),
                 connection_permit: connection_buffer.reserve(1).unwrap(),
                 guard: None,
+                delivery_deadline: tokio::time::Instant::now() + PARTIAL_FRAME_TIMEOUT,
                 terminal_lease: Some(RequestLease {
                     active: active.clone(),
                     request_id,
@@ -1714,6 +1776,7 @@ mod tests {
                     shutdown,
                     publication: None,
                 }),
+                delivery_deadline: tokio::time::Instant::now() + PARTIAL_FRAME_TIMEOUT,
                 terminal_lease: Some(RequestLease {
                     active: Arc::new(Mutex::new(BTreeMap::new())),
                     request_id,
@@ -1746,6 +1809,7 @@ mod tests {
                 principal_permit: registry.buffered_bytes(1000, 1).unwrap(),
                 connection_permit: connection_buffer.reserve(1).unwrap(),
                 guard: None,
+                delivery_deadline: tokio::time::Instant::now() + PARTIAL_FRAME_TIMEOUT,
                 terminal_lease: None,
             })
             .await
@@ -1765,18 +1829,21 @@ mod tests {
             &registry,
             &connection_buffer,
             (&outbound_tx, &close_tx),
-            ServerFrame::Response(Response {
-                server_connection_id: identifier,
-                request_id: RequestIdentifier::new(1).unwrap(),
-                result: ResponseResult::MockComplete,
-            }),
-            Some(OutputGuard {
-                deadline_at: tokio::time::Instant::now() + Duration::from_millis(10),
-                control,
-                shutdown,
-                publication: None,
-            }),
-            None,
+            QueuedFrame {
+                frame: ServerFrame::Response(Response {
+                    server_connection_id: identifier,
+                    request_id: RequestIdentifier::new(1).unwrap(),
+                    result: ResponseResult::MockComplete,
+                }),
+                guard: Some(OutputGuard {
+                    deadline_at: tokio::time::Instant::now() + Duration::from_millis(10),
+                    control,
+                    shutdown,
+                    publication: None,
+                }),
+                delivery_deadline: tokio::time::Instant::now() + Duration::from_millis(10),
+                terminal_lease: None,
+            },
         )
         .await;
 
