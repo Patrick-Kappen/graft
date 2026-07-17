@@ -452,7 +452,11 @@ The manifest envelope contains:
 - deterministic workload count; and
 - sorted workload records.
 
-Version 1 uses canonical JSON bytes and SHA-256 with this non-circular rule:
+Version 1 canonical JSON is UTF-8, compact JSON with no insignificant
+whitespace, lexicographically sorted object keys, contract-ordered arrays,
+standard JSON string escaping, and no floating-point values. A verifier rejects
+input bytes that are not this unique representation. It applies SHA-256 with
+this non-circular rule:
 
 1. remove top-level `generationId` and `manifestDigest` from the manifest;
 2. canonicalize the remaining manifest, which already includes producer
