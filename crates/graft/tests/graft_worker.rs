@@ -21,6 +21,11 @@ use graft::worker::protocol::{
 };
 use tempfile::TempDir;
 
+#[cfg(feature = "worker-test-fixtures")]
+const WORKER_BINARY: &str = env!("CARGO_BIN_EXE_graft-worker-fixture");
+#[cfg(not(feature = "worker-test-fixtures"))]
+const WORKER_BINARY: &str = env!("CARGO_BIN_EXE_graft-worker");
+
 struct WorkerProcess {
     child: Child,
     socket_path: std::path::PathBuf,
@@ -35,6 +40,10 @@ impl Drop for WorkerProcess {
 }
 
 fn spawn_worker() -> WorkerProcess {
+    spawn_worker_binary(WORKER_BINARY)
+}
+
+fn spawn_worker_binary(binary: &str) -> WorkerProcess {
     let temporary = TempDir::new().unwrap();
     let socket_path = temporary.path().join("worker.sock");
     let listener = UnixListener::bind(&socket_path).unwrap();
@@ -42,7 +51,6 @@ fn spawn_worker() -> WorkerProcess {
     let config_home = temporary.path().join("config");
     std::fs::create_dir(&config_home).unwrap();
     let uid = rustix::process::geteuid().as_raw();
-    let binary = env!("CARGO_BIN_EXE_graft-worker");
     let mut command = Command::new("bash");
     command
         .arg("-c")
@@ -226,7 +234,7 @@ fn invalid_activation_status(
             ListenPid::Missing | ListenPid::Value(_) => "exec \"$@\"",
         })
         .arg("graft-worker-wrapper")
-        .arg(env!("CARGO_BIN_EXE_graft-worker"))
+        .arg(WORKER_BINARY)
         .args([
             "--target",
             "user",
@@ -323,6 +331,32 @@ fn send_client_frame(stream: &mut UnixStream, frame: &ClientFrame) {
     stream
         .write_all(&encode_frame(frame, FrameDirection::ClientToServer).unwrap())
         .unwrap();
+}
+
+#[cfg(feature = "worker-test-fixtures")]
+#[test]
+fn production_worker_remains_unsupported_with_all_features() {
+    let worker = spawn_worker_binary(env!("CARGO_BIN_EXE_graft-worker"));
+    let mut stream = connect(&worker.socket_path);
+    let hello = handshake(&mut stream);
+    send_client_frame(
+        &mut stream,
+        &ClientFrame::Request(Request {
+            server_connection_id: hello.server_connection_id,
+            request_id: RequestIdentifier::new(1).unwrap(),
+            deadline_ms: Some(1_000),
+            operation: SemanticRequest::MockUnary { delay_ms: 0 },
+        }),
+    );
+
+    let response = read_server_frame::<ServerFrame>(&mut stream);
+
+    assert!(matches!(
+        response,
+        ServerFrame::Response(response)
+            if matches!(&response.result, ResponseResult::Error(error)
+                if error.code == graft::worker::protocol::WorkerErrorCode::Unsupported)
+    ));
 }
 
 #[cfg(feature = "worker-test-fixtures")]

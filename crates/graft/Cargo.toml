@@ -15,6 +15,11 @@ rust-version = "1.80"
 name = "graft"
 path = "src/main.rs"
 
+[[bin]]
+name = "graft-worker-fixture"
+path = "src/bin/graft-worker-fixture.rs"
+required-features = ["worker-test-fixtures"]
+
 [dependencies]
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
