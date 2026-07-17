@@ -3,12 +3,13 @@
 use std::collections::BTreeMap;
 use std::io;
 use std::os::fd::AsFd as _;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use tokio::io::{AsyncWriteExt as _, WriteHalf};
 use tokio::net::{UnixListener, UnixStream};
-use tokio::sync::{mpsc, watch, Mutex as AsyncMutex, Notify, Semaphore};
+use tokio::sync::{mpsc, watch, Notify, Semaphore};
 
 use crate::protocol::{
     encode_frame, negotiate_handshake, CapabilitySet, ClientHandshakeFrame, ConnectionIdentifier,
@@ -327,9 +328,7 @@ impl Connection {
                                 connection_id,
                                 &active,
                                 false,
-                            )
-                            .await
-                            {
+                            ) {
                                 queue_control_error(
                                     uid,
                                     ConnectionEpoch {
@@ -353,9 +352,7 @@ impl Connection {
                                 connection_id,
                                 &active,
                                 true,
-                            )
-                            .await
-                            {
+                            ) {
                                 queue_control_error(
                                     uid,
                                     ConnectionEpoch {
@@ -388,9 +385,18 @@ impl Connection {
     }
 }
 
+#[cfg(feature = "worker-test-fixtures")]
+#[derive(Clone)]
+struct StreamProgress {
+    produced: Arc<AtomicU64>,
+    delivered: Arc<AtomicU64>,
+    control: watch::Sender<ControlState>,
+}
+
 #[derive(Clone)]
 struct DeliveryPublication {
-    delivered: Arc<AsyncMutex<u64>>,
+    delivered: Arc<AtomicU64>,
+    control: watch::Sender<ControlState>,
     sequence: u64,
 }
 
@@ -433,66 +439,37 @@ async fn writer_loop(
             bytes,
             principal_permit,
             connection_permit,
-            mut guard,
+            guard,
             completion,
         } = outbound;
-        let mut delivery = if let Some(publication) = guard
-            .as_ref()
-            .and_then(|output_guard| output_guard.publication.as_ref())
-        {
-            Some(publication.delivered.clone().lock_owned().await)
-        } else {
-            None
-        };
-        let write = writer.write_all(&bytes);
-        tokio::pin!(write);
-        let written = if let Some(guard) = guard.as_mut() {
-            let mut control_open = true;
-            loop {
-                tokio::select! {
-                    biased;
-                    changed = connection_close.changed() => {
-                        let _ = changed;
-                        break false;
-                    }
-                    () = tokio::time::sleep_until(guard.deadline_at) => break false,
-                    changed = guard.shutdown.changed() => {
-                        let _ = changed;
-                        break false;
-                    }
-                    changed = guard.control.changed(), if control_open => {
-                        if changed.is_err() {
-                            control_open = false;
-                        } else {
-                            let state = *guard.control.borrow();
-                            if state.cancelled || state.worker_shutdown {
-                                break false;
-                            }
-                        }
-                    }
-                    result = &mut write => break result.is_ok(),
-                }
+        let written = tokio::select! {
+            biased;
+            changed = connection_close.changed() => {
+                let _ = changed;
+                false
             }
-        } else {
-            tokio::select! {
-                biased;
-                changed = connection_close.changed() => {
-                    let _ = changed;
-                    false
-                }
-                result = tokio::time::timeout(PARTIAL_FRAME_TIMEOUT, &mut write) => {
-                    matches!(result, Ok(Ok(())))
-                }
+            result = tokio::time::timeout(PARTIAL_FRAME_TIMEOUT, writer.write_all(&bytes)) => {
+                matches!(result, Ok(Ok(())))
             }
         };
         if written {
-            if let (Some(delivery), Some(publication)) = (
-                delivery.as_mut(),
-                guard
-                    .as_ref()
-                    .and_then(|output_guard| output_guard.publication.as_ref()),
-            ) {
-                **delivery = publication.sequence;
+            if let Some(publication) = guard
+                .as_ref()
+                .and_then(|output_guard| output_guard.publication.as_ref())
+            {
+                publication
+                    .delivered
+                    .store(publication.sequence, Ordering::Release);
+                let current = *publication.control.borrow();
+                if current.pending_acknowledgement != 0
+                    && current.pending_acknowledgement <= publication.sequence
+                {
+                    let _ = publication.control.send(ControlState {
+                        acknowledged: current.pending_acknowledgement,
+                        pending_acknowledgement: 0,
+                        ..current
+                    });
+                }
             }
         }
         if let Some(completion) = completion {
@@ -514,18 +491,20 @@ struct ControlState {
     #[cfg_attr(not(feature = "worker-test-fixtures"), allow(dead_code))]
     worker_shutdown: bool,
     acknowledged: u64,
+    pending_acknowledgement: u64,
 }
 
 struct ActiveRequest {
     control: watch::Sender<ControlState>,
-    delivered: Arc<AsyncMutex<u64>>,
+    produced: Arc<AtomicU64>,
+    delivered: Arc<AtomicU64>,
     completion: Arc<Notify>,
     stream: bool,
 }
 
 type ActiveMap = Arc<Mutex<BTreeMap<crate::protocol::RequestIdentifier, ActiveRequest>>>;
 
-async fn control_request(
+fn control_request(
     server_connection_id: ConnectionIdentifier,
     request_id: crate::protocol::RequestIdentifier,
     sequence: Option<u64>,
@@ -536,7 +515,7 @@ async fn control_request(
     if server_connection_id != expected_connection {
         return Err(WorkerErrorCode::ConnectionMismatch);
     }
-    let (control, delivered, stream) = {
+    let (control, produced, delivered, stream) = {
         let active = active
             .lock()
             .map_err(|_| WorkerErrorCode::RequestNotFound)?;
@@ -545,6 +524,7 @@ async fn control_request(
         };
         (
             request.control.clone(),
+            request.produced.clone(),
             request.delivered.clone(),
             request.stream,
         )
@@ -560,17 +540,25 @@ async fn control_request(
     let Some(sequence) = sequence else {
         return Err(WorkerErrorCode::InvalidAcknowledgement);
     };
-    if !stream || sequence < current.acknowledged || sequence > *delivered.lock().await {
+    let acknowledgement_floor = current.acknowledged.max(current.pending_acknowledgement);
+    if !stream || sequence < acknowledgement_floor || sequence > produced.load(Ordering::Acquire) {
         let _ = control.send(ControlState {
             cancelled: true,
             ..current
         });
         return Err(WorkerErrorCode::InvalidAcknowledgement);
     }
-    let _ = control.send(ControlState {
-        acknowledged: sequence,
-        ..current
-    });
+    if sequence <= delivered.load(Ordering::Acquire) {
+        let _ = control.send(ControlState {
+            acknowledged: sequence,
+            ..current
+        });
+    } else {
+        let _ = control.send(ControlState {
+            pending_acknowledgement: sequence,
+            ..current
+        });
+    }
     Ok(())
 }
 
@@ -625,6 +613,7 @@ const fn is_stream_operation(_operation: &SemanticRequest) -> bool {
     false
 }
 
+#[allow(clippy::too_many_lines)]
 async fn spawn_request(context: RequestContext) {
     if !context.registry.admission_allowed(context.peer.uid) {
         let _ = context.connection_close.send(true);
@@ -657,8 +646,11 @@ async fn spawn_request(context: RequestContext) {
         cancelled: false,
         worker_shutdown: false,
         acknowledged: 0,
+        pending_acknowledgement: 0,
     });
-    let delivered = Arc::new(AsyncMutex::new(0));
+    let delivery_control = control_tx.clone();
+    let produced = Arc::new(AtomicU64::new(0));
+    let delivered = Arc::new(AtomicU64::new(0));
     let stream = is_stream_operation(&context.request.operation);
     let identifier_reserved = {
         let Ok(mut active) = context.active.lock() else {
@@ -669,6 +661,7 @@ async fn spawn_request(context: RequestContext) {
         {
             entry.insert(ActiveRequest {
                 control: control_tx,
+                produced: produced.clone(),
                 delivered: delivered.clone(),
                 completion: context.completion.clone(),
                 stream,
@@ -715,7 +708,15 @@ async fn spawn_request(context: RequestContext) {
         let request_id = context.request.request_id;
         let active_requests = context.active.clone();
         let completion = context.completion.clone();
-        run_request(context, control_rx, delivered, deadline_at).await;
+        run_request(
+            context,
+            control_rx,
+            delivery_control,
+            produced,
+            delivered,
+            deadline_at,
+        )
+        .await;
         completion.notified().await;
         if let Ok(mut active) = active_requests.lock() {
             active.remove(&request_id);
@@ -768,11 +769,19 @@ async fn await_dispatch(
 async fn run_request(
     context: RequestContext,
     #[allow(unused_mut)] mut control: watch::Receiver<ControlState>,
-    delivered: Arc<AsyncMutex<u64>>,
+    delivery_control: watch::Sender<ControlState>,
+    produced: Arc<AtomicU64>,
+    delivered: Arc<AtomicU64>,
     deadline_at: tokio::time::Instant,
 ) {
     #[cfg(not(feature = "worker-test-fixtures"))]
-    let _ = (&control, &delivered, deadline_at);
+    let _ = (
+        &control,
+        &delivery_control,
+        &produced,
+        &delivered,
+        deadline_at,
+    );
     let dispatch_context = DispatchContext {
         principal: context.principal,
         peer: context.peer,
@@ -837,7 +846,11 @@ async fn run_request(
             run_mock_stream(
                 context,
                 &mut control,
-                delivered,
+                StreamProgress {
+                    produced,
+                    delivered,
+                    control: delivery_control,
+                },
                 deadline_at,
                 items,
                 interval_ms,
@@ -895,7 +908,7 @@ async fn run_mock_unary(
 async fn run_mock_stream(
     context: RequestContext,
     control: &mut watch::Receiver<ControlState>,
-    delivered: Arc<AsyncMutex<u64>>,
+    progress: StreamProgress,
     deadline_at: tokio::time::Instant,
     items: u32,
     interval_ms: u64,
@@ -999,6 +1012,7 @@ async fn run_mock_stream(
             }
         }
         sequence = sequence.saturating_add(1);
+        progress.produced.store(sequence, Ordering::Release);
         queue_frame(
             &context,
             ServerFrame::StreamItem(StreamItem {
@@ -1013,7 +1027,8 @@ async fn run_mock_stream(
                 control: control.clone(),
                 shutdown: context.shutdown.clone(),
                 publication: Some(DeliveryPublication {
-                    delivered: delivered.clone(),
+                    delivered: progress.delivered.clone(),
+                    control: progress.control.clone(),
                     sequence,
                 }),
             }),
@@ -1308,8 +1323,8 @@ mod tests {
         assert!(peer_is_authorized(system, 1001));
     }
 
-    #[tokio::test]
-    async fn acknowledgement_cannot_advance_beyond_written_sequence() {
+    #[test]
+    fn acknowledgement_cannot_advance_beyond_written_sequence() {
         let connection_id =
             ConnectionIdentifier::parse("018f0f77-8c4d-7b2a-8e6a-4b8a7d3a1c20").unwrap();
         let request_id = RequestIdentifier::new(1).unwrap();
@@ -1317,12 +1332,14 @@ mod tests {
             cancelled: false,
             worker_shutdown: false,
             acknowledged: 0,
+            pending_acknowledgement: 0,
         });
         let active = Arc::new(Mutex::new(BTreeMap::from([(
             request_id,
             ActiveRequest {
                 control,
-                delivered: Arc::new(AsyncMutex::new(0)),
+                produced: Arc::new(AtomicU64::new(0)),
+                delivered: Arc::new(AtomicU64::new(0)),
                 completion: Arc::new(Notify::new()),
                 stream: true,
             },
@@ -1335,10 +1352,57 @@ mod tests {
             connection_id,
             &active,
             false,
-        )
-        .await;
+        );
 
         assert_eq!(result, Err(WorkerErrorCode::InvalidAcknowledgement));
+    }
+
+    #[test]
+    fn speculative_acknowledgement_defers_without_blocking_cancellation() {
+        let connection_id =
+            ConnectionIdentifier::parse("018f0f77-8c4d-7b2a-8e6a-4b8a7d3a1c20").unwrap();
+        let request_id = RequestIdentifier::new(1).unwrap();
+        let (control, receiver) = watch::channel(ControlState {
+            cancelled: false,
+            worker_shutdown: false,
+            acknowledged: 0,
+            pending_acknowledgement: 0,
+        });
+        let active = Arc::new(Mutex::new(BTreeMap::from([(
+            request_id,
+            ActiveRequest {
+                control,
+                produced: Arc::new(AtomicU64::new(1)),
+                delivered: Arc::new(AtomicU64::new(0)),
+                completion: Arc::new(Notify::new()),
+                stream: true,
+            },
+        )])));
+
+        assert_eq!(
+            control_request(
+                connection_id,
+                request_id,
+                Some(1),
+                connection_id,
+                &active,
+                false,
+            ),
+            Ok(())
+        );
+        assert_eq!(receiver.borrow().pending_acknowledgement, 1);
+        assert_eq!(
+            control_request(
+                connection_id,
+                request_id,
+                None,
+                connection_id,
+                &active,
+                true,
+            ),
+            Ok(())
+        );
+        assert!(receiver.borrow().cancelled);
     }
 
     #[tokio::test]
@@ -1397,6 +1461,7 @@ mod tests {
             cancelled: false,
             worker_shutdown: false,
             acknowledged: 0,
+            pending_acknowledgement: 0,
         });
         let (_shutdown_tx, shutdown) = watch::channel(false);
         let identifier =
@@ -1450,6 +1515,7 @@ mod tests {
             cancelled: false,
             worker_shutdown: false,
             acknowledged: 0,
+            pending_acknowledgement: 0,
         });
         let (_shutdown_sender, mut shutdown) = watch::channel(false);
 
