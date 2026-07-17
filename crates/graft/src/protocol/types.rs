@@ -66,6 +66,9 @@ pub enum ValidationError {
         /// Name of the invalid field.
         field: &'static str,
     },
+    /// A request identifier is zero.
+    #[error("request identifier must be non-zero")]
+    ZeroRequestIdentifier,
     /// A capability appears more than once.
     #[error("requested capability is duplicated: {capability}")]
     DuplicateCapability {
@@ -95,6 +98,46 @@ fn validate_bounded_text(
         return Err(ValidationError::ControlCharacter { field });
     }
     Ok(())
+}
+
+/// Non-zero client-selected request identifier in JSON's interoperable range.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+#[serde(transparent)]
+pub struct RequestIdentifier(u64);
+
+impl RequestIdentifier {
+    /// Creates a validated request identifier.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for zero or a value above JSON's interoperable range.
+    pub const fn new(value: u64) -> Result<Self, ValidationError> {
+        if value == 0 {
+            return Err(ValidationError::ZeroRequestIdentifier);
+        }
+        if value > MAX_JSON_INTEGER {
+            return Err(ValidationError::JsonIntegerTooLarge {
+                field: "request identifier",
+            });
+        }
+        Ok(Self(value))
+    }
+
+    /// Returns the request identifier value.
+    #[must_use]
+    pub const fn get(self) -> u64 {
+        self.0
+    }
+}
+
+impl<'de> Deserialize<'de> for RequestIdentifier {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = u64::deserialize(deserializer)?;
+        Self::new(value).map_err(serde::de::Error::custom)
+    }
 }
 
 /// Logical worker-epoch time encoded within JSON's interoperable integer range.

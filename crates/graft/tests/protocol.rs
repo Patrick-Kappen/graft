@@ -4,10 +4,10 @@ use graft::protocol::{
     decode_frame, encode_frame, negotiate_handshake, validate_server_hello, Capability,
     CapabilitySet, ClientComponent, ClientHandshakeFrame, ClientHello, CodecError,
     ConnectionIdentifier, EffectiveLimits, FrameDirection, HandshakeError, ManagerKind,
-    ManifestGeneration, ManifestState, ProtocolVersionRange, SafeSummary, ServerHandshakeConfig,
-    ServerHandshakeFrame, ServerTimeMilliseconds, SoftwareVersion, WorkerContext, WorkerTarget,
-    MAX_INBOUND_FRAME_BYTES, MAX_JSON_INTEGER, MAX_OUTBOUND_FRAME_BYTES, MAX_SAFE_SUMMARY_BYTES,
-    MAX_SOFTWARE_VERSION_BYTES,
+    ManifestGeneration, ManifestState, ProtocolVersionRange, RequestIdentifier, SafeSummary,
+    ServerHandshakeConfig, ServerHandshakeFrame, ServerTimeMilliseconds, SoftwareVersion,
+    WorkerContext, WorkerTarget, MAX_INBOUND_FRAME_BYTES, MAX_JSON_INTEGER,
+    MAX_OUTBOUND_FRAME_BYTES, MAX_SAFE_SUMMARY_BYTES, MAX_SOFTWARE_VERSION_BYTES,
 };
 
 const CLIENT_ID: &str = "018f0f77-8c4d-7b2a-8e6a-4b8a7d3a1c20";
@@ -313,6 +313,27 @@ fn client_validation_rejects_server_version_capability_and_limit_escalation() {
     assert_eq!(
         validate_server_hello(&limited_client, &server),
         Err(HandshakeError::InvalidServerLimits)
+    );
+}
+
+#[test]
+fn request_identifier_enforces_non_zero_json_integer_boundaries_and_serde() {
+    let minimum = RequestIdentifier::new(1).expect("one is a valid request identifier");
+    let maximum =
+        RequestIdentifier::new(MAX_JSON_INTEGER).expect("maximum interoperable integer is valid");
+
+    assert_eq!(minimum.get(), 1);
+    assert_eq!(maximum.get(), MAX_JSON_INTEGER);
+    assert!(RequestIdentifier::new(0).is_err());
+    assert!(RequestIdentifier::new(MAX_JSON_INTEGER + 1).is_err());
+    assert_eq!(serde_json::to_string(&minimum).unwrap(), "1");
+    assert_eq!(
+        serde_json::from_str::<RequestIdentifier>("1").unwrap(),
+        minimum
+    );
+    assert!(serde_json::from_str::<RequestIdentifier>("0").is_err());
+    assert!(
+        serde_json::from_str::<RequestIdentifier>(&(MAX_JSON_INTEGER + 1).to_string()).is_err()
     );
 }
 
