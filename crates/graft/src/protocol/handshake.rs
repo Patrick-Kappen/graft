@@ -517,7 +517,7 @@ pub enum HandshakeError {
 ///
 /// # Errors
 ///
-/// Returns an error when versions do not overlap, a requested capability is
+/// Returns an error when versions do not overlap or a requested capability is
 /// unavailable.
 pub fn negotiate_handshake(
     client: &ClientHello,
