@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use tokio::io::{AsyncWriteExt as _, WriteHalf};
 use tokio::net::{UnixListener, UnixStream};
-use tokio::sync::{mpsc, watch, Mutex as AsyncMutex, Semaphore};
+use tokio::sync::{mpsc, watch, Mutex as AsyncMutex, Notify, Semaphore};
 
 use crate::protocol::{
     encode_frame, negotiate_handshake, CapabilitySet, ClientHandshakeFrame, ConnectionIdentifier,
@@ -316,6 +316,7 @@ impl Connection {
                             connection_buffer: connection_buffer.clone(),
                             outbound: outbound_tx.clone(),
                             connection_close: connection_close_tx.clone(),
+                            completion: Arc::new(Notify::new()),
                             shutdown: shutdown.clone(),
                         }).await,
                         ClientFrame::StreamAck(control) => {
@@ -407,6 +408,7 @@ enum Outbound {
         principal_permit: AdmissionPermit,
         connection_permit: ConnectionBufferPermit,
         guard: Option<OutputGuard>,
+        completion: Option<Arc<Notify>>,
     },
 }
 
@@ -432,6 +434,7 @@ async fn writer_loop(
             principal_permit,
             connection_permit,
             mut guard,
+            completion,
         } = outbound;
         let mut delivery = if let Some(publication) = guard
             .as_ref()
@@ -492,6 +495,9 @@ async fn writer_loop(
                 **delivery = publication.sequence;
             }
         }
+        if let Some(completion) = completion {
+            completion.notify_one();
+        }
         drop(connection_permit);
         drop(principal_permit);
         if !written {
@@ -513,6 +519,7 @@ struct ControlState {
 struct ActiveRequest {
     control: watch::Sender<ControlState>,
     delivered: Arc<AsyncMutex<u64>>,
+    completion: Arc<Notify>,
     stream: bool,
 }
 
@@ -576,6 +583,7 @@ fn cancel_all(active: &ActiveMap, worker_shutdown: bool) {
                 worker_shutdown,
                 ..current
             });
+            request.completion.notify_one();
         }
     }
 }
@@ -603,6 +611,7 @@ struct RequestContext {
     connection_buffer: ConnectionBuffer,
     outbound: mpsc::Sender<Outbound>,
     connection_close: watch::Sender<bool>,
+    completion: Arc<Notify>,
     shutdown: watch::Receiver<bool>,
 }
 
@@ -661,6 +670,7 @@ async fn spawn_request(context: RequestContext) {
             entry.insert(ActiveRequest {
                 control: control_tx,
                 delivered: delivered.clone(),
+                completion: context.completion.clone(),
                 stream,
             });
             true
@@ -704,7 +714,9 @@ async fn spawn_request(context: RequestContext) {
     tokio::spawn(async move {
         let request_id = context.request.request_id;
         let active_requests = context.active.clone();
+        let completion = context.completion.clone();
         run_request(context, control_rx, delivered, deadline_at).await;
+        completion.notified().await;
         if let Ok(mut active) = active_requests.lock() {
             active.remove(&request_id);
         }
@@ -1074,14 +1086,16 @@ async fn send_error(context: &RequestContext, code: WorkerErrorCode, summary: &'
 }
 
 async fn queue_frame(context: &RequestContext, frame: ServerFrame, guard: Option<OutputGuard>) {
+    let completion = matches!(&frame, ServerFrame::Response(_) | ServerFrame::StreamEnd(_))
+        .then(|| context.completion.clone());
     queue_encoded(
         context.peer.uid,
         &context.registry,
         &context.connection_buffer,
-        &context.outbound,
-        &context.connection_close,
+        (&context.outbound, &context.connection_close),
         frame,
         guard,
+        completion,
     )
     .await;
 }
@@ -1099,8 +1113,7 @@ async fn queue_control_error(
         uid,
         registry,
         connection_buffer,
-        output.0,
-        output.1,
+        output,
         ServerFrame::Response(Response {
             server_connection_id: identity.connection_id,
             request_id,
@@ -1112,6 +1125,7 @@ async fn queue_control_error(
             ),
         }),
         None,
+        None,
     )
     .await;
 }
@@ -1120,21 +1134,31 @@ async fn queue_encoded(
     uid: u32,
     registry: &AdmissionRegistry,
     connection_buffer: &ConnectionBuffer,
-    outbound: &mpsc::Sender<Outbound>,
-    connection_close: &watch::Sender<bool>,
+    output: (&mpsc::Sender<Outbound>, &watch::Sender<bool>),
     frame: ServerFrame,
     guard: Option<OutputGuard>,
+    completion: Option<Arc<Notify>>,
 ) {
+    let completion_on_failure = completion.clone();
     let Ok(bytes) = encode_frame(&frame, FrameDirection::ServerToClient) else {
-        let _ = connection_close.send(true);
+        if let Some(completion) = completion_on_failure {
+            completion.notify_one();
+        }
+        let _ = output.1.send(true);
         return;
     };
     let Some(connection_permit) = connection_buffer.reserve(bytes.len()) else {
-        let _ = connection_close.send(true);
+        if let Some(completion) = completion_on_failure {
+            completion.notify_one();
+        }
+        let _ = output.1.send(true);
         return;
     };
     let Some(principal_permit) = registry.buffered_bytes(uid, bytes.len()) else {
-        let _ = connection_close.send(true);
+        if let Some(completion) = completion_on_failure {
+            completion.notify_one();
+        }
+        let _ = output.1.send(true);
         return;
     };
     let mut enqueue_guard = guard.clone();
@@ -1143,8 +1167,9 @@ async fn queue_encoded(
         principal_permit,
         connection_permit,
         guard,
+        completion,
     };
-    let reserve = outbound.reserve();
+    let reserve = output.0.reserve();
     tokio::pin!(reserve);
     if let Some(guard) = enqueue_guard.as_mut() {
         let mut control_open = true;
@@ -1175,9 +1200,14 @@ async fn queue_encoded(
                 }
             }
         }
-        let _ = connection_close.send(true);
+        if let Some(completion) = completion_on_failure {
+            completion.notify_one();
+        }
+        let _ = output.1.send(true);
     } else if let Ok(permit) = reserve.await {
         permit.send(frame);
+    } else if let Some(completion) = completion_on_failure {
+        completion.notify_one();
     }
 }
 
@@ -1293,6 +1323,7 @@ mod tests {
             ActiveRequest {
                 control,
                 delivered: Arc::new(AsyncMutex::new(0)),
+                completion: Arc::new(Notify::new()),
                 stream: true,
             },
         )])));
@@ -1331,6 +1362,7 @@ mod tests {
                 principal_permit,
                 connection_permit,
                 guard: None,
+                completion: None,
             })
             .await
             .unwrap();
@@ -1357,6 +1389,7 @@ mod tests {
                 principal_permit: registry.buffered_bytes(1000, 1).unwrap(),
                 connection_permit: connection_buffer.reserve(1).unwrap(),
                 guard: None,
+                completion: None,
             })
             .await
             .unwrap();
@@ -1373,8 +1406,7 @@ mod tests {
             1000,
             &registry,
             &connection_buffer,
-            &outbound_tx,
-            &close_tx,
+            (&outbound_tx, &close_tx),
             ServerFrame::Response(Response {
                 server_connection_id: identifier,
                 request_id: RequestIdentifier::new(1).unwrap(),
@@ -1386,6 +1418,7 @@ mod tests {
                 shutdown,
                 publication: None,
             }),
+            None,
         )
         .await;
 

@@ -97,7 +97,12 @@ fn connect(path: &Path) -> UnixStream {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         match UnixStream::connect(path) {
-            Ok(stream) => return stream,
+            Ok(stream) => {
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(5)))
+                    .unwrap();
+                return stream;
+            }
             Err(error) if Instant::now() < deadline => {
                 let _ = error;
                 thread::sleep(Duration::from_millis(10));
