@@ -646,6 +646,23 @@ fn duplicate_request_and_wrong_connection_identifiers_fail_typed() {
         operation: SemanticRequest::MockUnary { delay_ms: 500 },
     });
     send_client_frame(&mut stream, &request);
+    send_client_frame(
+        &mut stream,
+        &ClientFrame::Request(Request {
+            server_connection_id: hello.server_connection_id,
+            request_id,
+            deadline_ms: Some(0),
+            operation: SemanticRequest::MockUnary { delay_ms: 0 },
+        }),
+    );
+    let invalid = read_server_frame::<ServerFrame>(&mut stream);
+    assert!(matches!(
+        invalid,
+        ServerFrame::Response(response)
+            if matches!(&response.result, ResponseResult::Error(error)
+                if error.code == graft::worker::protocol::WorkerErrorCode::Deadline)
+    ));
+
     send_client_frame(&mut stream, &request);
     let conflict = read_server_frame::<ServerFrame>(&mut stream);
     assert!(matches!(

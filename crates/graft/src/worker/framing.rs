@@ -39,6 +39,14 @@ pub enum AsyncFrameError {
     Encode(#[source] CodecError),
 }
 
+/// One decoded frame with its complete-payload receive time.
+pub struct ReceivedFrame<T> {
+    /// Decoded typed frame.
+    pub frame: T,
+    /// Instant captured immediately after the complete payload read.
+    pub received_at: tokio::time::Instant,
+}
+
 /// Reads one exact client-to-server frame without unbounded allocation.
 ///
 /// # Errors
@@ -46,6 +54,21 @@ pub enum AsyncFrameError {
 /// Returns an error for disconnect, timeout, invalid length, I/O, UTF-8, or
 /// typed JSON failure.
 pub async fn read_frame<R, T>(reader: &mut R) -> Result<T, AsyncFrameError>
+where
+    R: AsyncRead + Unpin,
+    T: DeserializeOwned,
+{
+    Ok(read_frame_with_timestamp(reader).await?.frame)
+}
+
+/// Reads one frame and retains the instant at which its payload completed.
+///
+/// # Errors
+///
+/// Returns the same bounded framing errors as [`read_frame`].
+pub async fn read_frame_with_timestamp<R, T>(
+    reader: &mut R,
+) -> Result<ReceivedFrame<T>, AsyncFrameError>
 where
     R: AsyncRead + Unpin,
     T: DeserializeOwned,
@@ -76,8 +99,10 @@ where
         .await
         .map_err(|_| AsyncFrameError::Timeout)?
         .map_err(AsyncFrameError::Io)?;
+    let received_at = tokio::time::Instant::now();
     std::str::from_utf8(&payload).map_err(|_| AsyncFrameError::Decode)?;
-    serde_json::from_slice(&payload).map_err(|_| AsyncFrameError::Decode)
+    let frame = serde_json::from_slice(&payload).map_err(|_| AsyncFrameError::Decode)?;
+    Ok(ReceivedFrame { frame, received_at })
 }
 
 /// Writes one exact server-to-client frame.

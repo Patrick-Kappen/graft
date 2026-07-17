@@ -12,17 +12,19 @@ use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::{mpsc, watch, Notify, Semaphore};
 
 use crate::protocol::{
-    encode_frame, negotiate_handshake, CapabilitySet, ClientHandshakeFrame, ConnectionIdentifier,
-    EffectiveLimits, FrameDirection, HandshakeError, ManifestState, ProtocolError,
-    ProtocolErrorCode, ProtocolVersionRange, SafeSummary, ServerHandshakeConfig,
-    ServerHandshakeFrame, SoftwareVersion, WorkerContext,
+    encode_frame_exact, encoded_frame_len, negotiate_handshake, CapabilitySet,
+    ClientHandshakeFrame, ConnectionIdentifier, EffectiveLimits, FrameDirection, HandshakeError,
+    ManifestState, ProtocolError, ProtocolErrorCode, ProtocolVersionRange, SafeSummary,
+    ServerHandshakeConfig, ServerHandshakeFrame, SoftwareVersion, WorkerContext,
 };
 
 use super::clock::WorkerEpoch;
 use super::dispatcher::{
     DispatchContext, DispatchPlan, PeerCredentials, PrincipalKey, SemanticDispatcher,
 };
-use super::framing::{read_frame, write_frame, AsyncFrameError, PARTIAL_FRAME_TIMEOUT};
+use super::framing::{
+    read_frame, read_frame_with_timestamp, write_frame, AsyncFrameError, PARTIAL_FRAME_TIMEOUT,
+};
 use super::limits::{AdmissionPermit, AdmissionRegistry, ConnectionBuffer, ConnectionBufferPermit};
 use super::protocol::{
     ClientFrame, OperationPhase, Request, Response, ResponseResult, RetryClassification,
@@ -297,9 +299,10 @@ impl Connection {
                         break;
                     }
                 }
-                frame = read_frame::<_, ClientFrame>(&mut reader) => {
-                    let received_at = tokio::time::Instant::now();
-                    let Ok(frame) = frame else { break; };
+                received = read_frame_with_timestamp::<_, ClientFrame>(&mut reader) => {
+                    let Ok(received) = received else { break; };
+                    let received_at = received.received_at;
+                    let frame = received.frame;
                     match frame {
                         ClientFrame::Request(request) => spawn_request(RequestContext {
                             request,
@@ -318,6 +321,7 @@ impl Connection {
                             outbound: outbound_tx.clone(),
                             connection_close: connection_close_tx.clone(),
                             completion: Arc::new(Notify::new()),
+                            owns_request_id: false,
                             shutdown: shutdown.clone(),
                         }).await,
                         ClientFrame::StreamAck(control) => {
@@ -666,6 +670,7 @@ struct RequestContext {
     outbound: mpsc::Sender<Outbound>,
     connection_close: watch::Sender<bool>,
     completion: Arc<Notify>,
+    owns_request_id: bool,
     shutdown: watch::Receiver<bool>,
 }
 
@@ -680,7 +685,7 @@ const fn is_stream_operation(_operation: &SemanticRequest) -> bool {
 }
 
 #[allow(clippy::too_many_lines)]
-async fn spawn_request(context: RequestContext) {
+async fn spawn_request(mut context: RequestContext) {
     if !context.registry.admission_allowed(context.peer.uid) {
         let _ = context.connection_close.send(true);
         return;
@@ -770,6 +775,7 @@ async fn spawn_request(context: RequestContext) {
         .await;
         return;
     };
+    context.owns_request_id = true;
     tokio::spawn(async move {
         let completion = context.completion.clone();
         run_request(
@@ -1162,16 +1168,15 @@ async fn send_error(context: &RequestContext, code: WorkerErrorCode, summary: &'
 }
 
 async fn queue_frame(context: &RequestContext, frame: ServerFrame, guard: Option<OutputGuard>) {
-    let terminal =
-        matches!(&frame, ServerFrame::Response(_) | ServerFrame::StreamEnd(_)).then(|| {
-            TerminalOutput {
-                completion: context.completion.clone(),
-                release: TerminalRelease {
-                    active: context.active.clone(),
-                    request_id: context.request.request_id,
-                },
-            }
-        });
+    let terminal = (context.owns_request_id
+        && matches!(&frame, ServerFrame::Response(_) | ServerFrame::StreamEnd(_)))
+    .then(|| TerminalOutput {
+        completion: context.completion.clone(),
+        release: TerminalRelease {
+            active: context.active.clone(),
+            request_id: context.request.request_id,
+        },
+    });
     queue_encoded(
         context.peer.uid,
         &context.registry,
@@ -1230,21 +1235,29 @@ async fn queue_encoded(
     let completion_on_failure = terminal
         .as_ref()
         .map(|terminal| terminal.completion.clone());
-    let Ok(bytes) = encode_frame(&frame, FrameDirection::ServerToClient) else {
+    let Ok(encoded_length) = encoded_frame_len(&frame, FrameDirection::ServerToClient) else {
         if let Some(completion) = completion_on_failure {
             completion.notify_one();
         }
         let _ = output.1.send(true);
         return;
     };
-    let Some(connection_permit) = connection_buffer.reserve(bytes.len()) else {
+    let Some(connection_permit) = connection_buffer.reserve(encoded_length) else {
         if let Some(completion) = completion_on_failure {
             completion.notify_one();
         }
         let _ = output.1.send(true);
         return;
     };
-    let Some(principal_permit) = registry.buffered_bytes(uid, bytes.len()) else {
+    let Some(principal_permit) = registry.buffered_bytes(uid, encoded_length) else {
+        if let Some(completion) = completion_on_failure {
+            completion.notify_one();
+        }
+        let _ = output.1.send(true);
+        return;
+    };
+    let Ok(bytes) = encode_frame_exact(&frame, FrameDirection::ServerToClient, encoded_length)
+    else {
         if let Some(completion) = completion_on_failure {
             completion.notify_one();
         }
