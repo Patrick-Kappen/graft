@@ -18,7 +18,8 @@ pub use handshake::{
 };
 pub use types::{
     Capability, CapabilitySet, ClientComponent, ConnectionIdentifier, ManagerKind,
-    ManifestGeneration, ProtocolVersion, ProtocolVersionRange, SafeSummary, ServerTimeMilliseconds,
-    SoftwareVersion, ValidationError, WorkerTarget, MAX_JSON_INTEGER, MAX_SAFE_SUMMARY_BYTES,
-    MAX_SOFTWARE_VERSION_BYTES, PROTOCOL_MAJOR, PROTOCOL_MAX_MINOR, PROTOCOL_MIN_MINOR,
+    ManifestGeneration, ProtocolVersion, ProtocolVersionRange, RequestIdentifier, SafeSummary,
+    ServerTimeMilliseconds, SoftwareVersion, ValidationError, WorkerTarget, MAX_JSON_INTEGER,
+    MAX_SAFE_SUMMARY_BYTES, MAX_SOFTWARE_VERSION_BYTES, PROTOCOL_MAJOR, PROTOCOL_MAX_MINOR,
+    PROTOCOL_MIN_MINOR,
 };
