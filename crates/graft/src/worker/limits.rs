@@ -54,6 +54,7 @@ impl Default for AdmissionRegistry {
 struct AdmissionState {
     totals: Usage,
     principals: BTreeMap<u32, Usage>,
+    principal_byte_limits: BTreeMap<u32, BTreeMap<usize, usize>>,
     rejections: RejectionState,
 }
 
@@ -155,6 +156,25 @@ impl AdmissionRegistry {
         self.reserve(uid, Resource::Stream)
     }
 
+    /// Registers one connection's negotiated principal-wide byte ceiling.
+    #[must_use]
+    pub fn principal_byte_limit(&self, uid: u32, maximum: usize) -> PrincipalByteLimitPermit {
+        let maximum = maximum.min(self.buffered_bytes_per_principal);
+        if let Ok(mut state) = self.state.lock() {
+            *state
+                .principal_byte_limits
+                .entry(uid)
+                .or_default()
+                .entry(maximum)
+                .or_default() += 1;
+        }
+        PrincipalByteLimitPermit {
+            registry: self.clone(),
+            uid,
+            maximum,
+        }
+    }
+
     /// Reserves encoded response bytes.
     #[must_use]
     pub fn buffered_bytes(&self, uid: u32, bytes: usize) -> Option<AdmissionPermit> {
@@ -164,11 +184,16 @@ impl AdmissionRegistry {
     fn reserve(&self, uid: u32, resource: Resource) -> Option<AdmissionPermit> {
         let mut state = self.state.lock().ok()?;
         let principal = state.principals.get(&uid).copied().unwrap_or_default();
+        let buffered_bytes_per_principal = state
+            .principal_byte_limits
+            .get(&uid)
+            .and_then(|limits| limits.keys().next().copied())
+            .unwrap_or(self.buffered_bytes_per_principal);
         if !fits(
             state.totals,
             principal,
             resource,
-            self.buffered_bytes_per_principal,
+            buffered_bytes_per_principal,
         ) {
             return None;
         }
@@ -188,6 +213,32 @@ impl AdmissionRegistry {
                 decrement(principal, resource);
                 if is_empty(*principal) {
                     state.principals.remove(&uid);
+                }
+            }
+        }
+    }
+}
+
+/// RAII registration of one negotiated principal byte ceiling.
+#[derive(Debug)]
+pub struct PrincipalByteLimitPermit {
+    registry: AdmissionRegistry,
+    uid: u32,
+    maximum: usize,
+}
+
+impl Drop for PrincipalByteLimitPermit {
+    fn drop(&mut self) {
+        if let Ok(mut state) = self.registry.state.lock() {
+            if let Some(limits) = state.principal_byte_limits.get_mut(&self.uid) {
+                if let Some(count) = limits.get_mut(&self.maximum) {
+                    *count = count.saturating_sub(1);
+                    if *count == 0 {
+                        limits.remove(&self.maximum);
+                    }
+                }
+                if limits.is_empty() {
+                    state.principal_byte_limits.remove(&self.uid);
                 }
             }
         }
@@ -456,5 +507,15 @@ mod tests {
         assert!(configured.buffered_bytes(1001, 1).is_some());
         drop(configured_permit);
         assert!(configured.buffered_bytes(1000, 1).is_some());
+
+        let negotiated = AdmissionRegistry::with_buffered_bytes_per_principal(100);
+        let high = negotiated.principal_byte_limit(1000, 80);
+        let low = negotiated.principal_byte_limit(1000, 10);
+        let bytes = negotiated.buffered_bytes(1000, 10).unwrap();
+        assert!(negotiated.buffered_bytes(1000, 1).is_none());
+        drop(low);
+        assert!(negotiated.buffered_bytes(1000, 1).is_some());
+        drop(bytes);
+        drop(high);
     }
 }

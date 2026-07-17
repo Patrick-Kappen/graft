@@ -272,6 +272,11 @@ impl Connection {
             return;
         }
         drop(handshake_permit);
+        let _principal_byte_limit = registry.principal_byte_limit(
+            uid,
+            usize::try_from(server_hello.effective_limits.buffered_response_bytes())
+                .unwrap_or(usize::MAX),
+        );
 
         let (outbound_tx, outbound_rx) = mpsc::channel(OUTBOUND_QUEUE_ITEMS);
         let (connection_close_tx, connection_close_rx) = watch::channel(false);
@@ -1437,10 +1442,10 @@ async fn queue_encoded(
         loop {
             tokio::select! {
                 biased;
-                () = tokio::time::sleep_until(delivery_deadline) => break,
+                () = tokio::time::sleep_until(delivery_deadline) => return,
                 changed = guard.shutdown.changed() => {
                     let _ = changed;
-                    break;
+                    return;
                 }
                 changed = guard.control.changed(), if control_open => {
                     if changed.is_err() {
@@ -1448,20 +1453,20 @@ async fn queue_encoded(
                     } else {
                         let state = *guard.control.borrow();
                         if state.cancelled || state.worker_shutdown {
-                            break;
+                            return;
                         }
                     }
                 }
                 permit = &mut reserve => {
                     if let Ok(permit) = permit {
                         permit.send(frame);
-                        return;
+                    } else {
+                        let _ = output.1.send(true);
                     }
-                    break;
+                    return;
                 }
             }
         }
-        let _ = output.1.send(true);
     } else {
         tokio::select! {
             biased;
@@ -1808,11 +1813,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn guarded_enqueue_closes_connection_at_absolute_deadline() {
+    async fn guarded_enqueue_drops_stale_frame_without_closing_connection() {
         let registry = AdmissionRegistry::default();
         let connection_buffer = ConnectionBuffer::new(4096);
         let (outbound_tx, mut outbound_rx) = mpsc::channel(1);
-        let (close_tx, mut close_rx) = watch::channel(false);
+        let (close_tx, close_rx) = watch::channel(false);
         outbound_tx
             .send(Outbound::Frame {
                 bytes: vec![0],
@@ -1857,9 +1862,9 @@ mod tests {
         )
         .await;
 
-        close_rx.changed().await.unwrap();
-        assert!(*close_rx.borrow());
+        assert!(!*close_rx.borrow());
         assert!(outbound_rx.try_recv().is_ok());
+        assert!(outbound_rx.try_recv().is_err());
     }
 
     #[tokio::test]

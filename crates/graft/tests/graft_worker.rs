@@ -310,6 +310,27 @@ fn worker_rejects_invalid_activation_cardinality_name_and_type() {
         Some(regular_file.as_raw_fd()),
         ListenPid::Child
     ));
+    let tcp_listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    assert!(!invalid_activation_status(
+        "1",
+        "graft-worker",
+        Some(tcp_listener.as_raw_fd()),
+        ListenPid::Child
+    ));
+    let unix_datagram = std::os::unix::net::UnixDatagram::unbound().unwrap();
+    assert!(!invalid_activation_status(
+        "1",
+        "graft-worker",
+        Some(unix_datagram.as_raw_fd()),
+        ListenPid::Child
+    ));
+    let (unix_stream, _peer) = std::os::unix::net::UnixStream::pair().unwrap();
+    assert!(!invalid_activation_status(
+        "1",
+        "graft-worker",
+        Some(unix_stream.as_raw_fd()),
+        ListenPid::Child
+    ));
     let directory = tempfile::tempdir().unwrap();
     let listener =
         std::os::unix::net::UnixListener::bind(directory.path().join("worker.sock")).unwrap();
