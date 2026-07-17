@@ -115,7 +115,13 @@ pub async fn serve(
                 {
                     continue;
                 }
-                let Some(connection_permit) = registry.connection(uid) else { continue; };
+                if !registry.admission_allowed(uid) {
+                    continue;
+                }
+                let Some(connection_permit) = registry.connection(uid) else {
+                    let _ = registry.rejection(uid);
+                    continue;
+                };
                 let connection = Connection {
                     stream,
                     peer,
@@ -190,7 +196,11 @@ impl Connection {
         } = self;
         let _admission = admission;
         let uid = peer.uid;
+        if !registry.admission_allowed(uid) {
+            return;
+        }
         let Some(handshake_permit) = registry.handshake(uid) else {
+            let _ = registry.rejection(uid);
             return;
         };
         let (mut reader, mut direct_writer) = tokio::io::split(stream);
@@ -202,11 +212,16 @@ impl Connection {
         let client_hello = match hello {
             Ok(Ok(ClientHandshakeFrame::ClientHello(client_hello))) => client_hello,
             Ok(Err(error)) => {
-                let frame = ServerHandshakeFrame::ProtocolError(frame_error(&error));
-                let _ = write_frame(&mut direct_writer, &frame).await;
+                if registry.rejection(uid) {
+                    let frame = ServerHandshakeFrame::ProtocolError(frame_error(&error));
+                    let _ = write_frame(&mut direct_writer, &frame).await;
+                }
                 return;
             }
-            Err(_) => return,
+            Err(_) => {
+                let _ = registry.rejection(uid);
+                return;
+            }
         };
         drop(handshake_permit);
 
@@ -230,8 +245,10 @@ impl Connection {
         let server_hello = match negotiate_handshake(&client_hello, &handshake_config) {
             Ok(hello) => hello,
             Err(error) => {
-                let frame = ServerHandshakeFrame::ProtocolError(handshake_error(&error));
-                let _ = write_frame(&mut direct_writer, &frame).await;
+                if registry.rejection(uid) {
+                    let frame = ServerHandshakeFrame::ProtocolError(handshake_error(&error));
+                    let _ = write_frame(&mut direct_writer, &frame).await;
+                }
                 return;
             }
         };
@@ -559,6 +576,10 @@ const fn is_stream_operation(_operation: &SemanticRequest) -> bool {
 }
 
 async fn spawn_request(context: RequestContext) {
+    if !context.registry.admission_allowed(context.peer.uid) {
+        let _ = context.connection_close.send(true);
+        return;
+    }
     if context.request.server_connection_id != context.expected_connection {
         send_error(
             &context,
@@ -582,24 +603,6 @@ async fn spawn_request(context: RequestContext) {
         return;
     }
     let deadline_at = tokio::time::Instant::now() + Duration::from_millis(deadline_ms);
-    let Ok(connection_permit) = context.request_slots.clone().try_acquire_owned() else {
-        send_error(
-            &context,
-            WorkerErrorCode::Overloaded,
-            "connection request limit reached",
-        )
-        .await;
-        return;
-    };
-    let Some(principal_permit) = context.registry.request(context.peer.uid) else {
-        send_error(
-            &context,
-            WorkerErrorCode::Overloaded,
-            "worker request limit reached",
-        )
-        .await;
-        return;
-    };
     let (control_tx, control_rx) = watch::channel(ControlState {
         cancelled: false,
         worker_shutdown: false,
@@ -607,7 +610,7 @@ async fn spawn_request(context: RequestContext) {
     });
     let emitted = Arc::new(AtomicU64::new(0));
     let stream = is_stream_operation(&context.request.operation);
-    let conflict = {
+    let identifier_reserved = {
         let Ok(mut active) = context.active.lock() else {
             return;
         };
@@ -619,12 +622,12 @@ async fn spawn_request(context: RequestContext) {
                 emitted: emitted.clone(),
                 stream,
             });
-            false
-        } else {
             true
+        } else {
+            false
         }
     };
-    if conflict {
+    if !identifier_reserved {
         send_error(
             &context,
             WorkerErrorCode::RequestConflict,
@@ -633,6 +636,30 @@ async fn spawn_request(context: RequestContext) {
         .await;
         return;
     }
+    let Ok(connection_permit) = context.request_slots.clone().try_acquire_owned() else {
+        if let Ok(mut active) = context.active.lock() {
+            active.remove(&context.request.request_id);
+        }
+        send_error(
+            &context,
+            WorkerErrorCode::Overloaded,
+            "connection request limit reached",
+        )
+        .await;
+        return;
+    };
+    let Some(principal_permit) = context.registry.request(context.peer.uid) else {
+        if let Ok(mut active) = context.active.lock() {
+            active.remove(&context.request.request_id);
+        }
+        send_error(
+            &context,
+            WorkerErrorCode::Overloaded,
+            "worker request limit reached",
+        )
+        .await;
+        return;
+    };
     tokio::spawn(async move {
         let request_id = context.request.request_id;
         let active_requests = context.active.clone();
@@ -979,6 +1006,10 @@ async fn queue_request_error(
 }
 
 async fn send_error(context: &RequestContext, code: WorkerErrorCode, summary: &'static str) {
+    if !context.registry.rejection(context.peer.uid) {
+        let _ = context.connection_close.send(true);
+        return;
+    }
     queue_frame(
         context,
         ServerFrame::Response(Response {

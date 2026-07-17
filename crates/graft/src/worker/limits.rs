@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 /// Fixed worker-core resource budgets.
 #[derive(Debug, Clone, Copy)]
@@ -28,6 +29,12 @@ impl WorkerLimits {
     pub const BUFFERED_BYTES_PER_PRINCIPAL: usize = 2 * 1024 * 1024;
     /// Buffered response bytes worker-wide.
     pub const BUFFERED_BYTES_WORKER: usize = 16 * 1024 * 1024;
+    /// Admission failures recorded per principal in one fixed window.
+    pub const REJECTIONS_PER_PRINCIPAL: usize = 64;
+    /// Admission failures recorded worker-wide in one fixed window.
+    pub const REJECTIONS_WORKER: usize = 256;
+    /// Fixed admission-failure accounting window.
+    pub const REJECTION_WINDOW: Duration = Duration::from_secs(1);
 }
 
 /// Shared bounded admission registry keyed by peer UID.
@@ -40,6 +47,14 @@ pub struct AdmissionRegistry {
 struct AdmissionState {
     totals: Usage,
     principals: BTreeMap<u32, Usage>,
+    rejections: RejectionState,
+}
+
+#[derive(Debug, Default)]
+struct RejectionState {
+    window_started: Option<Instant>,
+    total: usize,
+    principals: BTreeMap<u32, usize>,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -62,6 +77,41 @@ enum Resource {
 }
 
 impl AdmissionRegistry {
+    /// Returns whether this principal is below both rejection-rate limits.
+    #[must_use]
+    pub fn admission_allowed(&self, uid: u32) -> bool {
+        let Ok(mut state) = self.state.lock() else {
+            return false;
+        };
+        refresh_rejections(&mut state.rejections, Instant::now());
+        state.rejections.total < WorkerLimits::REJECTIONS_WORKER
+            && state.rejections.principals.get(&uid).copied().unwrap_or(0)
+                < WorkerLimits::REJECTIONS_PER_PRINCIPAL
+    }
+
+    /// Records one admission failure if its bounded rate window has capacity.
+    #[must_use]
+    pub fn rejection(&self, uid: u32) -> bool {
+        let Ok(mut state) = self.state.lock() else {
+            return false;
+        };
+        refresh_rejections(&mut state.rejections, Instant::now());
+        if state.rejections.total >= WorkerLimits::REJECTIONS_WORKER
+            || state.rejections.principals.get(&uid).copied().unwrap_or(0)
+                >= WorkerLimits::REJECTIONS_PER_PRINCIPAL
+        {
+            return false;
+        }
+        if !state.rejections.principals.contains_key(&uid)
+            && state.rejections.principals.len() >= WorkerLimits::CONNECTIONS_WORKER
+        {
+            return false;
+        }
+        state.rejections.total += 1;
+        *state.rejections.principals.entry(uid).or_default() += 1;
+        true
+    }
+
     /// Reserves one connection slot.
     #[must_use]
     pub fn connection(&self, uid: u32) -> Option<AdmissionPermit> {
@@ -230,6 +280,18 @@ fn decrement(usage: &mut Usage, resource: Resource) {
     }
 }
 
+fn refresh_rejections(rejections: &mut RejectionState, now: Instant) {
+    let expired = match rejections.window_started {
+        Some(started) => now.duration_since(started) >= WorkerLimits::REJECTION_WINDOW,
+        None => true,
+    };
+    if expired {
+        rejections.window_started = Some(now);
+        rejections.total = 0;
+        rejections.principals.clear();
+    }
+}
+
 const fn is_empty(usage: Usage) -> bool {
     usage.connections == 0
         && usage.handshakes == 0
@@ -306,6 +368,36 @@ mod tests {
         assert!(registry.stream(10_000).is_none());
         drop(worker);
         assert!(registry.stream(10_000).is_some());
+    }
+
+    #[test]
+    fn rejection_limits_apply_per_principal_and_worker_and_reset() {
+        let principal_registry = AdmissionRegistry::default();
+        for _ in 0..WorkerLimits::REJECTIONS_PER_PRINCIPAL {
+            assert!(principal_registry.rejection(1000));
+        }
+        assert!(!principal_registry.rejection(1000));
+        assert!(!principal_registry.admission_allowed(1000));
+        assert!(principal_registry.admission_allowed(1001));
+
+        let worker_registry = AdmissionRegistry::default();
+        for index in 0..WorkerLimits::REJECTIONS_WORKER {
+            let uid = u32::try_from(index % WorkerLimits::CONNECTIONS_WORKER).unwrap();
+            assert!(worker_registry.rejection(uid));
+        }
+        assert!(!worker_registry.rejection(10_000));
+        assert!(!worker_registry.admission_allowed(10_000));
+        worker_registry
+            .state
+            .lock()
+            .unwrap()
+            .rejections
+            .window_started = Some(
+            Instant::now()
+                .checked_sub(WorkerLimits::REJECTION_WINDOW)
+                .unwrap(),
+        );
+        assert!(worker_registry.admission_allowed(10_000));
     }
 
     #[test]

@@ -394,7 +394,7 @@ fn negotiated_connection_request_limit_rejects_new_work_without_eviction() {
     )
     .unwrap();
     let hello = handshake_with_limits(&mut stream, limits);
-    for value in [5_u64, 6] {
+    for value in [5_u64, 5, 6] {
         send_client_frame(
             &mut stream,
             &ClientFrame::Request(Request {
@@ -406,8 +406,15 @@ fn negotiated_connection_request_limit_rejects_new_work_without_eviction() {
         );
     }
 
+    let conflict = read_server_frame::<ServerFrame>(&mut stream);
     let overloaded = read_server_frame::<ServerFrame>(&mut stream);
 
+    assert!(matches!(
+        conflict,
+        ServerFrame::Response(response)
+            if matches!(&response.result, ResponseResult::Error(error)
+                if error.code == graft::worker::protocol::WorkerErrorCode::RequestConflict)
+    ));
     assert!(matches!(
         overloaded,
         ServerFrame::Response(response)
