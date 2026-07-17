@@ -146,17 +146,27 @@ fn read_server_frame<T: serde::de::DeserializeOwned>(stream: &mut UnixStream) ->
 
 #[test]
 fn malformed_and_oversized_initial_frames_receive_typed_protocol_errors() {
-    for frame in [
-        {
-            let payload = b"{}";
-            let mut frame = Vec::from(u32::try_from(payload.len()).unwrap().to_be_bytes());
-            frame.extend_from_slice(payload);
-            frame
-        },
-        u32::try_from(graft::protocol::MAX_INBOUND_FRAME_BYTES + 1)
-            .unwrap()
-            .to_be_bytes()
-            .to_vec(),
+    for (frame, expected_code) in [
+        (
+            {
+                let payload = b"{}";
+                let mut frame = Vec::from(u32::try_from(payload.len()).unwrap().to_be_bytes());
+                frame.extend_from_slice(payload);
+                frame
+            },
+            graft::protocol::ProtocolErrorCode::Malformed,
+        ),
+        (
+            0_u32.to_be_bytes().to_vec(),
+            graft::protocol::ProtocolErrorCode::Malformed,
+        ),
+        (
+            u32::try_from(graft::protocol::MAX_INBOUND_FRAME_BYTES + 1)
+                .unwrap()
+                .to_be_bytes()
+                .to_vec(),
+            graft::protocol::ProtocolErrorCode::LimitExceeded,
+        ),
     ] {
         let worker = spawn_worker();
         let mut stream = connect(&worker.socket_path);
@@ -164,7 +174,10 @@ fn malformed_and_oversized_initial_frames_receive_typed_protocol_errors() {
 
         let response = read_server_frame::<ServerHandshakeFrame>(&mut stream);
 
-        assert!(matches!(response, ServerHandshakeFrame::ProtocolError(_)));
+        assert!(matches!(
+            response,
+            ServerHandshakeFrame::ProtocolError(error) if error.code == expected_code
+        ));
     }
 }
 

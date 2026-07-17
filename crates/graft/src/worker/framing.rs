@@ -25,9 +25,12 @@ pub enum AsyncFrameError {
     /// Peer closed between complete frames.
     #[error("protocol peer disconnected")]
     Disconnected,
-    /// Declared frame is empty or oversized.
-    #[error("protocol frame length is invalid")]
-    Length,
+    /// Declared frame is empty.
+    #[error("protocol frame length is zero")]
+    EmptyLength,
+    /// Declared frame exceeds the inbound bound.
+    #[error("protocol frame length exceeds the inbound bound")]
+    OversizedLength,
     /// Typed payload is malformed.
     #[error("protocol frame payload is invalid")]
     Decode,
@@ -60,10 +63,13 @@ where
         .await
         .map_err(|_| AsyncFrameError::Timeout)?
         .map_err(AsyncFrameError::Io)?;
-    let length =
-        usize::try_from(u32::from_be_bytes(prefix)).map_err(|_| AsyncFrameError::Length)?;
-    if length == 0 || length > MAX_INBOUND_FRAME_BYTES {
-        return Err(AsyncFrameError::Length);
+    let length = usize::try_from(u32::from_be_bytes(prefix))
+        .map_err(|_| AsyncFrameError::OversizedLength)?;
+    if length == 0 {
+        return Err(AsyncFrameError::EmptyLength);
+    }
+    if length > MAX_INBOUND_FRAME_BYTES {
+        return Err(AsyncFrameError::OversizedLength);
     }
     let mut payload = vec![0_u8; length];
     tokio::time::timeout_at(frame_deadline, reader.read_exact(&mut payload))

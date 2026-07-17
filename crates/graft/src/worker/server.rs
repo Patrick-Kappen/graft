@@ -285,6 +285,12 @@ impl Connection {
                     let _ = result;
                     break;
                 }
+                changed = shutdown.changed() => {
+                    if changed.is_err() || *shutdown.borrow() {
+                        shutting_down = true;
+                        break;
+                    }
+                }
                 frame = read_frame::<_, ClientFrame>(&mut reader) => {
                     let Ok(frame) = frame else { break; };
                     match frame {
@@ -355,12 +361,6 @@ impl Connection {
                         }
                     }
                 }
-                changed = shutdown.changed() => {
-                    if changed.is_err() || *shutdown.borrow() {
-                        shutting_down = true;
-                        break;
-                    }
-                }
             }
         }
         cancel_all(&active, shutting_down);
@@ -377,10 +377,17 @@ impl Connection {
 }
 
 #[derive(Clone)]
+struct DeliveryPublication {
+    delivered: Arc<AtomicU64>,
+    sequence: u64,
+}
+
+#[derive(Clone)]
 struct OutputGuard {
     deadline_at: tokio::time::Instant,
     control: watch::Receiver<ControlState>,
     shutdown: watch::Receiver<bool>,
+    publication: Option<DeliveryPublication>,
 }
 
 enum Outbound {
@@ -456,6 +463,16 @@ async fn writer_loop(
                 }
             }
         };
+        if written {
+            if let Some(publication) = guard
+                .as_ref()
+                .and_then(|output_guard| output_guard.publication.as_ref())
+            {
+                publication
+                    .delivered
+                    .store(publication.sequence, Ordering::Release);
+            }
+        }
         drop(connection_permit);
         drop(principal_permit);
         if !written {
@@ -476,7 +493,7 @@ struct ControlState {
 
 struct ActiveRequest {
     control: watch::Sender<ControlState>,
-    emitted: Arc<AtomicU64>,
+    delivered: Arc<AtomicU64>,
     stream: bool,
 }
 
@@ -512,7 +529,7 @@ fn control_request(
     };
     if !request.stream
         || sequence < current.acknowledged
-        || sequence > request.emitted.load(Ordering::Acquire)
+        || sequence > request.delivered.load(Ordering::Acquire)
     {
         let _ = request.control.send(ControlState {
             cancelled: true,
@@ -608,7 +625,7 @@ async fn spawn_request(context: RequestContext) {
         worker_shutdown: false,
         acknowledged: 0,
     });
-    let emitted = Arc::new(AtomicU64::new(0));
+    let delivered = Arc::new(AtomicU64::new(0));
     let stream = is_stream_operation(&context.request.operation);
     let identifier_reserved = {
         let Ok(mut active) = context.active.lock() else {
@@ -619,7 +636,7 @@ async fn spawn_request(context: RequestContext) {
         {
             entry.insert(ActiveRequest {
                 control: control_tx,
-                emitted: emitted.clone(),
+                delivered: delivered.clone(),
                 stream,
             });
             true
@@ -663,7 +680,7 @@ async fn spawn_request(context: RequestContext) {
     tokio::spawn(async move {
         let request_id = context.request.request_id;
         let active_requests = context.active.clone();
-        run_request(context, control_rx, emitted, deadline_at).await;
+        run_request(context, control_rx, delivered, deadline_at).await;
         if let Ok(mut active) = active_requests.lock() {
             active.remove(&request_id);
         }
@@ -715,11 +732,11 @@ async fn await_dispatch(
 async fn run_request(
     context: RequestContext,
     #[allow(unused_mut)] mut control: watch::Receiver<ControlState>,
-    emitted: Arc<AtomicU64>,
+    delivered: Arc<AtomicU64>,
     deadline_at: tokio::time::Instant,
 ) {
     #[cfg(not(feature = "worker-test-fixtures"))]
-    let _ = (&control, &emitted, deadline_at);
+    let _ = (&control, &delivered, deadline_at);
     let dispatch_context = DispatchContext {
         principal: context.principal,
         peer: context.peer,
@@ -784,7 +801,7 @@ async fn run_request(
             run_mock_stream(
                 context,
                 &mut control,
-                emitted,
+                delivered,
                 deadline_at,
                 items,
                 interval_ms,
@@ -823,6 +840,7 @@ async fn run_mock_unary(
         deadline_at,
         control: control.clone(),
         shutdown: context.shutdown.clone(),
+        publication: None,
     });
     queue_frame(
         context,
@@ -841,7 +859,7 @@ async fn run_mock_unary(
 async fn run_mock_stream(
     context: RequestContext,
     control: &mut watch::Receiver<ControlState>,
-    emitted: Arc<AtomicU64>,
+    delivered: Arc<AtomicU64>,
     deadline_at: tokio::time::Instant,
     items: u32,
     interval_ms: u64,
@@ -945,7 +963,6 @@ async fn run_mock_stream(
             }
         }
         sequence = sequence.saturating_add(1);
-        emitted.store(sequence, Ordering::Release);
         queue_frame(
             &context,
             ServerFrame::StreamItem(StreamItem {
@@ -959,6 +976,10 @@ async fn run_mock_stream(
                 deadline_at,
                 control: control.clone(),
                 shutdown: context.shutdown.clone(),
+                publication: Some(DeliveryPublication {
+                    delivered: delivered.clone(),
+                    sequence,
+                }),
             }),
         )
         .await;
@@ -976,6 +997,7 @@ async fn run_mock_stream(
             deadline_at,
             control: control.clone(),
             shutdown: context.shutdown.clone(),
+            publication: None,
         }),
     )
     .await;
@@ -1166,8 +1188,11 @@ fn worker_error(
 
 fn frame_error(error: &AsyncFrameError) -> ProtocolError {
     let code = match error {
-        AsyncFrameError::Length | AsyncFrameError::Encode(_) => ProtocolErrorCode::LimitExceeded,
-        AsyncFrameError::Io(_)
+        AsyncFrameError::OversizedLength | AsyncFrameError::Encode(_) => {
+            ProtocolErrorCode::LimitExceeded
+        }
+        AsyncFrameError::EmptyLength
+        | AsyncFrameError::Io(_)
         | AsyncFrameError::Timeout
         | AsyncFrameError::Disconnected
         | AsyncFrameError::Decode => ProtocolErrorCode::Malformed,
@@ -1217,6 +1242,37 @@ mod tests {
         ) -> Pin<Box<dyn Future<Output = DispatchPlan> + Send + 'a>> {
             Box::pin(std::future::pending())
         }
+    }
+
+    #[test]
+    fn acknowledgement_cannot_advance_beyond_written_sequence() {
+        let connection_id =
+            ConnectionIdentifier::parse("018f0f77-8c4d-7b2a-8e6a-4b8a7d3a1c20").unwrap();
+        let request_id = RequestIdentifier::new(1).unwrap();
+        let (control, _receiver) = watch::channel(ControlState {
+            cancelled: false,
+            worker_shutdown: false,
+            acknowledged: 0,
+        });
+        let active = Arc::new(Mutex::new(BTreeMap::from([(
+            request_id,
+            ActiveRequest {
+                control,
+                delivered: Arc::new(AtomicU64::new(0)),
+                stream: true,
+            },
+        )])));
+
+        let result = control_request(
+            connection_id,
+            request_id,
+            Some(1),
+            connection_id,
+            &active,
+            false,
+        );
+
+        assert_eq!(result, Err(WorkerErrorCode::InvalidAcknowledgement));
     }
 
     #[tokio::test]
@@ -1293,6 +1349,7 @@ mod tests {
                 deadline_at: tokio::time::Instant::now() + Duration::from_millis(10),
                 control,
                 shutdown,
+                publication: None,
             }),
         )
         .await;
