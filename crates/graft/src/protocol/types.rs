@@ -79,7 +79,7 @@ pub enum ValidationError {
     #[error("manifest generation must be 64 lowercase hexadecimal characters")]
     InvalidManifestGeneration,
     /// Worker target and manager kind do not form an approved context.
-    #[error("worker target and manager kind do not match")]
+    #[error("worker target, effective UID, and manager kind do not form an approved context")]
     InvalidWorkerContext,
 }
 
