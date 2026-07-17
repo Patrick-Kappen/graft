@@ -420,23 +420,25 @@ struct RequestLease {
     active: ActiveMap,
     request_id: crate::protocol::RequestIdentifier,
     completion: Arc<Notify>,
-    identifier_released: bool,
+    released: watch::Sender<bool>,
 }
 
 impl RequestLease {
-    fn release_identifier(&mut self) {
-        if !self.identifier_released {
-            if let Ok(mut active) = self.active.lock() {
-                active.remove(&self.request_id);
+    fn begin_terminal_write(&self) {
+        if let Ok(mut active) = self.active.lock() {
+            if let Some(request) = active.get_mut(&self.request_id) {
+                request.terminal_writing = true;
             }
-            self.identifier_released = true;
         }
     }
 }
 
 impl Drop for RequestLease {
     fn drop(&mut self) {
-        self.release_identifier();
+        if let Ok(mut active) = self.active.lock() {
+            active.remove(&self.request_id);
+        }
+        let _ = self.released.send(true);
         self.completion.notify_one();
     }
 }
@@ -484,7 +486,7 @@ async fn writer_loop(
             connection_permit,
             guard,
             delivery_deadline,
-            mut terminal_lease,
+            terminal_lease,
         } = outbound
         else {
             let Outbound::Barrier { completion } = outbound else {
@@ -494,8 +496,8 @@ async fn writer_loop(
             continue;
         };
         let is_terminal = terminal_lease.is_some();
-        if let Some(lease) = terminal_lease.as_mut() {
-            lease.release_identifier();
+        if let Some(lease) = terminal_lease.as_ref() {
+            lease.begin_terminal_write();
         }
         let mut write_guard = guard.clone();
         let guard_expired = write_guard.as_ref().is_some_and(|guard| {
@@ -604,6 +606,8 @@ struct ActiveRequest {
     delivered: Arc<AtomicU64>,
     completion: Arc<Notify>,
     stream: bool,
+    terminal_writing: bool,
+    released: watch::Receiver<bool>,
 }
 
 type ActiveMap = Arc<Mutex<BTreeMap<crate::protocol::RequestIdentifier, ActiveRequest>>>;
@@ -781,33 +785,65 @@ async fn spawn_request(context: RequestContext) {
     let produced = Arc::new(AtomicU64::new(0));
     let delivered = Arc::new(AtomicU64::new(0));
     let stream = is_stream_operation(&context.request.operation);
-    let identifier_reserved = {
-        let Ok(mut active) = context.active.lock() else {
-            return;
+    let mut request_shutdown = context.shutdown.clone();
+    let (released_tx, released_rx) = watch::channel(false);
+    loop {
+        let wait_for_terminal = {
+            let Ok(mut active) = context.active.lock() else {
+                return;
+            };
+            match active.entry(context.request.request_id) {
+                std::collections::btree_map::Entry::Vacant(entry) => {
+                    entry.insert(ActiveRequest {
+                        control: control_tx.clone(),
+                        produced: produced.clone(),
+                        delivered: delivered.clone(),
+                        completion: context.completion.clone(),
+                        stream,
+                        terminal_writing: false,
+                        released: released_rx.clone(),
+                    });
+                    None
+                }
+                std::collections::btree_map::Entry::Occupied(entry)
+                    if entry.get().terminal_writing =>
+                {
+                    Some(Some(entry.get().released.clone()))
+                }
+                std::collections::btree_map::Entry::Occupied(_) => Some(None),
+            }
         };
-        if let std::collections::btree_map::Entry::Vacant(entry) =
-            active.entry(context.request.request_id)
-        {
-            entry.insert(ActiveRequest {
-                control: control_tx,
-                produced: produced.clone(),
-                delivered: delivered.clone(),
-                completion: context.completion.clone(),
-                stream,
-            });
-            true
-        } else {
-            false
+        match wait_for_terminal {
+            None => break,
+            Some(None) => {
+                send_error(
+                    &context,
+                    WorkerErrorCode::RequestConflict,
+                    "request identifier is already active",
+                )
+                .await;
+                return;
+            }
+            Some(Some(mut released)) => {
+                tokio::select! {
+                    biased;
+                    () = tokio::time::sleep_until(deadline_at) => {
+                        send_error(&context, WorkerErrorCode::Deadline, "request deadline elapsed").await;
+                        return;
+                    }
+                    changed = request_shutdown.changed() => {
+                        let _ = changed;
+                        return;
+                    }
+                    changed = released.changed() => {
+                        if changed.is_err() && !*released.borrow() {
+                            let _ = context.connection_close.send(true);
+                            return;
+                        }
+                    }
+                }
+            }
         }
-    };
-    if !identifier_reserved {
-        send_error(
-            &context,
-            WorkerErrorCode::RequestConflict,
-            "request identifier is already active",
-        )
-        .await;
-        return;
     }
     let Ok(connection_permit) = context.request_slots.clone().try_acquire_owned() else {
         if let Ok(mut active) = context.active.lock() {
@@ -837,7 +873,7 @@ async fn spawn_request(context: RequestContext) {
         active: context.active.clone(),
         request_id: context.request.request_id,
         completion: context.completion.clone(),
-        identifier_released: false,
+        released: released_tx,
     };
     let Ok(mut terminal_lease) = context.terminal_lease.lock() else {
         if let Ok(mut active) = context.active.lock() {
@@ -1598,6 +1634,8 @@ mod tests {
                 delivered: Arc::new(AtomicU64::new(0)),
                 completion: Arc::new(Notify::new()),
                 stream: true,
+                terminal_writing: false,
+                released: watch::channel(false).1,
             },
         )])));
 
@@ -1632,6 +1670,8 @@ mod tests {
                 delivered: Arc::new(AtomicU64::new(0)),
                 completion: Arc::new(Notify::new()),
                 stream: true,
+                terminal_writing: false,
+                released: watch::channel(false).1,
             },
         )])));
 
@@ -1704,6 +1744,7 @@ mod tests {
         let connection_buffer = ConnectionBuffer::new(1);
         let request_id = RequestIdentifier::new(1).unwrap();
         let completion = Arc::new(Notify::new());
+        let (released, release_state) = watch::channel(false);
         let (control, _receiver) = watch::channel(ControlState {
             cancelled: false,
             worker_shutdown: false,
@@ -1718,8 +1759,25 @@ mod tests {
                 delivered: Arc::new(AtomicU64::new(0)),
                 completion: completion.clone(),
                 stream: false,
+                terminal_writing: false,
+                released: release_state,
             },
         )])));
+        let lease = RequestLease {
+            active: active.clone(),
+            request_id,
+            completion: completion.clone(),
+            released,
+        };
+        lease.begin_terminal_write();
+        assert!(
+            active
+                .lock()
+                .unwrap()
+                .get(&request_id)
+                .unwrap()
+                .terminal_writing
+        );
         let (outbound_tx, outbound_rx) = mpsc::channel(1);
         outbound_tx
             .send(Outbound::Frame {
@@ -1728,12 +1786,7 @@ mod tests {
                 connection_permit: connection_buffer.reserve(1).unwrap(),
                 guard: None,
                 delivery_deadline: tokio::time::Instant::now() + PARTIAL_FRAME_TIMEOUT,
-                terminal_lease: Some(RequestLease {
-                    active: active.clone(),
-                    request_id,
-                    completion: completion.clone(),
-                    identifier_released: false,
-                }),
+                terminal_lease: Some(lease),
             })
             .await
             .unwrap();
@@ -1781,7 +1834,7 @@ mod tests {
                     active: Arc::new(Mutex::new(BTreeMap::new())),
                     request_id,
                     completion: Arc::new(Notify::new()),
-                    identifier_released: false,
+                    released: watch::channel(false).0,
                 }),
             })
             .await
