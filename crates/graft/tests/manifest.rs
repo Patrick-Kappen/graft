@@ -223,6 +223,20 @@ fn manifest_rejects_context_schema_api_count_and_workload_mismatches() {
     let mut wrong_path = workload("alpha", 'a');
     wrong_path["rootfsStorePath"] = "/tmp/not-store".into();
     set_workloads(&mut store_path, vec![wrong_path]);
+    let (mut dot_store_path, _) = pair("system");
+    let mut dot_path = workload("alpha", 'a');
+    dot_path["rootfsStorePath"] = "/nix/store/.".into();
+    set_workloads(&mut dot_store_path, vec![dot_path]);
+    let (mut parent_store_path, _) = pair("system");
+    let mut parent_path = workload("alpha", 'a');
+    parent_path["rootfsStorePath"] = "/nix/store/..".into();
+    set_workloads(&mut parent_store_path, vec![parent_path]);
+    let (mut bad_workload_name, _) = pair("system");
+    set_workloads(&mut bad_workload_name, vec![workload("@bad", 'a')]);
+    let (mut hidden_container_name, _) = pair("system");
+    let mut hidden_container = workload("alpha", 'a');
+    hidden_container["containerName"] = ".hidden".into();
+    set_workloads(&mut hidden_container_name, vec![hidden_container]);
     let (mut unit_mismatch, _) = pair("system");
     let mut wrong_service = workload("alpha", 'a');
     wrong_service["generatedService"] = "sshd.service".into();
@@ -245,6 +259,10 @@ fn manifest_rejects_context_schema_api_count_and_workload_mismatches() {
         count,
         workload_target,
         store_path,
+        dot_store_path,
+        parent_store_path,
+        bad_workload_name,
+        hidden_container_name,
         unsupported_workload_api,
     ] {
         assert!(Manifest::from_json(&serde_json::to_vec(&invalid).unwrap()).is_err());

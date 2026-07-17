@@ -229,7 +229,7 @@ impl BackendRequirement {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WorkloadRecord {
     workload_id: Sha256Identity,
-    name: BoundedIdentifier,
+    name: WorkloadName,
     target: WorkerTarget,
     enabled: bool,
     lifecycle: WorkloadLifecycle,
@@ -240,7 +240,7 @@ pub struct WorkloadRecord {
     dependency_digest: Sha256Identity,
     quadlet_source_unit: SourceUnitName,
     generated_service: ServiceUnitName,
-    container_name: BoundedIdentifier,
+    container_name: WorkloadName,
     artifact_identity: Sha256Identity,
     rootfs_store_path: NixStorePath,
     closure_identity: Sha256Identity,
@@ -806,6 +806,26 @@ fn strictly_sorted_unique<T: Ord>(values: &[T]) -> bool {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(transparent)]
+struct WorkloadName(String);
+
+impl<'de> Deserialize<'de> for WorkloadName {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        let mut bytes = value.bytes();
+        if value.len() > MAX_MANIFEST_STRING_BYTES
+            || !bytes
+                .next()
+                .is_some_and(|byte| byte.is_ascii_alphanumeric())
+            || !bytes.all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+        {
+            return Err(serde::de::Error::custom("invalid workload name"));
+        }
+        Ok(Self(value))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[serde(transparent)]
 struct BoundedIdentifier(String);
 
 impl<'de> Deserialize<'de> for BoundedIdentifier {
@@ -885,6 +905,7 @@ impl<'de> Deserialize<'de> for NixStorePath {
             ));
         };
         if base.is_empty()
+            || matches!(base, "." | "..")
             || base.contains('/')
             || base.len() > MAX_MANIFEST_STRING_BYTES
             || !base.bytes().all(|byte| {
