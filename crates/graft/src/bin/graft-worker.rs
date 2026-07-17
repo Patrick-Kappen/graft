@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use anyhow::{bail, Context as _, Result};
 use clap::{Parser, ValueEnum};
-use graft::manifest::{ManifestLoader, ProducerIdentity};
+use graft::manifest::{ManifestError, ManifestLoader, ProducerIdentity};
 #[cfg(feature = "worker-test-fixtures")]
 use graft::protocol::Capability;
 use graft::protocol::{
@@ -103,8 +103,8 @@ async fn main() -> Result<()> {
         Ok(snapshot) => ManifestState::Available {
             generation: ManifestGeneration::parse(snapshot.manifest().generation_id().as_str())?,
         },
-        Err(_) => ManifestState::Unavailable {
-            reason: ManifestUnavailableReason::Invalid,
+        Err(error) => ManifestState::Unavailable {
+            reason: manifest_unavailable_reason(&error),
         },
     };
     #[cfg(feature = "worker-test-fixtures")]
@@ -132,4 +132,47 @@ async fn main() -> Result<()> {
     };
     serve(listener, config).await?;
     Ok(())
+}
+
+fn manifest_unavailable_reason(error: &ManifestError) -> ManifestUnavailableReason {
+    match error {
+        ManifestError::Filesystem(source) if source.kind() == std::io::ErrorKind::NotFound => {
+            ManifestUnavailableReason::Missing
+        }
+        ManifestError::Filesystem(_)
+        | ManifestError::FileType
+        | ManifestError::Ownership
+        | ManifestError::Permissions
+        | ManifestError::UnexpectedEntry
+        | ManifestError::GenerationReference
+        | ManifestError::DocumentTooLarge => ManifestUnavailableReason::Unreadable,
+        ManifestError::IncompatibleSchema
+        | ManifestError::ApiCompatibility
+        | ManifestError::ProducerMismatch
+        | ManifestError::InstalledProducerMismatch => ManifestUnavailableReason::Incompatible,
+        _ => ManifestUnavailableReason::Invalid,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn manifest_unavailability_preserves_missing_incompatible_and_unreadable_classes() {
+        assert_eq!(
+            manifest_unavailable_reason(&ManifestError::Filesystem(std::io::Error::from(
+                std::io::ErrorKind::NotFound
+            ))),
+            ManifestUnavailableReason::Missing
+        );
+        assert_eq!(
+            manifest_unavailable_reason(&ManifestError::IncompatibleSchema),
+            ManifestUnavailableReason::Incompatible
+        );
+        assert_eq!(
+            manifest_unavailable_reason(&ManifestError::Permissions),
+            ManifestUnavailableReason::Unreadable
+        );
+    }
 }

@@ -51,9 +51,14 @@ pub fn take_listener() -> Result<UnixListener, ActivationError> {
         return Err(ActivationError::DescriptorName);
     }
 
-    // SAFETY: systemd's activation contract assigns descriptor 3 to this
-    // process, and ownership is transferred exactly once after all environment
-    // cardinality checks above. The borrowed view does not outlive this call.
+    // SAFETY: `fcntl(F_GETFD)` accepts an arbitrary integer descriptor and
+    // reports `EBADF` without requiring an I/O-safe borrowed descriptor.
+    if unsafe { libc::fcntl(ACTIVATION_FD, libc::F_GETFD) } == -1 {
+        return Err(ActivationError::Io(std::io::Error::last_os_error()));
+    }
+    // SAFETY: the successful raw `F_GETFD` probe above established that fd 3 is
+    // open. The borrowed view does not outlive this call and ownership is
+    // transferred exactly once below.
     let descriptor = unsafe { BorrowedFd::borrow_raw(ACTIVATION_FD) };
     if rustix::net::sockopt::socket_domain(descriptor).map_err(errno_to_io)? != AddressFamily::UNIX
         || rustix::net::sockopt::socket_type(descriptor).map_err(errno_to_io)? != SocketType::STREAM

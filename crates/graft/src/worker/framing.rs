@@ -55,7 +55,8 @@ where
         }
         Err(error) => return Err(AsyncFrameError::Io(error)),
     }
-    tokio::time::timeout(PARTIAL_FRAME_TIMEOUT, reader.read_exact(&mut prefix[1..]))
+    let frame_deadline = tokio::time::Instant::now() + PARTIAL_FRAME_TIMEOUT;
+    tokio::time::timeout_at(frame_deadline, reader.read_exact(&mut prefix[1..]))
         .await
         .map_err(|_| AsyncFrameError::Timeout)?
         .map_err(AsyncFrameError::Io)?;
@@ -65,7 +66,7 @@ where
         return Err(AsyncFrameError::Length);
     }
     let mut payload = vec![0_u8; length];
-    tokio::time::timeout(PARTIAL_FRAME_TIMEOUT, reader.read_exact(&mut payload))
+    tokio::time::timeout_at(frame_deadline, reader.read_exact(&mut payload))
         .await
         .map_err(|_| AsyncFrameError::Timeout)?
         .map_err(AsyncFrameError::Io)?;

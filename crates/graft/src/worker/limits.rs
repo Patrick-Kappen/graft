@@ -121,6 +121,53 @@ impl AdmissionRegistry {
     }
 }
 
+/// Per-connection negotiated buffered-byte accounting.
+#[derive(Debug, Clone)]
+pub struct ConnectionBuffer {
+    state: Arc<Mutex<usize>>,
+    maximum: usize,
+}
+
+impl ConnectionBuffer {
+    /// Creates a negotiated byte budget.
+    #[must_use]
+    pub fn new(maximum: usize) -> Self {
+        Self {
+            state: Arc::new(Mutex::new(0)),
+            maximum,
+        }
+    }
+
+    /// Reserves bytes before queueing a response.
+    #[must_use]
+    pub fn reserve(&self, bytes: usize) -> Option<ConnectionBufferPermit> {
+        let mut used = self.state.lock().ok()?;
+        if used.saturating_add(bytes) > self.maximum {
+            return None;
+        }
+        *used += bytes;
+        Some(ConnectionBufferPermit {
+            budget: self.clone(),
+            bytes,
+        })
+    }
+}
+
+/// RAII per-connection byte reservation.
+#[derive(Debug)]
+pub struct ConnectionBufferPermit {
+    budget: ConnectionBuffer,
+    bytes: usize,
+}
+
+impl Drop for ConnectionBufferPermit {
+    fn drop(&mut self) {
+        if let Ok(mut used) = self.budget.state.lock() {
+            *used = used.saturating_sub(self.bytes);
+        }
+    }
+}
+
 /// RAII admission reservation.
 #[derive(Debug)]
 pub struct AdmissionPermit {
@@ -226,7 +273,49 @@ mod tests {
     }
 
     #[test]
+    fn request_limits_apply_per_principal_and_worker_and_release() {
+        let registry = AdmissionRegistry::default();
+        let principal: Vec<_> = (0..WorkerLimits::REQUESTS_PER_PRINCIPAL)
+            .map(|_| registry.request(1000).unwrap())
+            .collect();
+        assert!(registry.request(1000).is_none());
+        drop(principal);
+        assert!(registry.request(1000).is_some());
+
+        let worker: Vec<_> = (0..WorkerLimits::REQUESTS_WORKER)
+            .map(|index| registry.request(u32::try_from(index).unwrap()).unwrap())
+            .collect();
+        assert!(registry.request(10_000).is_none());
+        drop(worker);
+        assert!(registry.request(10_000).is_some());
+    }
+
+    #[test]
+    fn stream_limits_apply_per_principal_and_worker_and_release() {
+        let registry = AdmissionRegistry::default();
+        let principal: Vec<_> = (0..WorkerLimits::STREAMS_PER_PRINCIPAL)
+            .map(|_| registry.stream(1000).unwrap())
+            .collect();
+        assert!(registry.stream(1000).is_none());
+        drop(principal);
+        assert!(registry.stream(1000).is_some());
+
+        let worker: Vec<_> = (0..WorkerLimits::STREAMS_WORKER)
+            .map(|index| registry.stream(u32::try_from(index).unwrap()).unwrap())
+            .collect();
+        assert!(registry.stream(10_000).is_none());
+        drop(worker);
+        assert!(registry.stream(10_000).is_some());
+    }
+
+    #[test]
     fn buffered_byte_limit_is_checked_before_reservation() {
+        let connection = ConnectionBuffer::new(10);
+        let connection_permit = connection.reserve(10).unwrap();
+        assert!(connection.reserve(1).is_none());
+        drop(connection_permit);
+        assert!(connection.reserve(1).is_some());
+
         let registry = AdmissionRegistry::default();
         let permit = registry
             .buffered_bytes(1000, WorkerLimits::BUFFERED_BYTES_PER_PRINCIPAL)

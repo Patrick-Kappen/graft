@@ -234,6 +234,7 @@ fn worker_rejects_invalid_activation_cardinality_name_and_type() {
     assert!(!invalid_activation_status("0", "graft-worker", None));
     assert!(!invalid_activation_status("2", "graft-worker", None));
     assert!(!invalid_activation_status("1", "wrong-name", None));
+    assert!(!invalid_activation_status("1", "graft-worker", None));
     let regular_file = std::fs::File::open("/dev/null").unwrap();
     assert!(!invalid_activation_status(
         "1",
@@ -426,10 +427,14 @@ fn sigterm_ends_active_stream_with_worker_shutdown() {
             deadline_ms: Some(5_000),
             operation: SemanticRequest::MockStream {
                 items: 10,
-                interval_ms: 1_000,
+                interval_ms: 100,
             },
         }),
     );
+    assert!(matches!(
+        read_server_frame::<ServerFrame>(&mut stream),
+        ServerFrame::StreamItem(item) if item.sequence == 1
+    ));
     let pid = rustix::process::Pid::from_raw(i32::try_from(worker.child.id()).unwrap()).unwrap();
     rustix::process::kill_process(pid, rustix::process::Signal::TERM).unwrap();
 
@@ -578,4 +583,183 @@ fn invalid_stream_acknowledgement_returns_typed_error_and_stops_interest() {
         frame,
         ServerFrame::StreamEnd(end) if end.reason == StreamEndReason::Cancelled
     )));
+}
+
+#[cfg(feature = "worker-test-fixtures")]
+#[test]
+fn acknowledgement_only_update_preserves_stream_interval_and_completion() {
+    let worker = spawn_worker();
+    let mut stream = connect(&worker.socket_path);
+    let hello = handshake(&mut stream);
+    let request_id = RequestIdentifier::new(12).unwrap();
+    send_client_frame(
+        &mut stream,
+        &ClientFrame::Request(Request {
+            server_connection_id: hello.server_connection_id,
+            request_id,
+            deadline_ms: Some(5_000),
+            operation: SemanticRequest::MockStream {
+                items: 2,
+                interval_ms: 50,
+            },
+        }),
+    );
+    assert!(matches!(
+        read_server_frame::<ServerFrame>(&mut stream),
+        ServerFrame::StreamItem(item) if item.sequence == 1
+    ));
+    send_client_frame(
+        &mut stream,
+        &ClientFrame::StreamAck(StreamAck {
+            server_connection_id: hello.server_connection_id,
+            request_id,
+            sequence: 1,
+        }),
+    );
+
+    assert!(matches!(
+        read_server_frame::<ServerFrame>(&mut stream),
+        ServerFrame::StreamItem(item) if item.sequence == 2
+    ));
+    assert!(matches!(
+        read_server_frame::<ServerFrame>(&mut stream),
+        ServerFrame::StreamEnd(end) if end.reason == StreamEndReason::Completed
+    ));
+}
+
+#[cfg(feature = "worker-test-fixtures")]
+#[test]
+fn request_deadline_wins_while_stream_ack_window_is_full() {
+    let worker = spawn_worker();
+    let mut stream = connect(&worker.socket_path);
+    let maxima = EffectiveLimits::protocol_maxima();
+    let limits = EffectiveLimits::new(
+        maxima.concurrent_requests(),
+        maxima.active_streams(),
+        maxima.buffered_response_bytes(),
+        1,
+        maxima.workloads_per_page(),
+        maxima.log_records_per_page(),
+        maxima.encoded_log_message_bytes(),
+        maxima.unary_deadline_ms(),
+        maxima.lifecycle_deadline_ms(),
+    )
+    .unwrap();
+    let hello = handshake_with_limits(&mut stream, limits);
+    send_client_frame(
+        &mut stream,
+        &ClientFrame::Request(Request {
+            server_connection_id: hello.server_connection_id,
+            request_id: RequestIdentifier::new(13).unwrap(),
+            deadline_ms: Some(20),
+            operation: SemanticRequest::MockStream {
+                items: 2,
+                interval_ms: 0,
+            },
+        }),
+    );
+    assert!(matches!(
+        read_server_frame::<ServerFrame>(&mut stream),
+        ServerFrame::StreamItem(item) if item.sequence == 1
+    ));
+
+    assert!(matches!(
+        read_server_frame::<ServerFrame>(&mut stream),
+        ServerFrame::StreamEnd(end) if end.reason == StreamEndReason::Deadline
+    ));
+}
+
+#[cfg(feature = "worker-test-fixtures")]
+#[test]
+fn negotiated_response_byte_exhaustion_closes_connection_deterministically() {
+    let worker = spawn_worker();
+    let mut stream = connect(&worker.socket_path);
+    let maxima = EffectiveLimits::protocol_maxima();
+    let limits = EffectiveLimits::new(
+        maxima.concurrent_requests(),
+        maxima.active_streams(),
+        1,
+        maxima.unacknowledged_stream_items(),
+        maxima.workloads_per_page(),
+        maxima.log_records_per_page(),
+        maxima.encoded_log_message_bytes(),
+        maxima.unary_deadline_ms(),
+        maxima.lifecycle_deadline_ms(),
+    )
+    .unwrap();
+    let hello = handshake_with_limits(&mut stream, limits);
+    send_client_frame(
+        &mut stream,
+        &ClientFrame::Request(Request {
+            server_connection_id: hello.server_connection_id,
+            request_id: RequestIdentifier::new(14).unwrap(),
+            deadline_ms: Some(1_000),
+            operation: SemanticRequest::MockUnary { delay_ms: 0 },
+        }),
+    );
+    let mut byte = [0_u8; 1];
+
+    assert_eq!(stream.read(&mut byte).unwrap(), 0);
+}
+
+#[cfg(feature = "worker-test-fixtures")]
+#[test]
+fn no_progress_acknowledgements_do_not_extend_fixed_stall_deadline() {
+    let worker = spawn_worker();
+    let mut stream = connect(&worker.socket_path);
+    let maxima = EffectiveLimits::protocol_maxima();
+    let limits = EffectiveLimits::new(
+        maxima.concurrent_requests(),
+        maxima.active_streams(),
+        maxima.buffered_response_bytes(),
+        1,
+        maxima.workloads_per_page(),
+        maxima.log_records_per_page(),
+        maxima.encoded_log_message_bytes(),
+        maxima.unary_deadline_ms(),
+        maxima.lifecycle_deadline_ms(),
+    )
+    .unwrap();
+    let hello = handshake_with_limits(&mut stream, limits);
+    let request_id = RequestIdentifier::new(15).unwrap();
+    send_client_frame(
+        &mut stream,
+        &ClientFrame::Request(Request {
+            server_connection_id: hello.server_connection_id,
+            request_id,
+            deadline_ms: Some(5_000),
+            operation: SemanticRequest::MockStream {
+                items: 2,
+                interval_ms: 0,
+            },
+        }),
+    );
+    assert!(matches!(
+        read_server_frame::<ServerFrame>(&mut stream),
+        ServerFrame::StreamItem(item) if item.sequence == 1
+    ));
+    let mut acknowledger = stream.try_clone().unwrap();
+    let started = Instant::now();
+    let sender = thread::spawn(move || {
+        for _ in 0..5 {
+            thread::sleep(Duration::from_millis(100));
+            send_client_frame(
+                &mut acknowledger,
+                &ClientFrame::StreamAck(StreamAck {
+                    server_connection_id: hello.server_connection_id,
+                    request_id,
+                    sequence: 0,
+                }),
+            );
+        }
+    });
+
+    let terminal = read_server_frame::<ServerFrame>(&mut stream);
+    sender.join().unwrap();
+
+    assert!(matches!(
+        terminal,
+        ServerFrame::StreamEnd(end) if end.reason == StreamEndReason::SlowConsumer
+    ));
+    assert!(started.elapsed() < Duration::from_millis(1_500));
 }

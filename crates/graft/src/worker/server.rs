@@ -23,7 +23,7 @@ use super::dispatcher::{
     DispatchContext, DispatchPlan, PeerCredentials, PrincipalKey, SemanticDispatcher,
 };
 use super::framing::{read_frame, write_frame, AsyncFrameError, PARTIAL_FRAME_TIMEOUT};
-use super::limits::{AdmissionPermit, AdmissionRegistry};
+use super::limits::{AdmissionPermit, AdmissionRegistry, ConnectionBuffer, ConnectionBufferPermit};
 use super::protocol::{
     ClientFrame, Request, Response, ResponseResult, SemanticRequest, ServerFrame, WorkerError,
     WorkerErrorCode,
@@ -62,6 +62,9 @@ pub enum ServerError {
     /// Activated listener setup failed.
     #[error("failed to configure activated listener")]
     Listener(#[source] io::Error),
+    /// Activated listener encountered a persistent accept failure.
+    #[error("activated listener accept failed")]
+    Accept(#[source] io::Error),
 }
 
 /// Runs one worker process until shutdown.
@@ -87,7 +90,17 @@ pub async fn serve(
     loop {
         tokio::select! {
             accepted = listener.accept() => {
-                let Ok((stream, _)) = accepted else { continue; };
+                let (stream, _) = match accepted {
+                    Ok(accepted) => accepted,
+                    Err(error) if matches!(
+                        error.kind(),
+                        io::ErrorKind::Interrupted | io::ErrorKind::WouldBlock | io::ErrorKind::ConnectionAborted
+                    ) => {
+                        tokio::time::sleep(Duration::from_millis(10)).await;
+                        continue;
+                    }
+                    Err(error) => return Err(ServerError::Accept(error)),
+                };
                 let Ok(credentials) = rustix::net::sockopt::socket_peercred(stream.as_fd()) else {
                     continue;
                 };
@@ -242,6 +255,9 @@ impl Connection {
         let stream_slots = Arc::new(Semaphore::new(
             usize::try_from(server_hello.effective_limits.active_streams()).unwrap_or(1),
         ));
+        let connection_buffer = ConnectionBuffer::new(
+            usize::try_from(server_hello.effective_limits.buffered_response_bytes()).unwrap_or(1),
+        );
 
         let mut shutting_down = false;
         loop {
@@ -261,6 +277,7 @@ impl Connection {
                             request_slots: request_slots.clone(),
                             stream_slots: stream_slots.clone(),
                             active: active.clone(),
+                            connection_buffer: connection_buffer.clone(),
                             outbound: outbound_tx.clone(),
                             shutdown: shutdown.clone(),
                         }),
@@ -275,7 +292,7 @@ impl Connection {
                             ) {
                                 queue_control_error(
                                     uid, connection_id, control.request_id, code,
-                                    &writer_registry, &outbound_tx,
+                                    &writer_registry, &connection_buffer, &outbound_tx,
                                 ).await;
                             }
                         }
@@ -290,7 +307,7 @@ impl Connection {
                             ) {
                                 queue_control_error(
                                     uid, connection_id, control.request_id, code,
-                                    &writer_registry, &outbound_tx,
+                                    &writer_registry, &connection_buffer, &outbound_tx,
                                 ).await;
                             }
                         }
@@ -310,15 +327,23 @@ impl Connection {
     }
 }
 
-struct Outbound {
-    bytes: Vec<u8>,
-    _permit: AdmissionPermit,
+enum Outbound {
+    Frame {
+        bytes: Vec<u8>,
+        _principal_permit: AdmissionPermit,
+        _connection_permit: ConnectionBufferPermit,
+    },
+    Close,
 }
 
 async fn writer_loop(mut writer: WriteHalf<UnixStream>, mut receiver: mpsc::Receiver<Outbound>) {
     while let Some(outbound) = receiver.recv().await {
+        let Outbound::Frame { bytes, .. } = outbound else {
+            let _ = writer.shutdown().await;
+            break;
+        };
         if !matches!(
-            tokio::time::timeout(PARTIAL_FRAME_TIMEOUT, writer.write_all(&outbound.bytes)).await,
+            tokio::time::timeout(PARTIAL_FRAME_TIMEOUT, writer.write_all(&bytes)).await,
             Ok(Ok(()))
         ) {
             break;
@@ -413,6 +438,7 @@ struct RequestContext {
     request_slots: Arc<Semaphore>,
     stream_slots: Arc<Semaphore>,
     active: ActiveMap,
+    connection_buffer: ConnectionBuffer,
     outbound: mpsc::Sender<Outbound>,
     shutdown: watch::Receiver<bool>,
 }
@@ -448,6 +474,7 @@ fn spawn_request(context: RequestContext) {
         );
         return;
     }
+    let deadline_at = tokio::time::Instant::now() + Duration::from_millis(deadline_ms);
     let Ok(connection_permit) = context.request_slots.clone().try_acquire_owned() else {
         send_error(
             &context,
@@ -496,8 +523,7 @@ fn spawn_request(context: RequestContext) {
     tokio::spawn(async move {
         let request_id = context.request.request_id;
         let active_requests = context.active.clone();
-        let deadline = Duration::from_millis(deadline_ms);
-        run_request(context, control_rx, emitted, deadline).await;
+        run_request(context, control_rx, emitted, deadline_at).await;
         if let Ok(mut active) = active_requests.lock() {
             active.remove(&request_id);
         }
@@ -506,14 +532,54 @@ fn spawn_request(context: RequestContext) {
     });
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DispatchInterruption {
+    Deadline,
+    Cancelled,
+    WorkerShutdown,
+}
+
+async fn await_dispatch(
+    dispatcher: &dyn SemanticDispatcher,
+    context: &DispatchContext,
+    operation: &SemanticRequest,
+    deadline_at: tokio::time::Instant,
+    control: &mut watch::Receiver<ControlState>,
+    shutdown: &mut watch::Receiver<bool>,
+) -> Result<DispatchPlan, DispatchInterruption> {
+    let dispatch = dispatcher.dispatch(context, operation);
+    tokio::pin!(dispatch);
+    loop {
+        tokio::select! {
+            plan = &mut dispatch => return Ok(plan),
+            () = tokio::time::sleep_until(deadline_at) => {
+                return Err(DispatchInterruption::Deadline);
+            }
+            changed = control.changed() => {
+                let _ = changed;
+                if control.borrow().worker_shutdown {
+                    return Err(DispatchInterruption::WorkerShutdown);
+                }
+                if control.borrow().cancelled {
+                    return Err(DispatchInterruption::Cancelled);
+                }
+            }
+            changed = shutdown.changed() => {
+                let _ = changed;
+                return Err(DispatchInterruption::WorkerShutdown);
+            }
+        }
+    }
+}
+
 async fn run_request(
     context: RequestContext,
     #[allow(unused_mut)] mut control: watch::Receiver<ControlState>,
     emitted: Arc<AtomicU64>,
-    deadline: Duration,
+    deadline_at: tokio::time::Instant,
 ) {
     #[cfg(not(feature = "worker-test-fixtures"))]
-    let _ = (&control, &emitted, deadline);
+    let _ = (&control, &emitted, deadline_at);
     let dispatch_context = DispatchContext {
         principal: context.principal,
         peer: context.peer,
@@ -521,10 +587,36 @@ async fn run_request(
         connection_id: context.expected_connection,
         request_id: context.request.request_id,
     };
-    let plan = context
-        .dispatcher
-        .dispatch(&dispatch_context, &context.request.operation)
-        .await;
+    let mut dispatch_shutdown = context.shutdown.clone();
+    let plan = match await_dispatch(
+        context.dispatcher.as_ref(),
+        &dispatch_context,
+        &context.request.operation,
+        deadline_at,
+        &mut control,
+        &mut dispatch_shutdown,
+    )
+    .await
+    {
+        Ok(plan) => plan,
+        Err(DispatchInterruption::Deadline) => {
+            queue_request_error(
+                &context,
+                WorkerErrorCode::Deadline,
+                "request deadline elapsed",
+            )
+            .await;
+            return;
+        }
+        Err(DispatchInterruption::Cancelled) => {
+            queue_request_error(&context, WorkerErrorCode::Cancelled, "request cancelled").await;
+            return;
+        }
+        Err(DispatchInterruption::WorkerShutdown) => {
+            queue_request_error(&context, WorkerErrorCode::WorkerShutdown, "worker shutdown").await;
+            return;
+        }
+    };
     match plan {
         DispatchPlan::Unsupported => {
             queue_frame(
@@ -542,11 +634,19 @@ async fn run_request(
         }
         #[cfg(feature = "worker-test-fixtures")]
         DispatchPlan::MockUnary { delay_ms } => {
-            run_mock_unary(&context, &mut control, deadline, delay_ms).await;
+            run_mock_unary(&context, &mut control, deadline_at, delay_ms).await;
         }
         #[cfg(feature = "worker-test-fixtures")]
         DispatchPlan::MockStream { items, interval_ms } => {
-            run_mock_stream(context, &mut control, emitted, deadline, items, interval_ms).await;
+            run_mock_stream(
+                context,
+                &mut control,
+                emitted,
+                deadline_at,
+                items,
+                interval_ms,
+            )
+            .await;
         }
     }
 }
@@ -555,13 +655,13 @@ async fn run_request(
 async fn run_mock_unary(
     context: &RequestContext,
     control: &mut watch::Receiver<ControlState>,
-    deadline: Duration,
+    deadline_at: tokio::time::Instant,
     delay_ms: u64,
 ) {
     let mut request_shutdown = context.shutdown.clone();
     let result = tokio::select! {
         () = tokio::time::sleep(Duration::from_millis(delay_ms)) => ResponseResult::MockComplete,
-        () = tokio::time::sleep(deadline) => worker_error(WorkerErrorCode::Deadline, "request deadline elapsed"),
+        () = tokio::time::sleep_until(deadline_at) => worker_error(WorkerErrorCode::Deadline, "request deadline elapsed"),
         changed = control.changed() => {
             let _ = changed;
             let state = *control.borrow();
@@ -593,7 +693,7 @@ async fn run_mock_stream(
     context: RequestContext,
     control: &mut watch::Receiver<ControlState>,
     emitted: Arc<AtomicU64>,
-    deadline: Duration,
+    deadline_at: tokio::time::Instant,
     items: u32,
     interval_ms: u64,
 ) {
@@ -613,26 +713,39 @@ async fn run_mock_stream(
         );
         return;
     };
-    let deadline_at = tokio::time::Instant::now() + deadline;
     let mut stream_shutdown = context.shutdown.clone();
     let mut reason = StreamEndReason::Completed;
     let mut sequence = 0_u64;
-    for value in 1..=items {
+    'items: for value in 1..=items {
+        let stalled_at = tokio::time::Instant::now() + Duration::from_secs(1);
         while sequence.saturating_sub(control.borrow().acknowledged)
             >= u64::from(context.limits.unacknowledged_stream_items())
         {
-            let wait = tokio::time::timeout(Duration::from_secs(1), control.changed()).await;
-            if wait.is_err() {
-                reason = StreamEndReason::SlowConsumer;
-                break;
-            }
-            if control.borrow().worker_shutdown {
-                reason = StreamEndReason::WorkerShutdown;
-                break;
-            }
-            if control.borrow().cancelled {
-                reason = StreamEndReason::Cancelled;
-                break;
+            tokio::select! {
+                () = tokio::time::sleep_until(stalled_at) => {
+                    reason = StreamEndReason::SlowConsumer;
+                    break 'items;
+                }
+                () = tokio::time::sleep_until(deadline_at) => {
+                    reason = StreamEndReason::Deadline;
+                    break 'items;
+                }
+                changed = control.changed() => {
+                    let _ = changed;
+                    if control.borrow().worker_shutdown {
+                        reason = StreamEndReason::WorkerShutdown;
+                        break 'items;
+                    }
+                    if control.borrow().cancelled {
+                        reason = StreamEndReason::Cancelled;
+                        break 'items;
+                    }
+                }
+                changed = stream_shutdown.changed() => {
+                    let _ = changed;
+                    reason = StreamEndReason::WorkerShutdown;
+                    break 'items;
+                }
             }
         }
         if reason != StreamEndReason::Completed {
@@ -654,25 +767,30 @@ async fn run_mock_stream(
             reason = StreamEndReason::Cancelled;
             break;
         }
-        tokio::select! {
-            () = tokio::time::sleep(Duration::from_millis(interval_ms)) => {}
-            changed = control.changed() => {
-                let _ = changed;
-                reason = if control.borrow().worker_shutdown {
-                    StreamEndReason::WorkerShutdown
-                } else {
-                    StreamEndReason::Cancelled
-                };
-                break;
-            }
-            changed = stream_shutdown.changed() => {
-                let _ = changed;
-                reason = StreamEndReason::WorkerShutdown;
-                break;
-            }
-            () = tokio::time::sleep_until(deadline_at) => {
-                reason = StreamEndReason::Deadline;
-                break;
+        let item_at = tokio::time::Instant::now() + Duration::from_millis(interval_ms);
+        loop {
+            tokio::select! {
+                () = tokio::time::sleep_until(item_at) => break,
+                changed = control.changed() => {
+                    let _ = changed;
+                    if control.borrow().worker_shutdown {
+                        reason = StreamEndReason::WorkerShutdown;
+                        break 'items;
+                    }
+                    if control.borrow().cancelled {
+                        reason = StreamEndReason::Cancelled;
+                        break 'items;
+                    }
+                }
+                changed = stream_shutdown.changed() => {
+                    let _ = changed;
+                    reason = StreamEndReason::WorkerShutdown;
+                    break 'items;
+                }
+                () = tokio::time::sleep_until(deadline_at) => {
+                    reason = StreamEndReason::Deadline;
+                    break 'items;
+                }
             }
         }
         sequence = sequence.saturating_add(1);
@@ -704,6 +822,22 @@ async fn run_mock_stream(
     drop(connection_stream);
 }
 
+async fn queue_request_error(
+    context: &RequestContext,
+    code: WorkerErrorCode,
+    summary: &'static str,
+) {
+    queue_frame(
+        context,
+        ServerFrame::Response(Response {
+            server_connection_id: context.expected_connection,
+            request_id: context.request.request_id,
+            result: worker_error(code, summary),
+        }),
+    )
+    .await;
+}
+
 fn send_error(context: &RequestContext, code: WorkerErrorCode, summary: &'static str) {
     let frame = ServerFrame::Response(Response {
         server_connection_id: context.expected_connection,
@@ -730,6 +864,7 @@ impl RequestContext {
             request_slots: self.request_slots.clone(),
             stream_slots: self.stream_slots.clone(),
             active: self.active.clone(),
+            connection_buffer: self.connection_buffer.clone(),
             outbound: self.outbound.clone(),
             shutdown: self.shutdown.clone(),
         }
@@ -740,6 +875,7 @@ async fn queue_frame(context: &RequestContext, frame: ServerFrame) {
     queue_encoded(
         context.peer.uid,
         &context.registry,
+        &context.connection_buffer,
         &context.outbound,
         frame,
     )
@@ -752,11 +888,13 @@ async fn queue_control_error(
     request_id: crate::protocol::RequestIdentifier,
     code: WorkerErrorCode,
     registry: &AdmissionRegistry,
+    connection_buffer: &ConnectionBuffer,
     outbound: &mpsc::Sender<Outbound>,
 ) {
     queue_encoded(
         uid,
         registry,
+        connection_buffer,
         outbound,
         ServerFrame::Response(Response {
             server_connection_id: connection_id,
@@ -770,19 +908,27 @@ async fn queue_control_error(
 async fn queue_encoded(
     uid: u32,
     registry: &AdmissionRegistry,
+    connection_buffer: &ConnectionBuffer,
     outbound: &mpsc::Sender<Outbound>,
     frame: ServerFrame,
 ) {
     let Ok(bytes) = encode_frame(&frame, FrameDirection::ServerToClient) else {
+        let _ = outbound.send(Outbound::Close).await;
         return;
     };
-    let Some(permit) = registry.buffered_bytes(uid, bytes.len()) else {
+    let Some(connection_permit) = connection_buffer.reserve(bytes.len()) else {
+        let _ = outbound.send(Outbound::Close).await;
+        return;
+    };
+    let Some(principal_permit) = registry.buffered_bytes(uid, bytes.len()) else {
+        let _ = outbound.send(Outbound::Close).await;
         return;
     };
     let _ = outbound
-        .send(Outbound {
+        .send(Outbound::Frame {
             bytes,
-            _permit: permit,
+            _principal_permit: principal_permit,
+            _connection_permit: connection_permit,
         })
         .await;
 }
@@ -821,5 +967,67 @@ fn handshake_error(error: &HandshakeError) -> ProtocolError {
         code,
         summary: SafeSummary::parse("handshake negotiation failed")
             .expect("static handshake summary is valid"),
+    }
+}
+
+#[cfg(all(test, feature = "worker-test-fixtures"))]
+mod tests {
+    use std::future::Future;
+    use std::pin::Pin;
+
+    use crate::protocol::{RequestIdentifier, WorkerTarget};
+
+    use super::*;
+
+    #[derive(Debug)]
+    struct StuckDispatcher;
+
+    impl SemanticDispatcher for StuckDispatcher {
+        fn dispatch<'a>(
+            &'a self,
+            _context: &'a DispatchContext,
+            _request: &'a SemanticRequest,
+        ) -> Pin<Box<dyn Future<Output = DispatchPlan> + Send + 'a>> {
+            Box::pin(std::future::pending())
+        }
+    }
+
+    #[tokio::test]
+    async fn absolute_request_deadline_bounds_stuck_dispatcher() {
+        let identifier =
+            ConnectionIdentifier::parse("018f0f77-8c4d-7b2a-8e6a-4b8a7d3a1c20").unwrap();
+        let context = DispatchContext {
+            principal: PrincipalKey {
+                target: WorkerTarget::User,
+                uid: 1000,
+            },
+            peer: PeerCredentials {
+                pid: 42,
+                uid: 1000,
+                gid: 100,
+            },
+            worker_epoch: identifier,
+            connection_id: identifier,
+            request_id: RequestIdentifier::new(1).unwrap(),
+        };
+        let operation = SemanticRequest::MockUnary { delay_ms: 0 };
+        let (_control_sender, mut control) = watch::channel(ControlState {
+            cancelled: false,
+            worker_shutdown: false,
+            acknowledged: 0,
+        });
+        let (_shutdown_sender, mut shutdown) = watch::channel(false);
+
+        let result = await_dispatch(
+            &StuckDispatcher,
+            &context,
+            &operation,
+            tokio::time::Instant::now() + Duration::from_millis(10),
+            &mut control,
+            &mut shutdown,
+        )
+        .await;
+
+        assert_eq!(result, Err(DispatchInterruption::Deadline));
     }
 }
