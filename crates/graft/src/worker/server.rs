@@ -3,13 +3,12 @@
 use std::collections::BTreeMap;
 use std::io;
 use std::os::fd::AsFd as _;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use tokio::io::{AsyncWriteExt as _, WriteHalf};
 use tokio::net::{UnixListener, UnixStream};
-use tokio::sync::{mpsc, watch, Semaphore};
+use tokio::sync::{mpsc, watch, Mutex as AsyncMutex, Semaphore};
 
 use crate::protocol::{
     encode_frame, negotiate_handshake, CapabilitySet, ClientHandshakeFrame, ConnectionIdentifier,
@@ -70,6 +69,10 @@ pub enum ServerError {
     Accept(#[source] io::Error),
 }
 
+fn peer_is_authorized(context: WorkerContext, peer_uid: u32) -> bool {
+    context.target() != crate::protocol::WorkerTarget::User || peer_uid == context.effective_uid()
+}
+
 /// Runs one worker process until shutdown.
 ///
 /// # Errors
@@ -123,9 +126,7 @@ pub async fn serve(
                     gid: credentials.gid.as_raw(),
                 };
                 let uid = peer.uid;
-                if config.context.target() == crate::protocol::WorkerTarget::User
-                    && uid != config.context.effective_uid()
-                {
+                if !peer_is_authorized(config.context, uid) {
                     continue;
                 }
                 if !registry.admission_allowed(uid) {
@@ -296,10 +297,12 @@ impl Connection {
                     }
                 }
                 frame = read_frame::<_, ClientFrame>(&mut reader) => {
+                    let received_at = tokio::time::Instant::now();
                     let Ok(frame) = frame else { break; };
                     match frame {
                         ClientFrame::Request(request) => spawn_request(RequestContext {
                             request,
+                            received_at,
                             expected_connection: connection_id,
                             peer,
                             principal: PrincipalKey { target: config.context.target(), uid },
@@ -323,7 +326,9 @@ impl Connection {
                                 connection_id,
                                 &active,
                                 false,
-                            ) {
+                            )
+                            .await
+                            {
                                 queue_control_error(
                                     uid,
                                     ConnectionEpoch {
@@ -347,7 +352,9 @@ impl Connection {
                                 connection_id,
                                 &active,
                                 true,
-                            ) {
+                            )
+                            .await
+                            {
                                 queue_control_error(
                                     uid,
                                     ConnectionEpoch {
@@ -382,7 +389,7 @@ impl Connection {
 
 #[derive(Clone)]
 struct DeliveryPublication {
-    delivered: Arc<AtomicU64>,
+    delivered: Arc<AsyncMutex<u64>>,
     sequence: u64,
 }
 
@@ -426,6 +433,14 @@ async fn writer_loop(
             connection_permit,
             mut guard,
         } = outbound;
+        let mut delivery = if let Some(publication) = guard
+            .as_ref()
+            .and_then(|output_guard| output_guard.publication.as_ref())
+        {
+            Some(publication.delivered.clone().lock_owned().await)
+        } else {
+            None
+        };
         let write = writer.write_all(&bytes);
         tokio::pin!(write);
         let written = if let Some(guard) = guard.as_mut() {
@@ -468,13 +483,13 @@ async fn writer_loop(
             }
         };
         if written {
-            if let Some(publication) = guard
-                .as_ref()
-                .and_then(|output_guard| output_guard.publication.as_ref())
-            {
-                publication
-                    .delivered
-                    .store(publication.sequence, Ordering::Release);
+            if let (Some(delivery), Some(publication)) = (
+                delivery.as_mut(),
+                guard
+                    .as_ref()
+                    .and_then(|output_guard| output_guard.publication.as_ref()),
+            ) {
+                **delivery = publication.sequence;
             }
         }
         drop(connection_permit);
@@ -497,13 +512,13 @@ struct ControlState {
 
 struct ActiveRequest {
     control: watch::Sender<ControlState>,
-    delivered: Arc<AtomicU64>,
+    delivered: Arc<AsyncMutex<u64>>,
     stream: bool,
 }
 
 type ActiveMap = Arc<Mutex<BTreeMap<crate::protocol::RequestIdentifier, ActiveRequest>>>;
 
-fn control_request(
+async fn control_request(
     server_connection_id: ConnectionIdentifier,
     request_id: crate::protocol::RequestIdentifier,
     sequence: Option<u64>,
@@ -514,15 +529,22 @@ fn control_request(
     if server_connection_id != expected_connection {
         return Err(WorkerErrorCode::ConnectionMismatch);
     }
-    let active = active
-        .lock()
-        .map_err(|_| WorkerErrorCode::RequestNotFound)?;
-    let Some(request) = active.get(&request_id) else {
-        return Err(WorkerErrorCode::RequestNotFound);
+    let (control, delivered, stream) = {
+        let active = active
+            .lock()
+            .map_err(|_| WorkerErrorCode::RequestNotFound)?;
+        let Some(request) = active.get(&request_id) else {
+            return Err(WorkerErrorCode::RequestNotFound);
+        };
+        (
+            request.control.clone(),
+            request.delivered.clone(),
+            request.stream,
+        )
     };
-    let current = *request.control.borrow();
+    let current = *control.borrow();
     if cancel {
-        let _ = request.control.send(ControlState {
+        let _ = control.send(ControlState {
             cancelled: true,
             ..current
         });
@@ -531,17 +553,14 @@ fn control_request(
     let Some(sequence) = sequence else {
         return Err(WorkerErrorCode::InvalidAcknowledgement);
     };
-    if !request.stream
-        || sequence < current.acknowledged
-        || sequence > request.delivered.load(Ordering::Acquire)
-    {
-        let _ = request.control.send(ControlState {
+    if !stream || sequence < current.acknowledged || sequence > *delivered.lock().await {
+        let _ = control.send(ControlState {
             cancelled: true,
             ..current
         });
         return Err(WorkerErrorCode::InvalidAcknowledgement);
     }
-    let _ = request.control.send(ControlState {
+    let _ = control.send(ControlState {
         acknowledged: sequence,
         ..current
     });
@@ -569,6 +588,7 @@ struct ConnectionEpoch {
 
 struct RequestContext {
     request: Request,
+    received_at: tokio::time::Instant,
     expected_connection: ConnectionIdentifier,
     peer: PeerCredentials,
     principal: PrincipalKey,
@@ -623,13 +643,13 @@ async fn spawn_request(context: RequestContext) {
         .await;
         return;
     }
-    let deadline_at = tokio::time::Instant::now() + Duration::from_millis(deadline_ms);
+    let deadline_at = context.received_at + Duration::from_millis(deadline_ms);
     let (control_tx, control_rx) = watch::channel(ControlState {
         cancelled: false,
         worker_shutdown: false,
         acknowledged: 0,
     });
-    let delivered = Arc::new(AtomicU64::new(0));
+    let delivered = Arc::new(AsyncMutex::new(0));
     let stream = is_stream_operation(&context.request.operation);
     let identifier_reserved = {
         let Ok(mut active) = context.active.lock() else {
@@ -736,7 +756,7 @@ async fn await_dispatch(
 async fn run_request(
     context: RequestContext,
     #[allow(unused_mut)] mut control: watch::Receiver<ControlState>,
-    delivered: Arc<AtomicU64>,
+    delivered: Arc<AsyncMutex<u64>>,
     deadline_at: tokio::time::Instant,
 ) {
     #[cfg(not(feature = "worker-test-fixtures"))]
@@ -863,7 +883,7 @@ async fn run_mock_unary(
 async fn run_mock_stream(
     context: RequestContext,
     control: &mut watch::Receiver<ControlState>,
-    delivered: Arc<AtomicU64>,
+    delivered: Arc<AsyncMutex<u64>>,
     deadline_at: tokio::time::Instant,
     items: u32,
     interval_ms: u64,
@@ -1230,7 +1250,7 @@ mod tests {
     use std::future::Future;
     use std::pin::Pin;
 
-    use crate::protocol::{RequestIdentifier, WorkerTarget};
+    use crate::protocol::{ManagerKind, RequestIdentifier, WorkerTarget};
 
     use super::super::limits::WorkerLimits;
     use super::*;
@@ -1249,7 +1269,17 @@ mod tests {
     }
 
     #[test]
-    fn acknowledgement_cannot_advance_beyond_written_sequence() {
+    fn user_peer_authorization_requires_exact_kernel_uid() {
+        let user = WorkerContext::new(WorkerTarget::User, 1000, ManagerKind::User).unwrap();
+        let system = WorkerContext::new(WorkerTarget::System, 0, ManagerKind::System).unwrap();
+
+        assert!(peer_is_authorized(user, 1000));
+        assert!(!peer_is_authorized(user, 1001));
+        assert!(peer_is_authorized(system, 1001));
+    }
+
+    #[tokio::test]
+    async fn acknowledgement_cannot_advance_beyond_written_sequence() {
         let connection_id =
             ConnectionIdentifier::parse("018f0f77-8c4d-7b2a-8e6a-4b8a7d3a1c20").unwrap();
         let request_id = RequestIdentifier::new(1).unwrap();
@@ -1262,7 +1292,7 @@ mod tests {
             request_id,
             ActiveRequest {
                 control,
-                delivered: Arc::new(AtomicU64::new(0)),
+                delivered: Arc::new(AsyncMutex::new(0)),
                 stream: true,
             },
         )])));
@@ -1274,7 +1304,8 @@ mod tests {
             connection_id,
             &active,
             false,
-        );
+        )
+        .await;
 
         assert_eq!(result, Err(WorkerErrorCode::InvalidAcknowledgement));
     }
