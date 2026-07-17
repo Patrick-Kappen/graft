@@ -235,11 +235,9 @@ fn invalid_activation_status(
         })
         .arg("graft-worker-wrapper")
         .arg(WORKER_BINARY)
+        .args(["--target", "user", "--effective-uid"])
+        .arg(rustix::process::getuid().as_raw().to_string())
         .args([
-            "--target",
-            "user",
-            "--effective-uid",
-            "1000",
             "--manager",
             "user",
             "--config-home",
@@ -312,6 +310,9 @@ fn worker_rejects_invalid_activation_cardinality_name_and_type() {
         Some(regular_file.as_raw_fd()),
         ListenPid::Child
     ));
+    let directory = tempfile::tempdir().unwrap();
+    let listener =
+        std::os::unix::net::UnixListener::bind(directory.path().join("worker.sock")).unwrap();
     for listen_pid in [
         ListenPid::Missing,
         ListenPid::Value("invalid"),
@@ -320,7 +321,7 @@ fn worker_rejects_invalid_activation_cardinality_name_and_type() {
         assert!(!invalid_activation_status(
             "1",
             "graft-worker",
-            Some(regular_file.as_raw_fd()),
+            Some(listener.as_raw_fd()),
             listen_pid,
         ));
     }
@@ -517,6 +518,24 @@ fn real_worker_unary_deadline_and_cancellation_are_typed() {
                     && error.retry == RetryClassification::Never
                     && error.phase == OperationPhase::Execution
                     && error.worker_epoch == hello.worker_epoch)
+    ));
+
+    let boundary_id = RequestIdentifier::new(14).unwrap();
+    send_client_frame(
+        &mut stream,
+        &ClientFrame::Request(Request {
+            server_connection_id: hello.server_connection_id,
+            request_id: boundary_id,
+            deadline_ms: Some(10),
+            operation: SemanticRequest::MockUnary { delay_ms: 10 },
+        }),
+    );
+    let boundary = read_server_frame::<ServerFrame>(&mut stream);
+    assert!(matches!(
+        boundary,
+        ServerFrame::Response(response)
+            if matches!(&response.result, ResponseResult::Error(error)
+                if error.code == graft::worker::protocol::WorkerErrorCode::Deadline)
     ));
 
     let cancel_id = RequestIdentifier::new(4).unwrap();
@@ -778,21 +797,19 @@ fn invalid_stream_acknowledgement_returns_typed_error_and_stops_interest() {
         }),
     );
 
-    let frames = [
-        read_server_frame::<ServerFrame>(&mut stream),
-        read_server_frame::<ServerFrame>(&mut stream),
-    ];
+    let control_error = read_server_frame::<ServerFrame>(&mut stream);
+    let terminal = read_server_frame::<ServerFrame>(&mut stream);
 
-    assert!(frames.iter().any(|frame| matches!(
-        frame,
-        ServerFrame::Response(response)
-            if matches!(&response.result, ResponseResult::Error(error)
-                if error.code == graft::worker::protocol::WorkerErrorCode::InvalidAcknowledgement)
-    )));
-    assert!(frames.iter().any(|frame| matches!(
-        frame,
+    assert!(matches!(
+        control_error,
+        ServerFrame::ControlError(control)
+            if control.error.code
+                == graft::worker::protocol::WorkerErrorCode::InvalidAcknowledgement
+    ));
+    assert!(matches!(
+        terminal,
         ServerFrame::StreamEnd(end) if end.reason == StreamEndReason::Cancelled
-    )));
+    ));
 }
 
 #[cfg(feature = "worker-test-fixtures")]

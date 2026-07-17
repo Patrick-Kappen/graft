@@ -27,8 +27,8 @@ use super::framing::{
 };
 use super::limits::{AdmissionPermit, AdmissionRegistry, ConnectionBuffer, ConnectionBufferPermit};
 use super::protocol::{
-    ClientFrame, OperationPhase, Request, Response, ResponseResult, RetryClassification,
-    SemanticRequest, ServerFrame, WorkerError, WorkerErrorCode,
+    ClientFrame, ControlError, OperationPhase, Request, Response, ResponseResult,
+    RetryClassification, SemanticRequest, ServerFrame, WorkerError, WorkerErrorCode,
 };
 #[cfg(feature = "worker-test-fixtures")]
 use super::protocol::{StreamEnd, StreamEndReason, StreamItem};
@@ -842,13 +842,20 @@ async fn await_dispatch(
     control: &mut watch::Receiver<ControlState>,
     shutdown: &mut watch::Receiver<bool>,
 ) -> Result<DispatchPlan, DispatchInterruption> {
+    if tokio::time::Instant::now() >= deadline_at {
+        return Err(DispatchInterruption::Deadline);
+    }
     let dispatch = dispatcher.dispatch(context, operation);
     tokio::pin!(dispatch);
     loop {
         tokio::select! {
-            plan = &mut dispatch => return Ok(plan),
+            biased;
             () = tokio::time::sleep_until(deadline_at) => {
                 return Err(DispatchInterruption::Deadline);
+            }
+            changed = shutdown.changed() => {
+                let _ = changed;
+                return Err(DispatchInterruption::WorkerShutdown);
             }
             changed = control.changed() => {
                 let _ = changed;
@@ -859,9 +866,12 @@ async fn await_dispatch(
                     return Err(DispatchInterruption::Cancelled);
                 }
             }
-            changed = shutdown.changed() => {
-                let _ = changed;
-                return Err(DispatchInterruption::WorkerShutdown);
+            plan = &mut dispatch => {
+                return if tokio::time::Instant::now() >= deadline_at {
+                    Err(DispatchInterruption::Deadline)
+                } else {
+                    Ok(plan)
+                };
             }
         }
     }
@@ -970,7 +980,7 @@ async fn run_mock_unary(
 ) {
     let mut request_shutdown = context.shutdown.clone();
     let result = tokio::select! {
-        () = tokio::time::sleep(Duration::from_millis(delay_ms)) => ResponseResult::MockComplete,
+        biased;
         () = tokio::time::sleep_until(deadline_at) => worker_error(context.epoch.identifier(), WorkerErrorCode::Deadline, "request deadline elapsed", OperationPhase::Execution),
         changed = control.changed() => {
             let _ = changed;
@@ -985,6 +995,13 @@ async fn run_mock_unary(
             let _ = changed;
             worker_error(context.epoch.identifier(), WorkerErrorCode::WorkerShutdown, "worker shutdown", OperationPhase::Execution)
         }
+        () = tokio::time::sleep(Duration::from_millis(delay_ms)) => {
+            if tokio::time::Instant::now() >= deadline_at {
+                worker_error(context.epoch.identifier(), WorkerErrorCode::Deadline, "request deadline elapsed", OperationPhase::Execution)
+            } else {
+                ResponseResult::MockComplete
+            }
+        },
     };
     queue_frame(
         context,
@@ -1263,15 +1280,21 @@ async fn queue_control_error(
         registry,
         connection_buffer,
         output,
-        ServerFrame::Response(Response {
+        ServerFrame::ControlError(ControlError {
             server_connection_id: identity.connection_id,
             request_id,
-            result: worker_error(
-                identity.worker_epoch,
+            error: WorkerError {
                 code,
-                "request control frame is invalid",
-                OperationPhase::Stream,
-            ),
+                summary: SafeSummary::parse("request control frame is invalid")
+                    .expect("fixed control summary is valid"),
+                retry: if code == WorkerErrorCode::RequestNotFound {
+                    RetryClassification::AfterStateRefresh
+                } else {
+                    RetryClassification::Never
+                },
+                phase: OperationPhase::Stream,
+                worker_epoch: identity.worker_epoch,
+            },
         }),
         None,
         None,
@@ -1459,6 +1482,19 @@ mod tests {
             _request: &'a SemanticRequest,
         ) -> Pin<Box<dyn Future<Output = DispatchPlan> + Send + 'a>> {
             Box::pin(std::future::pending())
+        }
+    }
+
+    #[derive(Debug)]
+    struct ReadyDispatcher;
+
+    impl SemanticDispatcher for ReadyDispatcher {
+        fn dispatch<'a>(
+            &'a self,
+            _context: &'a DispatchContext,
+            _request: &'a SemanticRequest,
+        ) -> Pin<Box<dyn Future<Output = DispatchPlan> + Send + 'a>> {
+            Box::pin(async { DispatchPlan::Unsupported })
         }
     }
 
@@ -1716,6 +1752,17 @@ mod tests {
             pending_acknowledgement: 0,
         });
         let (_shutdown_sender, mut shutdown) = watch::channel(false);
+
+        let boundary = await_dispatch(
+            &ReadyDispatcher,
+            &context,
+            &operation,
+            tokio::time::Instant::now(),
+            &mut control,
+            &mut shutdown,
+        )
+        .await;
+        assert_eq!(boundary, Err(DispatchInterruption::Deadline));
 
         let result = await_dispatch(
             &StuckDispatcher,

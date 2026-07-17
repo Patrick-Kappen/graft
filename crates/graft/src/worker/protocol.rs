@@ -22,6 +22,8 @@ pub enum ClientFrame {
 pub enum ServerFrame {
     /// Completes one unary request.
     Response(Response),
+    /// Reports a non-terminal control-frame failure.
+    ControlError(ControlError),
     /// Emits one sequenced stream item.
     StreamItem(StreamItem),
     /// Ends one stream.
@@ -91,6 +93,18 @@ pub enum SemanticRequest {
         /// Milliseconds between items.
         interval_ms: u64,
     },
+}
+
+/// Non-terminal error for a stream control frame.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub struct ControlError {
+    /// Server-selected connection identifier.
+    pub server_connection_id: ConnectionIdentifier,
+    /// Request identifier targeted by the invalid control frame.
+    pub request_id: RequestIdentifier,
+    /// Typed control failure.
+    pub error: WorkerError,
 }
 
 /// Unary response envelope.
