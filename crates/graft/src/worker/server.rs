@@ -408,6 +408,22 @@ struct OutputGuard {
     publication: Option<DeliveryPublication>,
 }
 
+struct TerminalRelease {
+    active: ActiveMap,
+    request_id: crate::protocol::RequestIdentifier,
+}
+
+struct TerminalOutput {
+    completion: Arc<Notify>,
+    release: TerminalRelease,
+}
+
+enum WriteOutcome {
+    Written,
+    Skipped,
+    Failed,
+}
+
 enum Outbound {
     Frame {
         bytes: Vec<u8>,
@@ -415,9 +431,11 @@ enum Outbound {
         connection_permit: ConnectionBufferPermit,
         guard: Option<OutputGuard>,
         completion: Option<Arc<Notify>>,
+        terminal_release: Option<TerminalRelease>,
     },
 }
 
+#[allow(clippy::too_many_lines)]
 async fn writer_loop(
     mut writer: WriteHalf<UnixStream>,
     mut receiver: mpsc::Receiver<Outbound>,
@@ -441,7 +459,13 @@ async fn writer_loop(
             connection_permit,
             guard,
             completion,
+            terminal_release,
         } = outbound;
+        if let Some(release) = terminal_release {
+            if let Ok(mut active) = release.active.lock() {
+                active.remove(&release.request_id);
+            }
+        }
         let mut write_guard = guard.clone();
         let guard_expired = write_guard.as_ref().is_some_and(|guard| {
             tokio::time::Instant::now() >= guard.deadline_at
@@ -451,8 +475,8 @@ async fn writer_loop(
         });
         let write = tokio::time::timeout(PARTIAL_FRAME_TIMEOUT, writer.write_all(&bytes));
         tokio::pin!(write);
-        let written = if guard_expired {
-            false
+        let outcome = if guard_expired {
+            WriteOutcome::Skipped
         } else if let Some(guard) = write_guard.as_mut() {
             let mut control_open = true;
             loop {
@@ -460,12 +484,14 @@ async fn writer_loop(
                     biased;
                     changed = connection_close.changed() => {
                         let _ = changed;
-                        break false;
+                        break WriteOutcome::Failed;
                     }
-                    () = tokio::time::sleep_until(guard.deadline_at) => break false,
+                    () = tokio::time::sleep_until(guard.deadline_at) => {
+                        break WriteOutcome::Failed;
+                    }
                     changed = guard.shutdown.changed() => {
                         let _ = changed;
-                        break false;
+                        break WriteOutcome::Failed;
                     }
                     changed = guard.control.changed(), if control_open => {
                         if changed.is_err() {
@@ -473,11 +499,15 @@ async fn writer_loop(
                         } else {
                             let state = *guard.control.borrow();
                             if state.cancelled || state.worker_shutdown {
-                                break false;
+                                break WriteOutcome::Failed;
                             }
                         }
                     }
-                    result = &mut write => break matches!(result, Ok(Ok(()))),
+                    result = &mut write => break if matches!(result, Ok(Ok(()))) {
+                        WriteOutcome::Written
+                    } else {
+                        WriteOutcome::Failed
+                    },
                 }
             }
         } else {
@@ -485,12 +515,16 @@ async fn writer_loop(
                 biased;
                 changed = connection_close.changed() => {
                     let _ = changed;
-                    false
+                    WriteOutcome::Failed
                 }
-                result = &mut write => matches!(result, Ok(Ok(()))),
+                result = &mut write => if matches!(result, Ok(Ok(()))) {
+                    WriteOutcome::Written
+                } else {
+                    WriteOutcome::Failed
+                },
             }
         };
-        if written {
+        if matches!(outcome, WriteOutcome::Written) {
             if let Some(publication) = guard
                 .as_ref()
                 .and_then(|output_guard| output_guard.publication.as_ref())
@@ -513,7 +547,7 @@ async fn writer_loop(
         }
         drop(connection_permit);
         drop(principal_permit);
-        if !written {
+        if matches!(outcome, WriteOutcome::Failed) {
             break;
         }
     }
@@ -737,8 +771,6 @@ async fn spawn_request(context: RequestContext) {
         return;
     };
     tokio::spawn(async move {
-        let request_id = context.request.request_id;
-        let active_requests = context.active.clone();
         let completion = context.completion.clone();
         run_request(
             context,
@@ -750,9 +782,6 @@ async fn spawn_request(context: RequestContext) {
         )
         .await;
         completion.notified().await;
-        if let Ok(mut active) = active_requests.lock() {
-            active.remove(&request_id);
-        }
         drop(principal_permit);
         drop(connection_permit);
     });
@@ -1133,8 +1162,16 @@ async fn send_error(context: &RequestContext, code: WorkerErrorCode, summary: &'
 }
 
 async fn queue_frame(context: &RequestContext, frame: ServerFrame, guard: Option<OutputGuard>) {
-    let completion = matches!(&frame, ServerFrame::Response(_) | ServerFrame::StreamEnd(_))
-        .then(|| context.completion.clone());
+    let terminal =
+        matches!(&frame, ServerFrame::Response(_) | ServerFrame::StreamEnd(_)).then(|| {
+            TerminalOutput {
+                completion: context.completion.clone(),
+                release: TerminalRelease {
+                    active: context.active.clone(),
+                    request_id: context.request.request_id,
+                },
+            }
+        });
     queue_encoded(
         context.peer.uid,
         &context.registry,
@@ -1142,7 +1179,7 @@ async fn queue_frame(context: &RequestContext, frame: ServerFrame, guard: Option
         (&context.outbound, &context.connection_close),
         frame,
         guard,
-        completion,
+        terminal,
     )
     .await;
 }
@@ -1188,9 +1225,11 @@ async fn queue_encoded(
     output: (&mpsc::Sender<Outbound>, &watch::Sender<bool>),
     frame: ServerFrame,
     guard: Option<OutputGuard>,
-    completion: Option<Arc<Notify>>,
+    terminal: Option<TerminalOutput>,
 ) {
-    let completion_on_failure = completion.clone();
+    let completion_on_failure = terminal
+        .as_ref()
+        .map(|terminal| terminal.completion.clone());
     let Ok(bytes) = encode_frame(&frame, FrameDirection::ServerToClient) else {
         if let Some(completion) = completion_on_failure {
             completion.notify_one();
@@ -1213,12 +1252,17 @@ async fn queue_encoded(
         return;
     };
     let mut enqueue_guard = guard.clone();
+    let (completion, terminal_release) = match terminal {
+        Some(terminal) => (Some(terminal.completion), Some(terminal.release)),
+        None => (None, None),
+    };
     let frame = Outbound::Frame {
         bytes,
         principal_permit,
         connection_permit,
         guard,
         completion,
+        terminal_release,
     };
     let reserve = output.0.reserve();
     tokio::pin!(reserve);
@@ -1463,6 +1507,7 @@ mod tests {
                 connection_permit,
                 guard: None,
                 completion: None,
+                terminal_release: None,
             })
             .await
             .unwrap();
@@ -1490,6 +1535,7 @@ mod tests {
                 connection_permit: connection_buffer.reserve(1).unwrap(),
                 guard: None,
                 completion: None,
+                terminal_release: None,
             })
             .await
             .unwrap();

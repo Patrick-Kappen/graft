@@ -382,6 +382,14 @@ fn real_worker_process_dispatches_typed_mock_unary_request() {
             if response.request_id == request_id
                 && response.result == ResponseResult::MockComplete
     ));
+
+    send_client_frame(&mut stream, &request);
+    assert!(matches!(
+        read_server_frame::<ServerFrame>(&mut stream),
+        ServerFrame::Response(response)
+            if response.request_id == request_id
+                && response.result == ResponseResult::MockComplete
+    ));
 }
 
 #[cfg(feature = "worker-test-fixtures")]
