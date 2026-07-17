@@ -258,6 +258,14 @@ impl Connection {
                 return;
             }
         };
+        let Some(_principal_byte_limit) = registry.principal_byte_limit(
+            uid,
+            usize::try_from(server_hello.effective_limits.buffered_response_bytes())
+                .unwrap_or(usize::MAX),
+        ) else {
+            let _ = registry.rejection(uid);
+            return;
+        };
         if !matches!(
             tokio::time::timeout_at(
                 handshake_deadline,
@@ -272,11 +280,6 @@ impl Connection {
             return;
         }
         drop(handshake_permit);
-        let _principal_byte_limit = registry.principal_byte_limit(
-            uid,
-            usize::try_from(server_hello.effective_limits.buffered_response_bytes())
-                .unwrap_or(usize::MAX),
-        );
 
         let (outbound_tx, outbound_rx) = mpsc::channel(OUTBOUND_QUEUE_ITEMS);
         let (connection_close_tx, connection_close_rx) = watch::channel(false);

@@ -158,21 +158,38 @@ impl AdmissionRegistry {
 
     /// Registers one connection's negotiated principal-wide byte ceiling.
     #[must_use]
-    pub fn principal_byte_limit(&self, uid: u32, maximum: usize) -> PrincipalByteLimitPermit {
+    pub fn principal_byte_limit(
+        &self,
+        uid: u32,
+        maximum: usize,
+    ) -> Option<PrincipalByteLimitPermit> {
         let maximum = maximum.min(self.buffered_bytes_per_principal);
-        if let Ok(mut state) = self.state.lock() {
-            *state
-                .principal_byte_limits
-                .entry(uid)
-                .or_default()
-                .entry(maximum)
-                .or_default() += 1;
+        let mut state = self.state.lock().ok()?;
+        let existing_minimum = state
+            .principal_byte_limits
+            .get(&uid)
+            .and_then(|limits| limits.keys().next().copied())
+            .unwrap_or(self.buffered_bytes_per_principal);
+        let effective_maximum = existing_minimum.min(maximum);
+        if state
+            .principals
+            .get(&uid)
+            .is_some_and(|usage| usage.buffered_bytes > effective_maximum)
+        {
+            return None;
         }
-        PrincipalByteLimitPermit {
+        *state
+            .principal_byte_limits
+            .entry(uid)
+            .or_default()
+            .entry(maximum)
+            .or_default() += 1;
+        drop(state);
+        Some(PrincipalByteLimitPermit {
             registry: self.clone(),
             uid,
             maximum,
-        }
+        })
     }
 
     /// Reserves encoded response bytes.
@@ -509,8 +526,11 @@ mod tests {
         assert!(configured.buffered_bytes(1000, 1).is_some());
 
         let negotiated = AdmissionRegistry::with_buffered_bytes_per_principal(100);
-        let high = negotiated.principal_byte_limit(1000, 80);
-        let low = negotiated.principal_byte_limit(1000, 10);
+        let high = negotiated.principal_byte_limit(1000, 80).unwrap();
+        let existing_bytes = negotiated.buffered_bytes(1000, 50).unwrap();
+        assert!(negotiated.principal_byte_limit(1000, 10).is_none());
+        drop(existing_bytes);
+        let low = negotiated.principal_byte_limit(1000, 10).unwrap();
         let bytes = negotiated.buffered_bytes(1000, 10).unwrap();
         assert!(negotiated.buffered_bytes(1000, 1).is_none());
         drop(low);
