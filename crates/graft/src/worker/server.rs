@@ -346,8 +346,13 @@ impl Connection {
         }
         cancel_all(&active, shutting_down);
         drop(outbound_tx);
-        if !writer.is_finished() {
-            let _ = tokio::time::timeout(Duration::from_secs(2), &mut writer).await;
+        if !writer.is_finished()
+            && tokio::time::timeout(Duration::from_secs(2), &mut writer)
+                .await
+                .is_err()
+        {
+            writer.abort();
+            let _ = writer.await;
         }
     }
 }

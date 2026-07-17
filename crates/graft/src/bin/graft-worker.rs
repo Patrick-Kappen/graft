@@ -136,9 +136,7 @@ async fn main() -> Result<()> {
 
 fn manifest_unavailable_reason(error: &ManifestError) -> ManifestUnavailableReason {
     match error {
-        ManifestError::Filesystem(source) if source.kind() == std::io::ErrorKind::NotFound => {
-            ManifestUnavailableReason::Missing
-        }
+        ManifestError::MissingCurrent => ManifestUnavailableReason::Missing,
         ManifestError::Filesystem(_)
         | ManifestError::FileType
         | ManifestError::Ownership
@@ -161,10 +159,14 @@ mod tests {
     #[test]
     fn manifest_unavailability_preserves_missing_incompatible_and_unreadable_classes() {
         assert_eq!(
+            manifest_unavailable_reason(&ManifestError::MissingCurrent),
+            ManifestUnavailableReason::Missing
+        );
+        assert_eq!(
             manifest_unavailable_reason(&ManifestError::Filesystem(std::io::Error::from(
                 std::io::ErrorKind::NotFound
             ))),
-            ManifestUnavailableReason::Missing
+            ManifestUnavailableReason::Unreadable
         );
         assert_eq!(
             manifest_unavailable_reason(&ManifestError::IncompatibleSchema),

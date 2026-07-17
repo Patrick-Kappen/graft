@@ -167,7 +167,13 @@ impl ManifestLoader {
             "current",
             rustix::fs::AtFlags::SYMLINK_NOFOLLOW,
         )
-        .map_err(errno_to_manifest)?;
+        .map_err(|error| {
+            if error == rustix::io::Errno::NOENT {
+                ManifestError::MissingCurrent
+            } else {
+                errno_to_manifest(error)
+            }
+        })?;
         if rustix::fs::FileType::from_raw_mode(pointer.st_mode) != rustix::fs::FileType::Symlink {
             return Err(ManifestError::FileType);
         }
@@ -584,6 +590,10 @@ mod tests {
         assert!(snapshot.endpoint_file().metadata().unwrap().is_file());
 
         fs::remove_file(fixture.config_home.join("graft/current")).unwrap();
+        assert!(matches!(
+            fixture.loader.load_with_store_root(&fixture.store_root),
+            Err(ManifestError::MissingCurrent)
+        ));
         assert_eq!(snapshot.manifest().workload_count(), 0);
         assert!(snapshot.manifest_file().metadata().unwrap().is_file());
     }
