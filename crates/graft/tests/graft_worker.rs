@@ -491,6 +491,32 @@ fn real_worker_stream_sequences_acknowledgements_and_cancellation() {
             if end.reason == StreamEndReason::Cancelled
                 && end.worker_epoch == hello.worker_epoch
     ));
+
+    let immediate_id = RequestIdentifier::new(17).unwrap();
+    send_client_frame(
+        &mut stream,
+        &ClientFrame::Request(Request {
+            server_connection_id: hello.server_connection_id,
+            request_id: immediate_id,
+            deadline_ms: Some(5_000),
+            operation: SemanticRequest::MockStream {
+                items: 1,
+                interval_ms: 1_000,
+            },
+        }),
+    );
+    send_client_frame(
+        &mut stream,
+        &ClientFrame::Cancel(Cancel {
+            server_connection_id: hello.server_connection_id,
+            request_id: immediate_id,
+        }),
+    );
+    assert!(matches!(
+        read_server_frame::<ServerFrame>(&mut stream),
+        ServerFrame::StreamEnd(end)
+            if end.request_id == immediate_id && end.reason == StreamEndReason::Cancelled
+    ));
 }
 
 #[cfg(feature = "worker-test-fixtures")]
