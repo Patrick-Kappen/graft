@@ -319,9 +319,9 @@ impl MutationRegistry {
         result: RetainedMutationResult,
         logical_now_ms: u64,
     ) -> bool {
-        if serde_json::to_vec(&result).map_or(true, |encoded| {
-            encoded.len() > MAX_RETAINED_RESULT_BYTES
-        }) {
+        if serde_json::to_vec(&result)
+            .map_or(true, |encoded| encoded.len() > MAX_RETAINED_RESULT_BYTES)
+        {
             return false;
         }
         let Some(record) = self.records.get_mut(&(principal_uid, operation_id)) else {
