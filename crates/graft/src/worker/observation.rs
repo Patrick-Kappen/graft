@@ -49,7 +49,7 @@ impl<'de> Deserialize<'de> for ObservationText {
 }
 
 /// Manifest-bound workload selector accepted by read-only operations.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub struct WorkloadSelector {
     /// Fixed worker target.
