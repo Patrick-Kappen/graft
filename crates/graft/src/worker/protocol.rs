@@ -22,6 +22,8 @@ pub enum ClientFrame {
 pub enum ServerFrame {
     /// Completes one unary request.
     Response(Response),
+    /// Reports a non-terminal rejected duplicate request.
+    RequestError(RequestError),
     /// Reports a non-terminal control-frame failure.
     ControlError(ControlError),
     /// Emits one sequenced stream item.
@@ -93,6 +95,18 @@ pub enum SemanticRequest {
         /// Milliseconds between items.
         interval_ms: u64,
     },
+}
+
+/// Non-terminal error rejecting a new request while its identifier is active.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub struct RequestError {
+    /// Server-selected connection identifier.
+    pub server_connection_id: ConnectionIdentifier,
+    /// Active request identifier that rejected the new request.
+    pub request_id: RequestIdentifier,
+    /// Typed admission failure.
+    pub error: WorkerError,
 }
 
 /// Non-terminal error for a stream control frame.

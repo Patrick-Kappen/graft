@@ -210,6 +210,7 @@ After negotiation, every JSON payload is one tagged frame variant:
 | `ServerHello` | server to client | Fix worker context and negotiated contract. |
 | `Request` | client to server | Start or join one typed unary or streaming operation. |
 | `Response` | server to client | Return one unary success or typed error. |
+| `RequestError` | server to client | Reject a duplicate request without terminating the active request that owns its identifier. |
 | `ControlError` | server to client | Report a typed failure for `StreamAck` or `Cancel` without itself terminating the request. |
 | `StreamItem` | server to client | Return one sequenced bounded stream item. |
 | `StreamAck` | client to server | Advance per-stream backpressure window. |
@@ -224,6 +225,10 @@ integers encoded within JSON's interoperable integer range. Starting a new
 `Request` with an identifier that is already active is a conflict; `StreamAck`
 and `Cancel` reuse the active request identifier they target. Stream sequence
 numbers start at one and increase by one within a request.
+
+`RequestError` is non-terminal. It reports that a newly submitted `Request`
+was rejected because its identifier remains active; it neither changes nor
+terminates the request that already owns that identifier.
 
 `ControlError` is non-terminal: it does not release the request identifier and
 clients must not treat it as a unary `Response`. It identifies the rejected

@@ -27,7 +27,7 @@ use super::framing::PARTIAL_FRAME_TIMEOUT;
 use super::framing::{read_frame, read_frame_with_timestamp, write_frame, AsyncFrameError};
 use super::limits::{AdmissionPermit, AdmissionRegistry, ConnectionBuffer, ConnectionBufferPermit};
 use super::protocol::{
-    ClientFrame, ControlError, OperationPhase, Request, Response, ResponseResult,
+    ClientFrame, ControlError, OperationPhase, Request, RequestError, Response, ResponseResult,
     RetryClassification, SemanticRequest, ServerFrame, WorkerError, WorkerErrorCode,
 };
 #[cfg(feature = "worker-test-fixtures")]
@@ -358,6 +358,9 @@ impl Connection {
                                     (&outbound_tx, &connection_close_tx),
                                 )
                                 .await;
+                                if code == WorkerErrorCode::InvalidAcknowledgement {
+                                    cancel_stream_interest(&active, control.request_id);
+                                }
                             }
                         }
                         ClientFrame::Cancel(control) => {
@@ -641,7 +644,6 @@ fn control_request(
         return Err(WorkerErrorCode::InvalidAcknowledgement);
     }
     if sequence < acknowledgement_floor || sequence > produced.load(Ordering::Acquire) {
-        control.send_modify(|state| state.cancelled = true);
         return Err(WorkerErrorCode::InvalidAcknowledgement);
     }
     if sequence <= delivered.load(Ordering::Acquire) {
@@ -660,6 +662,14 @@ fn control_request(
         }
     }
     Ok(())
+}
+
+fn cancel_stream_interest(active: &ActiveMap, request_id: crate::protocol::RequestIdentifier) {
+    if let Ok(active) = active.lock() {
+        if let Some(request) = active.get(&request_id).filter(|request| request.stream) {
+            request.control.send_modify(|state| state.cancelled = true);
+        }
+    }
 }
 
 fn cancel_all(active: &ActiveMap, worker_shutdown: bool) {
@@ -777,12 +787,7 @@ async fn spawn_request(context: RequestContext) {
         }
     };
     if !identifier_reserved {
-        send_error(
-            &context,
-            WorkerErrorCode::RequestConflict,
-            "request identifier is already active",
-        )
-        .await;
+        queue_duplicate_error(&context).await;
         return;
     }
     let deadline_maximum = match operation_deadline_class(&context.request.operation) {
@@ -1359,6 +1364,37 @@ async fn queue_frame(context: &RequestContext, frame: ServerFrame, guard: Option
             guard,
             delivery_deadline,
             terminal_lease,
+        },
+    )
+    .await;
+}
+
+async fn queue_duplicate_error(context: &RequestContext) {
+    if !context.registry.rejection(context.peer.uid) {
+        let _ = context.connection_close.send(true);
+        return;
+    }
+    queue_encoded(
+        context.peer.uid,
+        &context.registry,
+        &context.connection_buffer,
+        (&context.outbound, &context.connection_close),
+        QueuedFrame {
+            frame: ServerFrame::RequestError(RequestError {
+                server_connection_id: context.expected_connection,
+                request_id: context.request.request_id,
+                error: WorkerError {
+                    code: WorkerErrorCode::RequestConflict,
+                    summary: SafeSummary::parse("request identifier is already active")
+                        .expect("fixed conflict summary is valid"),
+                    retry: RetryClassification::AfterStateRefresh,
+                    phase: OperationPhase::Admission,
+                    worker_epoch: context.epoch.identifier(),
+                },
+            }),
+            guard: None,
+            delivery_deadline: tokio::time::Instant::now() + TERMINAL_DELIVERY_TIMEOUT,
+            terminal_lease: None,
         },
     )
     .await;

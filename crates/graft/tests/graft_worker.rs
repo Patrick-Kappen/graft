@@ -726,9 +726,9 @@ fn negotiated_connection_request_limit_rejects_new_work_without_eviction() {
 
     assert!(matches!(
         conflict,
-        ServerFrame::Response(response)
-            if matches!(&response.result, ResponseResult::Error(error)
-                if error.code == graft::worker::protocol::WorkerErrorCode::RequestConflict)
+        ServerFrame::RequestError(error)
+            if error.error.code
+                == graft::worker::protocol::WorkerErrorCode::RequestConflict
     ));
     assert!(matches!(
         overloaded,
@@ -843,18 +843,18 @@ fn duplicate_request_and_wrong_connection_identifiers_fail_typed() {
     let invalid_duplicate = read_server_frame::<ServerFrame>(&mut stream);
     assert!(matches!(
         invalid_duplicate,
-        ServerFrame::Response(response)
-            if matches!(&response.result, ResponseResult::Error(error)
-                if error.code == graft::worker::protocol::WorkerErrorCode::RequestConflict)
+        ServerFrame::RequestError(error)
+            if error.error.code
+                == graft::worker::protocol::WorkerErrorCode::RequestConflict
     ));
 
     send_client_frame(&mut stream, &request);
     let conflict = read_server_frame::<ServerFrame>(&mut stream);
     assert!(matches!(
         conflict,
-        ServerFrame::Response(response)
-            if matches!(&response.result, ResponseResult::Error(error)
-                if error.code == graft::worker::protocol::WorkerErrorCode::RequestConflict)
+        ServerFrame::RequestError(error)
+            if error.error.code
+                == graft::worker::protocol::WorkerErrorCode::RequestConflict
     ));
 
     send_client_frame(
