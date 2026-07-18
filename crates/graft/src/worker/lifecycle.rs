@@ -310,6 +310,87 @@ const fn decide_restart(
     }
 }
 
+/// Why the final interested caller departed before commitment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CallerDeparture {
+    /// Explicit protocol cancellation.
+    Cancelled,
+    /// Caller deadline elapsed.
+    Deadline,
+    /// Connection disappeared.
+    Disconnected,
+}
+
+/// Linearized manager-work commitment outcome.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommitmentOutcome {
+    /// Commitment won; later departures cannot reverse manager work.
+    Committed,
+    /// Final caller departed first; no attachment or backend call is permitted.
+    Departed(CallerDeparture),
+}
+
+/// Request-local interest gate serialized with manager-work commitment.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommitmentGate {
+    callers: u32,
+    committed: bool,
+    final_departure: Option<CallerDeparture>,
+}
+
+impl CommitmentGate {
+    /// Creates a gate with the originating caller interested.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            callers: 1,
+            committed: false,
+            final_departure: None,
+        }
+    }
+
+    /// Adds one duplicate caller before or after commitment.
+    #[must_use]
+    pub fn join(&mut self) -> bool {
+        let Some(callers) = self.callers.checked_add(1) else {
+            return false;
+        };
+        self.callers = callers;
+        true
+    }
+
+    /// Removes one caller and records only the final pre-commitment departure.
+    pub fn depart(&mut self, reason: CallerDeparture) {
+        self.callers = self.callers.saturating_sub(1);
+        if self.callers == 0 && !self.committed && self.final_departure.is_none() {
+            self.final_departure = Some(reason);
+        }
+    }
+
+    /// Attempts the single manager-work commitment linearization point.
+    #[must_use]
+    pub fn commit(&mut self) -> CommitmentOutcome {
+        if let Some(reason) = self.final_departure {
+            return CommitmentOutcome::Departed(reason);
+        }
+        self.committed = true;
+        CommitmentOutcome::Committed
+    }
+
+    /// Returns whether manager work has committed.
+    #[must_use]
+    pub const fn is_committed(&self) -> bool {
+        self.committed
+    }
+}
+
+impl Default for CommitmentGate {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Stable manager epoch; job identities never cross this boundary.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
@@ -486,6 +567,28 @@ mod tests {
             decide_lifecycle(LifecycleAction::Restart, WorkloadLifecycle::Setup, value,),
             LifecycleDecision::Conflict
         );
+    }
+
+    #[test]
+    fn final_departure_and_commitment_have_one_irreversible_winner() {
+        let mut departure_first = CommitmentGate::new();
+        departure_first.depart(CallerDeparture::Cancelled);
+        assert_eq!(
+            departure_first.commit(),
+            CommitmentOutcome::Departed(CallerDeparture::Cancelled)
+        );
+        assert!(!departure_first.is_committed());
+
+        let mut commitment_first = CommitmentGate::new();
+        assert_eq!(commitment_first.commit(), CommitmentOutcome::Committed);
+        commitment_first.depart(CallerDeparture::Disconnected);
+        assert!(commitment_first.is_committed());
+        assert_eq!(commitment_first.commit(), CommitmentOutcome::Committed);
+
+        let mut duplicate = CommitmentGate::new();
+        assert!(duplicate.join());
+        duplicate.depart(CallerDeparture::Deadline);
+        assert_eq!(duplicate.commit(), CommitmentOutcome::Committed);
     }
 
     #[test]
