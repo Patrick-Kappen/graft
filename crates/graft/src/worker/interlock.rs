@@ -61,6 +61,12 @@ pub struct InterlockRecord {
     pub action: LifecycleAction,
     /// Exact worker-derived backend identities required for reconciliation.
     pub backend_selector: BackendSelector,
+    /// Server logical acceptance time.
+    pub accepted_ms: u64,
+    /// Absolute terminal-observation cutoff.
+    pub observation_deadline_ms: u64,
+    /// Manager submission time when this worker submitted work.
+    pub submission_ms: Option<u64>,
     /// Manager state captured before commitment.
     pub initial_state: LifecycleState,
     /// Current durable phase.
@@ -188,12 +194,30 @@ impl InterlockStore {
         Ok(records)
     }
 
+    /// Atomically creates one synchronized record without replacement.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the identity exists or validation, capacity,
+    /// encoding, or durable I/O fails.
+    pub fn persist_new(&self, record: &InterlockRecord) -> Result<(), InterlockError> {
+        self.persist_internal(record, false)
+    }
+
     /// Atomically creates or replaces one synchronized record.
     ///
     /// # Errors
     ///
     /// Returns an error when validation, capacity, encoding, or durable I/O fails.
     pub fn persist(&self, record: &InterlockRecord) -> Result<(), InterlockError> {
+        self.persist_internal(record, true)
+    }
+
+    fn persist_internal(
+        &self,
+        record: &InterlockRecord,
+        allow_replace: bool,
+    ) -> Result<(), InterlockError> {
         validate_directory(&self.directory, self.uid, self.gid)?;
         let bytes = serde_json::to_vec(record).map_err(InterlockError::Json)?;
         if bytes.is_empty() || bytes.len() > MAX_INTERLOCK_BYTES {
@@ -203,6 +227,9 @@ impl InterlockStore {
         let replacing = existing
             .iter()
             .any(|value| value.operation_id == record.operation_id);
+        if replacing && !allow_replace {
+            return Err(InterlockError::AlreadyExists);
+        }
         if !replacing && existing.len() >= MAX_INTERLOCKS {
             return Err(InterlockError::Capacity);
         }
@@ -241,7 +268,18 @@ impl InterlockStore {
                 .map_err(InterlockError::Io)?;
             temporary.write_all(&bytes).map_err(InterlockError::Io)?;
             temporary.sync_all().map_err(InterlockError::Io)?;
-            fs::rename(&temporary_path, &final_path).map_err(InterlockError::Io)?;
+            if allow_replace {
+                fs::rename(&temporary_path, &final_path).map_err(InterlockError::Io)?;
+            } else {
+                fs::hard_link(&temporary_path, &final_path).map_err(|error| {
+                    if error.kind() == std::io::ErrorKind::AlreadyExists {
+                        InterlockError::AlreadyExists
+                    } else {
+                        InterlockError::Io(error)
+                    }
+                })?;
+                fs::remove_file(&temporary_path).map_err(InterlockError::Io)?;
+            }
             sync_directory(&self.directory)
         })();
         if result.is_err() {
@@ -299,6 +337,9 @@ pub enum InterlockError {
     /// Duplicate operation identity was found.
     #[error("duplicate interlock operation identity")]
     Duplicate,
+    /// Durable operation identity already exists.
+    #[error("interlock operation identity already exists")]
+    AlreadyExists,
     /// Filesystem operation failed.
     #[error("interlock filesystem operation failed: {0}")]
     Io(#[source] std::io::Error),
@@ -402,6 +443,9 @@ mod tests {
                 generated_service: ObservationText::parse("alpha.service").unwrap(),
                 container_name: ObservationText::parse("alpha").unwrap(),
             },
+            accepted_ms: operation_id().timestamp_ms(),
+            observation_deadline_ms: operation_id().timestamp_ms().saturating_add(600_000),
+            submission_ms: None,
             initial_state: LifecycleState::Inactive,
             phase: InterlockPhase::Prepared,
             manager_epoch: None,
@@ -416,7 +460,12 @@ mod tests {
         let _guard = store.lock_submission().unwrap();
         let mut value = record();
 
-        store.persist(&value).unwrap();
+        store.persist_new(&value).unwrap();
+        assert_eq!(store.load().unwrap(), vec![value.clone()]);
+        assert!(matches!(
+            store.persist_new(&value),
+            Err(InterlockError::AlreadyExists)
+        ));
         assert_eq!(store.load().unwrap(), vec![value.clone()]);
         value.phase = InterlockPhase::CommittingSubmission;
         store.persist(&value).unwrap();

@@ -168,6 +168,8 @@ pub enum CorrelatedResult {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub struct LifecycleObservation {
+    /// Logical time at which this evidence was captured.
+    pub observed_ms: u64,
     /// Current normalized state.
     pub state: LifecycleState,
     /// Selected-unit queued job, if any.
@@ -420,6 +422,9 @@ pub struct ManagerEpoch {
 
 /// Narrow lifecycle manager adapter with no Podman fallback.
 pub trait LifecycleManagerAdapter: Send + Sync + std::fmt::Debug {
+    /// Captures current worker logical time at an adapter boundary.
+    fn logical_now_ms(&self) -> u64;
+
     /// Captures the fixed manager epoch.
     ///
     /// # Errors
@@ -461,6 +466,8 @@ pub trait LifecycleManagerAdapter: Send + Sync + std::fmt::Debug {
 /// Typed manager submission acknowledgement; not lifecycle success.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ManagerSubmission {
+    /// Logical time at which manager acceptance was captured.
+    pub accepted_ms: u64,
     /// Manager epoch that accepted the call.
     pub epoch: ManagerEpoch,
     /// Bounded manager job identity when returned.
@@ -486,6 +493,7 @@ mod tests {
 
     fn observation(state: LifecycleState) -> LifecycleObservation {
         LifecycleObservation {
+            observed_ms: 0,
             state,
             queued_job: None,
             failed_quiescent: true,
