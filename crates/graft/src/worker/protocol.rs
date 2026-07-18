@@ -4,6 +4,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::protocol::{ConnectionIdentifier, RequestIdentifier, SafeSummary};
 
+use super::coordinator::LifecycleExecution;
+use super::lifecycle::LifecycleRequest;
+use super::mutation::MutationQuery;
 use super::observation::{
     InspectSnapshot, ListStatusRequest, StatusPage, WorkloadSelector, WorkloadSnapshot,
 };
@@ -88,6 +91,10 @@ pub enum SemanticRequest {
         /// Exact current workload identity.
         selector: WorkloadSelector,
     },
+    /// Starts or joins one typed lifecycle mutation.
+    Lifecycle(LifecycleRequest),
+    /// Queries retained lifecycle state without submitting manager work.
+    QueryLifecycle(LifecycleRequest),
     /// Internal production placeholder that is never accepted from the wire.
     #[serde(skip)]
     Reserved,
@@ -155,6 +162,10 @@ pub struct Response {
 pub enum ResponseResult {
     /// Read-only discovery or status operation completed.
     ReadOnly(Box<ReadOnlyResponse>),
+    /// Lifecycle mutation completed or remains in progress.
+    Lifecycle(LifecycleExecution),
+    /// Non-mutating lifecycle result query completed.
+    LifecycleQuery(MutationQuery),
     /// Fixture operation completed.
     #[cfg(feature = "worker-test-fixtures")]
     MockComplete,
