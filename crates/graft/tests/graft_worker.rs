@@ -542,6 +542,49 @@ fn real_worker_stream_sequences_acknowledgements_and_cancellation() {
 
 #[cfg(feature = "worker-test-fixtures")]
 #[test]
+fn stream_ack_on_unary_reports_control_error_without_cancelling_request() {
+    let worker = spawn_worker();
+    let mut stream = connect(&worker.socket_path);
+    let hello = handshake(&mut stream);
+    let request_id = RequestIdentifier::new(18).unwrap();
+    send_client_frame(
+        &mut stream,
+        &ClientFrame::Request(Request {
+            server_connection_id: hello.server_connection_id,
+            request_id,
+            deadline_ms: Some(5_000),
+            operation: SemanticRequest::MockUnary { delay_ms: 50 },
+        }),
+    );
+    send_client_frame(
+        &mut stream,
+        &ClientFrame::StreamAck(StreamAck {
+            server_connection_id: hello.server_connection_id,
+            request_id,
+            sequence: 0,
+        }),
+    );
+
+    let control_error = read_server_frame::<ServerFrame>(&mut stream);
+    let terminal = read_server_frame::<ServerFrame>(&mut stream);
+
+    assert!(matches!(
+        control_error,
+        ServerFrame::ControlError(control)
+            if control.request_id == request_id
+                && control.error.code
+                    == graft::worker::protocol::WorkerErrorCode::InvalidAcknowledgement
+    ));
+    assert!(matches!(
+        terminal,
+        ServerFrame::Response(response)
+            if response.request_id == request_id
+                && response.result == ResponseResult::MockComplete
+    ));
+}
+
+#[cfg(feature = "worker-test-fixtures")]
+#[test]
 fn real_worker_unary_deadline_and_cancellation_are_typed() {
     let worker = spawn_worker();
     let mut stream = connect(&worker.socket_path);

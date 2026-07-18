@@ -637,7 +637,10 @@ fn control_request(
         return Err(WorkerErrorCode::InvalidAcknowledgement);
     };
     let acknowledgement_floor = current.acknowledged.max(current.pending_acknowledgement);
-    if !stream || sequence < acknowledgement_floor || sequence > produced.load(Ordering::Acquire) {
+    if !stream {
+        return Err(WorkerErrorCode::InvalidAcknowledgement);
+    }
+    if sequence < acknowledgement_floor || sequence > produced.load(Ordering::Acquire) {
         control.send_modify(|state| state.cancelled = true);
         return Err(WorkerErrorCode::InvalidAcknowledgement);
     }
@@ -1088,17 +1091,23 @@ async fn run_mock_stream(
     let mut reason = StreamEndReason::Completed;
     let mut sequence = 0_u64;
     'items: for value in 1..=items {
-        let stalled_at = tokio::time::Instant::now() + Duration::from_secs(1);
+        let mut stalled_at = None;
         while sequence.saturating_sub(control.borrow().acknowledged)
             >= u64::from(context.limits.unacknowledged_stream_items())
         {
+            if stalled_at.is_none()
+                && progress.delivered.load(Ordering::Acquire) > control.borrow().acknowledged
+            {
+                stalled_at = Some(tokio::time::Instant::now() + Duration::from_secs(1));
+            }
             tokio::select! {
-                () = tokio::time::sleep_until(stalled_at) => {
-                    reason = StreamEndReason::SlowConsumer;
-                    break 'items;
-                }
+                biased;
                 () = tokio::time::sleep_until(deadline_at) => {
                     reason = StreamEndReason::Deadline;
+                    break 'items;
+                }
+                () = tokio::time::sleep_until(stalled_at.unwrap_or(deadline_at)), if stalled_at.is_some() => {
+                    reason = StreamEndReason::SlowConsumer;
                     break 'items;
                 }
                 changed = control.changed() => {
