@@ -1,3 +1,7 @@
+[features]
+default = []
+worker-test-fixtures = []
+
 [package]
 name = "graft"
 version = "0.3.0-alpha.1"
@@ -11,6 +15,11 @@ rust-version = "1.80"
 name = "graft"
 path = "src/main.rs"
 
+[[bin]]
+name = "graft-worker-fixture"
+path = "src/bin/graft-worker-fixture.rs"
+required-features = ["worker-test-fixtures"]
+
 [dependencies]
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
@@ -23,8 +32,9 @@ thiserror = "=2.0.18"
 toml = "0.8"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-uuid = { version = "=1.18.1", default-features = false, features = ["std"] }
-rustix = { version = "=1.1.4", features = ["fs"] }
+uuid = { version = "=1.18.1", default-features = false, features = ["std", "v7"] }
+rustix = { version = "=1.1.4", features = ["fs", "net", "process"] }
+tokio = { version = "=1.48.0", features = ["io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 
 [dev-dependencies]
 # no external mock libraries — manual mocks keep tests self-contained

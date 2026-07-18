@@ -83,7 +83,7 @@ pub fn encode_frame<T: Serialize>(
     direction: FrameDirection,
 ) -> Result<Vec<u8>, CodecError> {
     let maximum = direction.maximum();
-    let mut writer = BoundedFrameWriter::new(maximum);
+    let mut writer = BoundedFrameWriter::new(maximum, PREFIX_BYTES + maximum.min(4_096));
     if let Err(source) = serde_json::to_writer(&mut writer, value) {
         return match writer.exceeded {
             Some(actual) => Err(CodecError::Oversized { actual, maximum }),
@@ -93,6 +93,89 @@ pub fn encode_frame<T: Serialize>(
     writer.finish()
 }
 
+/// Counts the exact encoded frame length without allocating the payload.
+///
+/// # Errors
+///
+/// Returns an error when serialization fails or exceeds the directional bound.
+pub fn encoded_frame_len<T: Serialize>(
+    value: &T,
+    direction: FrameDirection,
+) -> Result<usize, CodecError> {
+    let maximum = direction.maximum();
+    let mut writer = CountingWriter {
+        length: 0,
+        maximum,
+        exceeded: None,
+    };
+    if let Err(source) = serde_json::to_writer(&mut writer, value) {
+        return match writer.exceeded {
+            Some(actual) => Err(CodecError::Oversized { actual, maximum }),
+            None => Err(CodecError::Encode(source)),
+        };
+    }
+    if writer.length == 0 {
+        return Err(CodecError::ZeroLength);
+    }
+    Ok(PREFIX_BYTES + writer.length)
+}
+
+/// Encodes into one allocation sized by a prior [`encoded_frame_len`] call.
+///
+/// # Errors
+///
+/// Returns an error if serialization fails or differs from the expected size.
+pub fn encode_frame_exact<T: Serialize>(
+    value: &T,
+    direction: FrameDirection,
+    expected_length: usize,
+) -> Result<Vec<u8>, CodecError> {
+    let maximum = direction.maximum();
+    let maximum_frame_length = PREFIX_BYTES + maximum;
+    if expected_length > maximum_frame_length {
+        return Err(CodecError::Oversized {
+            actual: expected_length.saturating_sub(PREFIX_BYTES),
+            maximum,
+        });
+    }
+    let mut writer = BoundedFrameWriter::new(maximum, expected_length);
+    if let Err(source) = serde_json::to_writer(&mut writer, value) {
+        return match writer.exceeded {
+            Some(actual) => Err(CodecError::Oversized { actual, maximum }),
+            None => Err(CodecError::Encode(source)),
+        };
+    }
+    let frame = writer.finish()?;
+    if frame.len() != expected_length {
+        return Err(CodecError::Encode(serde_json::Error::io(
+            std::io::Error::new(std::io::ErrorKind::InvalidData, "encoded length changed"),
+        )));
+    }
+    Ok(frame)
+}
+
+struct CountingWriter {
+    length: usize,
+    maximum: usize,
+    exceeded: Option<usize>,
+}
+
+impl io::Write for CountingWriter {
+    fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
+        let actual = self.length.saturating_add(buffer.len());
+        if actual > self.maximum {
+            self.exceeded = Some(actual);
+            return Err(std::io::Error::other("frame exceeds directional limit"));
+        }
+        self.length = actual;
+        Ok(buffer.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
 struct BoundedFrameWriter {
     frame: Vec<u8>,
     maximum: usize,
@@ -100,8 +183,8 @@ struct BoundedFrameWriter {
 }
 
 impl BoundedFrameWriter {
-    fn new(maximum: usize) -> Self {
-        let mut frame = Vec::with_capacity(PREFIX_BYTES + maximum.min(4_096));
+    fn new(maximum: usize, capacity: usize) -> Self {
+        let mut frame = Vec::with_capacity(capacity);
         frame.extend_from_slice(&[0; PREFIX_BYTES]);
         Self {
             frame,

@@ -8,8 +8,8 @@ mod handshake;
 mod types;
 
 pub use codec::{
-    decode_frame, encode_frame, CodecError, FrameDirection, MAX_INBOUND_FRAME_BYTES,
-    MAX_OUTBOUND_FRAME_BYTES,
+    decode_frame, encode_frame, encode_frame_exact, encoded_frame_len, CodecError, FrameDirection,
+    MAX_INBOUND_FRAME_BYTES, MAX_OUTBOUND_FRAME_BYTES,
 };
 pub use handshake::{
     negotiate_handshake, validate_server_hello, ClientHandshakeFrame, ClientHello, EffectiveLimits,

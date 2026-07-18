@@ -25,6 +25,9 @@ pub const MAX_ENDPOINT_BYTES: u64 = 16 * 1024;
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum ManifestError {
+    /// The configured `current` pointer is absent.
+    #[error("current discovery generation pointer is missing")]
+    MissingCurrent,
     /// A filesystem operation failed without exposing untrusted file content.
     #[error("discovery generation filesystem validation failed")]
     Filesystem(#[source] std::io::Error),

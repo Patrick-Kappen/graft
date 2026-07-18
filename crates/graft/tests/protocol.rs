@@ -1,12 +1,12 @@
 use serde::ser::SerializeSeq as _;
 
 use graft::protocol::{
-    decode_frame, encode_frame, negotiate_handshake, validate_server_hello, Capability,
-    CapabilitySet, ClientComponent, ClientHandshakeFrame, ClientHello, CodecError,
-    ConnectionIdentifier, EffectiveLimits, FrameDirection, HandshakeError, ManagerKind,
-    ManifestGeneration, ManifestState, ProtocolVersionRange, RequestIdentifier, SafeSummary,
-    ServerHandshakeConfig, ServerHandshakeFrame, ServerTimeMilliseconds, SoftwareVersion,
-    WorkerContext, WorkerTarget, MAX_INBOUND_FRAME_BYTES, MAX_JSON_INTEGER,
+    decode_frame, encode_frame, encode_frame_exact, encoded_frame_len, negotiate_handshake,
+    validate_server_hello, Capability, CapabilitySet, ClientComponent, ClientHandshakeFrame,
+    ClientHello, CodecError, ConnectionIdentifier, EffectiveLimits, FrameDirection, HandshakeError,
+    ManagerKind, ManifestGeneration, ManifestState, ProtocolVersionRange, RequestIdentifier,
+    SafeSummary, ServerHandshakeConfig, ServerHandshakeFrame, ServerTimeMilliseconds,
+    SoftwareVersion, WorkerContext, WorkerTarget, MAX_INBOUND_FRAME_BYTES, MAX_JSON_INTEGER,
     MAX_OUTBOUND_FRAME_BYTES, MAX_SAFE_SUMMARY_BYTES, MAX_SOFTWARE_VERSION_BYTES,
 };
 
@@ -55,6 +55,22 @@ fn server_config() -> ServerHandshakeConfig {
         server_connection_id: ConnectionIdentifier::parse(SERVER_ID)
             .expect("fixture identifier is valid"),
     }
+}
+
+#[test]
+fn exact_two_pass_encoding_matches_bounded_encoder() {
+    let frame = client_hello();
+    let expected = encode_frame(&frame, FrameDirection::ClientToServer).unwrap();
+    let length = encoded_frame_len(&frame, FrameDirection::ClientToServer).unwrap();
+
+    let exact = encode_frame_exact(&frame, FrameDirection::ClientToServer, length).unwrap();
+
+    assert_eq!(length, expected.len());
+    assert_eq!(exact, expected);
+    assert!(matches!(
+        encode_frame_exact(&frame, FrameDirection::ClientToServer, usize::MAX),
+        Err(CodecError::Oversized { .. })
+    ));
 }
 
 #[test]
