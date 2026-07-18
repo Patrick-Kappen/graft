@@ -9,8 +9,10 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::manifest::WorkloadLifecycle;
 use crate::protocol::ConnectionIdentifier;
 
+use super::discovery::BackendSelector;
 use super::lifecycle::{LifecycleAction, ManagerEpoch, OperationIdentifier};
 use super::observation::{ObservationText, WorkloadSelector};
 
@@ -53,8 +55,12 @@ pub struct InterlockRecord {
     pub operation_id: OperationIdentifier,
     /// Immutable workload identity.
     pub selector: WorkloadSelector,
+    /// Declared lifecycle used for terminal reconciliation.
+    pub lifecycle: WorkloadLifecycle,
     /// Requested action.
     pub action: LifecycleAction,
+    /// Exact worker-derived backend identities required for reconciliation.
+    pub backend_selector: BackendSelector,
     /// Current durable phase.
     pub phase: InterlockPhase,
     /// Manager epoch when known.
@@ -386,7 +392,13 @@ mod tests {
                 generation: ManifestGeneration::parse("a".repeat(64)).unwrap(),
                 workload_id: ManifestGeneration::parse("b".repeat(64)).unwrap(),
             },
+            lifecycle: WorkloadLifecycle::LongRunning,
             action: LifecycleAction::Up,
+            backend_selector: BackendSelector {
+                workload_name: ObservationText::parse("alpha").unwrap(),
+                generated_service: ObservationText::parse("alpha.service").unwrap(),
+                container_name: ObservationText::parse("alpha").unwrap(),
+            },
             phase: InterlockPhase::Prepared,
             manager_epoch: None,
             job_id: None,

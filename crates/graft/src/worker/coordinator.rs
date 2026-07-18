@@ -51,6 +51,15 @@ pub enum LifecycleRejection {
     InfrastructureUnavailable,
 }
 
+/// Bounded startup/on-demand interlock reconciliation result.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ReconciliationReport {
+    /// Safely cleared prepared or terminal records.
+    pub cleared: usize,
+    /// Records retained because manager evidence remains active or ambiguous.
+    pub retained: usize,
+}
+
 /// Worker-side lifecycle coordinator with no direct runtime fallback.
 #[derive(Debug)]
 pub struct LifecycleCoordinator<M: LifecycleManagerAdapter> {
@@ -68,6 +77,57 @@ impl<M: LifecycleManagerAdapter> LifecycleCoordinator<M> {
             interlocks,
             registry: Mutex::new(MutationRegistry::new(worker_epoch)),
         }
+    }
+
+    /// Reconciles durable records without reconstructing mutation results.
+    ///
+    /// # Errors
+    ///
+    /// Returns infrastructure unavailable when records, lock, or manager identity
+    /// cannot be loaded safely. Ambiguous individual records remain retained.
+    pub fn reconcile_interlocks(&self) -> Result<ReconciliationReport, LifecycleRejection> {
+        let _activation = self
+            .interlocks
+            .lock_submission()
+            .map_err(|_| LifecycleRejection::InfrastructureUnavailable)?;
+        let records = self
+            .interlocks
+            .load()
+            .map_err(|_| LifecycleRejection::InfrastructureUnavailable)?;
+        let manager_epoch = self
+            .manager
+            .epoch()
+            .map_err(|_| LifecycleRejection::InfrastructureUnavailable)?;
+        let mut report = ReconciliationReport {
+            cleared: 0,
+            retained: 0,
+        };
+        for record in records {
+            let clear = if record.phase == InterlockPhase::Prepared {
+                true
+            } else if record.manager_epoch.as_ref() != Some(&manager_epoch) {
+                false
+            } else {
+                self.manager
+                    .observe(&record.backend_selector)
+                    .ok()
+                    .is_some_and(|observation| {
+                        observation.queued_job.is_none()
+                            && !observation.correlatable_jobless_transition
+                            && (terminal_satisfied(record.action, record.lifecycle, observation)
+                                || observation.state == LifecycleState::Failed)
+                    })
+            };
+            if clear {
+                self.interlocks
+                    .remove(record.operation_id)
+                    .map_err(|_| LifecycleRejection::InfrastructureUnavailable)?;
+                report.cleared = report.cleared.saturating_add(1);
+            } else {
+                report.retained = report.retained.saturating_add(1);
+            }
+        }
+        Ok(report)
     }
 
     /// Executes one already-authorized, manifest-bound lifecycle request.
@@ -207,7 +267,9 @@ impl<M: LifecycleManagerAdapter> LifecycleCoordinator<M> {
             principal_uid,
             operation_id: request.operation_id,
             selector: request.selector.clone(),
+            lifecycle,
             action: request.action,
+            backend_selector: backend_selector.clone(),
             phase: InterlockPhase::Prepared,
             manager_epoch: Some(manager_epoch.clone()),
             job_id: None,
@@ -601,6 +663,10 @@ mod tests {
                 LifecycleExecution::Terminal(terminal)
             );
             assert_eq!(coordinator.interlocks.load().unwrap().len(), retained);
+            assert_eq!(
+                coordinator.reconcile_interlocks().unwrap().retained,
+                retained
+            );
         }
     }
 }
