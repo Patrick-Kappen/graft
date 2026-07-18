@@ -2,6 +2,8 @@
 
 use std::collections::BTreeMap;
 
+use serde::{Deserialize, Serialize};
+
 use crate::protocol::ConnectionIdentifier;
 
 use super::lifecycle::{LifecycleRequest, OperationIdentifier, OPERATION_PAST_WINDOW_MS};
@@ -13,7 +15,8 @@ pub const MAX_PRINCIPAL_MUTATIONS: usize = 256;
 pub const MAX_WORKER_MUTATIONS: usize = 1_024;
 
 /// Current accepted operation phase exposed by result queries.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum MutationPhase {
     /// Accepted under the shared activation lock.
     Accepted,
@@ -24,7 +27,8 @@ pub enum MutationPhase {
 }
 
 /// Bounded terminal classification retained by the registry.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum MutationTerminal {
     /// Action-specific terminal success was proven.
     Succeeded,
@@ -74,7 +78,8 @@ pub enum MutationAdmission {
 }
 
 /// Result of a non-mutating operation-result query.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "query_result", content = "value", rename_all = "snake_case")]
 pub enum MutationQuery {
     /// Retained terminal result.
     Terminal(MutationTerminal),

@@ -596,7 +596,9 @@ impl DiscoveryDispatcher {
                     runtime_supported: self.runtime.is_supported(),
                 }))
             }
-            SemanticRequest::Reserved => Err(DispatchFailure::new(
+            SemanticRequest::Lifecycle(_)
+            | SemanticRequest::QueryLifecycle(_)
+            | SemanticRequest::Reserved => Err(DispatchFailure::new(
                 WorkerErrorCode::Unsupported,
                 "semantic operation is unavailable",
             )),

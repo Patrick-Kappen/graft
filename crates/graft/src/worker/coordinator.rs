@@ -2,6 +2,8 @@
 
 use std::sync::{Mutex, MutexGuard};
 
+use serde::{Deserialize, Serialize};
+
 use crate::manifest::WorkloadLifecycle;
 use crate::protocol::ConnectionIdentifier;
 
@@ -14,7 +16,8 @@ use super::lifecycle::{
 use super::mutation::{MutationAdmission, MutationPhase, MutationRegistry, MutationTerminal};
 
 /// Result of one lifecycle submission or duplicate join attempt.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "execution", content = "value", rename_all = "snake_case")]
 pub enum LifecycleExecution {
     /// Action-specific terminal result was established.
     Terminal(MutationTerminal),
@@ -25,7 +28,8 @@ pub enum LifecycleExecution {
 }
 
 /// Closed pre-acceptance lifecycle rejection.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum LifecycleRejection {
     /// Workload is declaratively disabled.
     WorkloadDisabled,
