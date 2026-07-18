@@ -8,6 +8,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 use uuid::Uuid;
 
@@ -29,7 +30,8 @@ const CURSOR_TTL: Duration = Duration::from_secs(60);
 const MAX_RETAINED_CURSORS: usize = 1_024;
 
 /// Worker-owned backend selector derived only from a validated manifest record.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub struct BackendSelector {
     /// Manifest workload name used only for deterministic adapter lookup.
     pub workload_name: ObservationText,
