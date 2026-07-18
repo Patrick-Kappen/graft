@@ -1,8 +1,9 @@
 # Local worker and API contract
 
 > **Status:** partially implemented. The current release contains the local
-> worker transport plus user-scope discovery/status/inspect handlers, but does
-> not yet install the worker or expose public runtime CLI commands. Lifecycle details
+> worker transport, user-scope discovery/status/inspect handlers, and the
+> capability-gated lifecycle/interlock core, but does not yet install the worker
+> or expose public runtime CLI commands. Lifecycle details
 > are fixed by [Local lifecycle operations](lifecycle-operations.md);
 > status, logs, metrics, and events are fixed by
 > [Runtime observability](observability.md), and service/socket installation

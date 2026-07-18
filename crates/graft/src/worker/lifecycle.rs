@@ -470,6 +470,36 @@ mod tests {
     }
 
     #[test]
+    fn lifecycle_wire_types_round_trip_and_reject_unknown_fields() {
+        let request = LifecycleRequest {
+            operation_id: OperationIdentifier::parse("018f0f77-8c4d-7b2a-8e6a-4b8a7d3a1c21")
+                .unwrap(),
+            origin_worker_epoch: ConnectionIdentifier::parse(
+                "018f0f77-8c4d-7b2a-8e6a-4b8a7d3a1c20",
+            )
+            .unwrap(),
+            selector: WorkloadSelector {
+                target: crate::protocol::WorkerTarget::User,
+                name: super::super::observation::ObservationText::parse("alpha").unwrap(),
+                generation: crate::protocol::ManifestGeneration::parse("a".repeat(64)).unwrap(),
+                workload_id: crate::protocol::ManifestGeneration::parse("b".repeat(64)).unwrap(),
+            },
+            action: LifecycleAction::Restart,
+        };
+        let encoded = serde_json::to_vec(&request).unwrap();
+        assert_eq!(
+            serde_json::from_slice::<LifecycleRequest>(&encoded).unwrap(),
+            request
+        );
+        let mut value = serde_json::to_value(&request).unwrap();
+        value
+            .as_object_mut()
+            .unwrap()
+            .insert("raw_unit".into(), serde_json::json!("foreign.service"));
+        assert!(serde_json::from_value::<LifecycleRequest>(value).is_err());
+    }
+
+    #[test]
     fn uuidv7_replay_window_uses_exact_open_past_and_closed_future_boundaries() {
         fn id(timestamp_ms: u64) -> OperationIdentifier {
             let mut bytes = *Uuid::nil().as_bytes();

@@ -1,8 +1,11 @@
 # Local lifecycle operations
 
-> **Status:** approved design for future implementation. The current release
-> materialises lifecycle semantics into Quadlet services but does not expose
-> `graft up`, `graft down`, or `graft restart`. This contract depends on the
+> **Status:** partially implemented. The worker contains typed lifecycle
+> requests/results, exhaustive state decisions, replay retention, commitment
+> coordination, and durable interlock reconciliation. Production manager calls
+> remain capability-gated until controlled systemd and Nix activation bindings
+> land; public `graft up`, `graft down`, and `graft restart` commands do not yet
+> exist. This contract depends on the
 > [local worker API](worker-api.md) and does not add a rebuild path.
 
 This document defines the lifecycle operations shared by the future CLI, TUI,
