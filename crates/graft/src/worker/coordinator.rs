@@ -1,5 +1,6 @@
 //! Lifecycle commitment coordinator for validated user workloads.
 
+use std::collections::BTreeMap;
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
@@ -17,8 +18,8 @@ use super::lifecycle::{
 use super::mutation::{
     LifecycleAuthorization, LifecycleDisposition, LifecycleFailurePhase, LifecycleTerminalResult,
     MutationAdmission, MutationGuidance, MutationPhase, MutationQuery, MutationQueryCode,
-    MutationQueryError, MutationRegistry, MutationTerminal, MutationTerminalError,
-    RetainedMutationResult,
+    MutationQueryError, MutationRegistry, MutationTerminal, MutationTerminalCode,
+    MutationTerminalError, RetainedMutationResult,
 };
 
 const MAX_TERMINAL_OBSERVATIONS: usize = 16;
@@ -83,6 +84,7 @@ pub struct LifecycleCoordinator<M: LifecycleManagerAdapter> {
     manager: M,
     interlocks: InterlockStore,
     registry: Mutex<MutationRegistry>,
+    commitments: Mutex<BTreeMap<(u32, super::lifecycle::OperationIdentifier), CommitmentGate>>,
 }
 
 impl<M: LifecycleManagerAdapter> LifecycleCoordinator<M> {
@@ -94,6 +96,7 @@ impl<M: LifecycleManagerAdapter> LifecycleCoordinator<M> {
             manager,
             interlocks,
             registry: Mutex::new(MutationRegistry::new(worker_epoch)),
+            commitments: Mutex::new(BTreeMap::new()),
         }
     }
 
@@ -150,7 +153,7 @@ impl<M: LifecycleManagerAdapter> LifecycleCoordinator<M> {
                 self.manager
                     .observe(&record.backend_selector)
                     .ok()
-                    .is_some_and(|observation| reconciliation_terminal(&record, observation))
+                    .is_some_and(|observation| reconciliation_terminal(&record, &observation))
             };
             if clear {
                 self.interlocks
@@ -212,10 +215,16 @@ impl<M: LifecycleManagerAdapter> LifecycleCoordinator<M> {
             registry.admit(principal_uid, request.clone(), logical_now_ms)
         };
         match admission {
+            MutationAdmission::JoinedReservation => {
+                self.join_commitment(principal_uid, request.operation_id);
+                return LifecycleExecution::Rejected(LifecycleRejection::OperationInProgress);
+            }
             MutationAdmission::JoinedInProgress(MutationPhase::Observing) => {
+                self.join_commitment(principal_uid, request.operation_id);
                 return self.resume_observation(principal_uid, &request, logical_now_ms);
             }
             MutationAdmission::JoinedInProgress(phase) => {
+                self.join_commitment(principal_uid, request.operation_id);
                 return LifecycleExecution::InProgress(phase);
             }
             MutationAdmission::JoinedTerminal(result) => {
@@ -236,7 +245,22 @@ impl<M: LifecycleManagerAdapter> LifecycleCoordinator<M> {
             MutationAdmission::Overloaded => {
                 return LifecycleExecution::Rejected(LifecycleRejection::Overloaded);
             }
-            MutationAdmission::Accepted => {}
+            MutationAdmission::Accepted => {
+                let Ok(gate) = commitment.lock().map(|gate| gate.clone()) else {
+                    self.reject_accepted(principal_uid, request.operation_id);
+                    return LifecycleExecution::Rejected(
+                        LifecycleRejection::InfrastructureUnavailable,
+                    );
+                };
+                if let Ok(mut commitments) = self.commitments.lock() {
+                    commitments.insert((principal_uid, request.operation_id), gate);
+                } else {
+                    self.reject_accepted(principal_uid, request.operation_id);
+                    return LifecycleExecution::Rejected(
+                        LifecycleRejection::InfrastructureUnavailable,
+                    );
+                }
+            }
         }
         let operation_id = request.operation_id;
         let execution = self.execute_new(
@@ -280,7 +304,10 @@ impl<M: LifecycleManagerAdapter> LifecycleCoordinator<M> {
         let Ok(observation) = self.manager.observe(backend_selector) else {
             return LifecycleExecution::Rejected(LifecycleRejection::InfrastructureUnavailable);
         };
-        let decision = decide_lifecycle(request.action, lifecycle, observation);
+        if self.manager.epoch().ok().as_ref() != Some(&manager_epoch) {
+            return LifecycleExecution::Rejected(LifecycleRejection::InfrastructureUnavailable);
+        }
+        let decision = decide_lifecycle(request.action, lifecycle, observation.clone());
         match decision {
             LifecycleDecision::Conflict => {
                 LifecycleExecution::Rejected(LifecycleRejection::Conflict)
@@ -292,6 +319,7 @@ impl<M: LifecycleManagerAdapter> LifecycleCoordinator<M> {
                 LifecycleExecution::Rejected(LifecycleRejection::InfrastructureUnavailable)
             }
             LifecycleDecision::NoChange => {
+                self.accept_reserved(principal_uid, request.operation_id);
                 let terminal = Self::lifecycle_result(
                     &request,
                     lifecycle,
@@ -301,6 +329,7 @@ impl<M: LifecycleManagerAdapter> LifecycleCoordinator<M> {
                     observation.state,
                     Some(observation.state),
                     None,
+                    observation.invocation_id.clone(),
                     LifecycleTimes {
                         accepted: logical_now_ms,
                         submission: None,
@@ -384,6 +413,7 @@ impl<M: LifecycleManagerAdapter> LifecycleCoordinator<M> {
         if self.interlocks.persist_new(&interlock).is_err() {
             return LifecycleExecution::Rejected(LifecycleRejection::InfrastructureUnavailable);
         }
+        self.accept_reserved(principal_uid, request.operation_id);
         interlock.phase = match manager_action {
             Some(ManagerAction::CancelStartThenStop) => InterlockPhase::CommittingCancel,
             Some(_) => InterlockPhase::CommittingSubmission,
@@ -408,9 +438,19 @@ impl<M: LifecycleManagerAdapter> LifecycleCoordinator<M> {
             let terminal = RetainedMutationResult::BeforeCommitment(MutationTerminalError {
                 operation_id: request.operation_id,
                 origin_worker_epoch: request.origin_worker_epoch,
+                worker_epoch: self.worker_epoch,
                 selector: request.selector.clone(),
                 action: request.action,
-                departure,
+                departure: Some(departure),
+                code: match departure {
+                    CallerDeparture::Cancelled => MutationTerminalCode::CancelledBeforeCommitment,
+                    CallerDeparture::Deadline => MutationTerminalCode::DeadlineBeforeCommitment,
+                    CallerDeparture::Disconnected => {
+                        MutationTerminalCode::DisconnectedBeforeCommitment
+                    }
+                },
+                phase: MutationPhase::Accepted,
+                guidance: MutationGuidance::SubmitNewOperation,
                 completed_ms: self.manager.logical_now_ms(),
             });
             self.publish_terminal(principal_uid, terminal.clone());
@@ -464,6 +504,7 @@ impl<M: LifecycleManagerAdapter> LifecycleCoordinator<M> {
                         initial_state,
                         None,
                         interlock.job_id,
+                        None,
                         LifecycleTimes {
                             accepted: interlock.accepted_ms,
                             submission: interlock.submission_ms,
@@ -515,6 +556,7 @@ impl<M: LifecycleManagerAdapter> LifecycleCoordinator<M> {
                         initial_state,
                         None,
                         interlock.job_id,
+                        None,
                         LifecycleTimes {
                             accepted: interlock.accepted_ms,
                             submission: interlock.submission_ms,
@@ -545,6 +587,7 @@ impl<M: LifecycleManagerAdapter> LifecycleCoordinator<M> {
         );
         let mut outcome = MutationTerminal::ResultUnknown;
         let mut final_state = None;
+        let mut final_invocation = None;
         let mut failure_phase = Some(LifecycleFailurePhase::Observation);
         let mut completed_ms = logical_now_ms;
         for _ in 0..MAX_TERMINAL_OBSERVATIONS {
@@ -557,19 +600,14 @@ impl<M: LifecycleManagerAdapter> LifecycleCoordinator<M> {
                 break;
             }
             final_state = Some(observation.state);
+            final_invocation.clone_from(&observation.invocation_id);
             completed_ms = observation.observed_ms.max(logical_now_ms);
-            if observation.execution_result == CorrelatedResult::Failed
-                || observation.stop_result == CorrelatedResult::Failed
-            {
+            if let Some(phase) = terminal_failure(request.action, &observation) {
                 outcome = MutationTerminal::Failed;
-                failure_phase = Some(if observation.stop_result == CorrelatedResult::Failed {
-                    LifecycleFailurePhase::Stop
-                } else {
-                    LifecycleFailurePhase::Execution
-                });
+                failure_phase = Some(phase);
                 break;
             }
-            if terminal_satisfied(request.action, lifecycle, observation) {
+            if terminal_satisfied(request.action, lifecycle, &observation) {
                 outcome = MutationTerminal::Succeeded;
                 failure_phase = None;
                 break;
@@ -588,6 +626,7 @@ impl<M: LifecycleManagerAdapter> LifecycleCoordinator<M> {
             initial_state,
             final_state,
             interlock.job_id,
+            final_invocation,
             LifecycleTimes {
                 accepted: interlock.accepted_ms,
                 submission: interlock.submission_ms,
@@ -636,16 +675,10 @@ impl<M: LifecycleManagerAdapter> LifecycleCoordinator<M> {
             if observed_epoch != manager_epoch {
                 break;
             }
-            let failure_phase = if observation.stop_result == CorrelatedResult::Failed {
-                Some(LifecycleFailurePhase::Stop)
-            } else if observation.execution_result == CorrelatedResult::Failed {
-                Some(LifecycleFailurePhase::Execution)
-            } else {
-                None
-            };
+            let failure_phase = terminal_failure(request.action, &observation);
             let outcome = if failure_phase.is_some() {
                 Some(MutationTerminal::Failed)
-            } else if terminal_satisfied(request.action, record.lifecycle, observation) {
+            } else if terminal_satisfied(request.action, record.lifecycle, &observation) {
                 Some(MutationTerminal::Succeeded)
             } else {
                 None
@@ -661,6 +694,7 @@ impl<M: LifecycleManagerAdapter> LifecycleCoordinator<M> {
                     record.initial_state,
                     Some(observation.state),
                     record.job_id,
+                    observation.invocation_id.clone(),
                     LifecycleTimes {
                         accepted: record.accepted_ms,
                         submission: record.submission_ms,
@@ -685,6 +719,28 @@ impl<M: LifecycleManagerAdapter> LifecycleCoordinator<M> {
         LifecycleExecution::InProgress(MutationPhase::Observing)
     }
 
+    fn join_commitment(
+        &self,
+        principal_uid: u32,
+        operation_id: super::lifecycle::OperationIdentifier,
+    ) {
+        if let Ok(mut commitments) = self.commitments.lock() {
+            if let Some(gate) = commitments.get_mut(&(principal_uid, operation_id)) {
+                let _ = gate.join();
+            }
+        }
+    }
+
+    fn accept_reserved(
+        &self,
+        principal_uid: u32,
+        operation_id: super::lifecycle::OperationIdentifier,
+    ) {
+        if let Ok(mut registry) = self.registry.lock() {
+            let _ = registry.accept(principal_uid, operation_id);
+        }
+    }
+
     fn reject_accepted(
         &self,
         principal_uid: u32,
@@ -692,6 +748,9 @@ impl<M: LifecycleManagerAdapter> LifecycleCoordinator<M> {
     ) {
         if let Ok(mut registry) = self.registry.lock() {
             let _ = registry.reject_accepted(principal_uid, operation_id);
+        }
+        if let Ok(mut commitments) = self.commitments.lock() {
+            commitments.remove(&(principal_uid, operation_id));
         }
     }
 
@@ -727,6 +786,9 @@ impl<M: LifecycleManagerAdapter> LifecycleCoordinator<M> {
         if let Ok(mut registry) = self.registry.lock() {
             let _ = registry.terminal(principal_uid, operation_id, result, completed_ms);
         }
+        if let Ok(mut commitments) = self.commitments.lock() {
+            commitments.remove(&(principal_uid, operation_id));
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -748,6 +810,7 @@ impl<M: LifecycleManagerAdapter> LifecycleCoordinator<M> {
             initial_state,
             None,
             interlock.job_id,
+            interlock.invocation_id.clone(),
             LifecycleTimes {
                 accepted: interlock.accepted_ms,
                 submission: interlock.submission_ms,
@@ -769,6 +832,7 @@ impl<M: LifecycleManagerAdapter> LifecycleCoordinator<M> {
         initial_state: LifecycleState,
         final_state: Option<LifecycleState>,
         job_id: Option<u32>,
+        invocation_id: Option<super::observation::ObservationText>,
         times: LifecycleTimes,
         failure_phase: Option<LifecycleFailurePhase>,
     ) -> RetainedMutationResult {
@@ -786,7 +850,7 @@ impl<M: LifecycleManagerAdapter> LifecycleCoordinator<M> {
             initial_state,
             final_state,
             job_id,
-            invocation_id: None,
+            invocation_id,
             accepted_ms: times.accepted,
             submission_ms: times.submission,
             completed_ms: times.completed,
@@ -811,7 +875,7 @@ const fn lifecycle_disposition(phase: InterlockPhase) -> LifecycleDisposition {
 
 fn reconciliation_terminal(
     record: &InterlockRecord,
-    observation: super::lifecycle::LifecycleObservation,
+    observation: &super::lifecycle::LifecycleObservation,
 ) -> bool {
     if observation.queued_job.is_some() || observation.correlatable_jobless_transition {
         return false;
@@ -827,8 +891,38 @@ fn reconciliation_terminal(
         | InterlockPhase::ObservingExisting
         | InterlockPhase::CommittedSubmission => {
             terminal_satisfied(record.action, record.lifecycle, observation)
-                || observation.execution_result == CorrelatedResult::Failed
-                || observation.stop_result == CorrelatedResult::Failed
+                || terminal_failure(record.action, observation).is_some()
+        }
+    }
+}
+
+fn terminal_failure(
+    action: LifecycleAction,
+    observation: &super::lifecycle::LifecycleObservation,
+) -> Option<LifecycleFailurePhase> {
+    match action {
+        LifecycleAction::Down => {
+            if observation.stop_result == CorrelatedResult::Failed {
+                Some(LifecycleFailurePhase::Stop)
+            } else {
+                None
+            }
+        }
+        LifecycleAction::Up => {
+            if observation.execution_result == CorrelatedResult::Failed {
+                Some(LifecycleFailurePhase::Execution)
+            } else {
+                None
+            }
+        }
+        LifecycleAction::Restart => {
+            if observation.stop_result == CorrelatedResult::Failed {
+                Some(LifecycleFailurePhase::Stop)
+            } else if observation.execution_result == CorrelatedResult::Failed {
+                Some(LifecycleFailurePhase::Execution)
+            } else {
+                None
+            }
         }
     }
 }
@@ -836,7 +930,7 @@ fn reconciliation_terminal(
 fn terminal_satisfied(
     action: LifecycleAction,
     lifecycle: WorkloadLifecycle,
-    observation: super::lifecycle::LifecycleObservation,
+    observation: &super::lifecycle::LifecycleObservation,
 ) -> bool {
     match action {
         LifecycleAction::Down => {
@@ -848,6 +942,8 @@ fn terminal_satisfied(
         LifecycleAction::Up => match lifecycle {
             WorkloadLifecycle::LongRunning => {
                 matches!(observation.state, LifecycleState::ActiveRunning)
+                    && observation.new_invocation
+                    && observation.invocation_id.is_some()
             }
             WorkloadLifecycle::Setup => {
                 matches!(observation.state, LifecycleState::ActiveExited)
@@ -860,6 +956,7 @@ fn terminal_satisfied(
         },
         LifecycleAction::Restart => {
             observation.new_invocation
+                && observation.invocation_id.is_some()
                 && match lifecycle {
                     WorkloadLifecycle::LongRunning => {
                         matches!(observation.state, LifecycleState::ActiveRunning)
@@ -980,6 +1077,7 @@ mod tests {
             failed_quiescent: true,
             correlatable_jobless_transition: false,
             execution_result: CorrelatedResult::None,
+            invocation_id: None,
             new_invocation: false,
             stop_result: CorrelatedResult::None,
         }
@@ -1099,16 +1197,37 @@ mod tests {
             invocation_id: None,
         };
         let stale_failed = observation(LifecycleState::Failed);
-        assert!(!reconciliation_terminal(&record, stale_failed));
+        assert!(!reconciliation_terminal(&record, &stale_failed));
 
         let mut correlated_failed = stale_failed;
         correlated_failed.execution_result = CorrelatedResult::Failed;
-        assert!(reconciliation_terminal(&record, correlated_failed));
+        assert!(reconciliation_terminal(&record, &correlated_failed));
         record.phase = InterlockPhase::CommittingCancel;
-        assert!(!reconciliation_terminal(&record, correlated_failed));
+        assert!(!reconciliation_terminal(&record, &correlated_failed));
+        record.phase = InterlockPhase::CommittingStop;
+        record.action = LifecycleAction::Down;
+        assert!(!reconciliation_terminal(&record, &correlated_failed));
         record.phase = InterlockPhase::CancelCommittedStopPending;
         let quiescent = observation(LifecycleState::Inactive);
-        assert!(reconciliation_terminal(&record, quiescent));
+        assert!(reconciliation_terminal(&record, &quiescent));
+    }
+
+    #[test]
+    fn active_state_without_invocation_attribution_is_not_terminal_success() {
+        let active = observation(LifecycleState::ActiveRunning);
+        assert!(!terminal_satisfied(
+            LifecycleAction::Up,
+            WorkloadLifecycle::LongRunning,
+            &active,
+        ));
+        let mut attributed = active;
+        attributed.new_invocation = true;
+        attributed.invocation_id = Some(ObservationText::parse("invocation-2").unwrap());
+        assert!(terminal_satisfied(
+            LifecycleAction::Up,
+            WorkloadLifecycle::LongRunning,
+            &attributed,
+        ));
     }
 
     #[test]
@@ -1157,7 +1276,7 @@ mod tests {
         assert_eq!(
             terminal_outcome(&coordinator.execute_with_gate(
                 1000,
-                value,
+                value.clone(),
                 &selector(),
                 WorkloadLifecycle::LongRunning,
                 true,
@@ -1166,6 +1285,16 @@ mod tests {
             )),
             Some(MutationTerminal::DepartedBeforeCommitment)
         );
+        let MutationQuery::Terminal(result) = coordinator.query(1000, &value, now) else {
+            panic!("terminal query expected");
+        };
+        let RetainedMutationResult::BeforeCommitment(error) = result.as_ref() else {
+            panic!("pre-commitment error expected");
+        };
+        assert_eq!(error.worker_epoch, worker_epoch());
+        assert_eq!(error.code, MutationTerminalCode::CancelledBeforeCommitment);
+        assert_eq!(error.phase, MutationPhase::Accepted);
+        assert_eq!(error.guidance, MutationGuidance::SubmitNewOperation);
         assert_eq!(submissions.load(Ordering::Relaxed), 0);
         assert!(coordinator.interlocks.load().unwrap().is_empty());
     }
@@ -1210,7 +1339,8 @@ mod tests {
             correlated: true,
         });
 
-        let (_temporary, coordinator, _submissions) = fixture(vec![activating], Ok(accepted()));
+        let (_temporary, coordinator, _submissions) =
+            fixture(vec![activating.clone()], Ok(accepted()));
         *coordinator.manager.cancellation.lock().unwrap() = Err(LifecycleAdapterError::Ambiguous);
         let value = request(LifecycleAction::Down);
         let now = value.operation_id.timestamp_ms();
@@ -1230,8 +1360,10 @@ mod tests {
             InterlockPhase::CommittingCancel
         );
 
-        let (_temporary, coordinator, _submissions) =
-            fixture(vec![activating], Err(LifecycleAdapterError::Ambiguous));
+        let (_temporary, coordinator, _submissions) = fixture(
+            vec![activating.clone()],
+            Err(LifecycleAdapterError::Ambiguous),
+        );
         let value = request(LifecycleAction::Down);
         assert_eq!(
             terminal_outcome(&coordinator.execute(
@@ -1358,6 +1490,8 @@ mod tests {
         );
         let mut terminal = observation(LifecycleState::ActiveRunning);
         terminal.observed_ms = 3;
+        terminal.new_invocation = true;
+        terminal.invocation_id = Some(ObservationText::parse("invocation-2").unwrap());
         observations.push(terminal);
         let (_temporary, coordinator, _submissions) = fixture(observations, Ok(accepted()));
         let value = request(LifecycleAction::Up);
@@ -1418,8 +1552,62 @@ mod tests {
     }
 
     #[test]
+    fn down_ignores_unattributed_execution_failure() {
+        let mut terminal = observation(LifecycleState::Failed);
+        terminal.failed_quiescent = true;
+        terminal.execution_result = CorrelatedResult::Failed;
+        let (_temporary, coordinator, _submissions) = fixture(
+            vec![observation(LifecycleState::ActiveRunning), terminal],
+            Ok(accepted()),
+        );
+        let value = request(LifecycleAction::Down);
+        let now = value.operation_id.timestamp_ms();
+
+        assert_eq!(
+            coordinator.execute(
+                1000,
+                value,
+                &selector(),
+                WorkloadLifecycle::LongRunning,
+                true,
+                now,
+            ),
+            LifecycleExecution::InProgress(MutationPhase::Observing)
+        );
+        assert_eq!(coordinator.interlocks.load().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn initial_observation_must_remain_bound_to_manager_epoch() {
+        let (_temporary, coordinator, submissions) =
+            fixture(vec![observation(LifecycleState::Inactive)], Ok(accepted()));
+        coordinator
+            .manager
+            .change_epoch_at
+            .store(1, Ordering::Relaxed);
+        let value = request(LifecycleAction::Up);
+        let now = value.operation_id.timestamp_ms();
+
+        assert_eq!(
+            coordinator.execute(
+                1000,
+                value,
+                &selector(),
+                WorkloadLifecycle::LongRunning,
+                true,
+                now,
+            ),
+            LifecycleExecution::Rejected(LifecycleRejection::InfrastructureUnavailable)
+        );
+        assert_eq!(submissions.load(Ordering::Relaxed), 0);
+        assert!(coordinator.interlocks.load().unwrap().is_empty());
+    }
+
+    #[test]
     fn manager_epoch_change_cannot_terminalize_or_clear_old_work() {
-        let terminal = observation(LifecycleState::ActiveRunning);
+        let mut terminal = observation(LifecycleState::ActiveRunning);
+        terminal.new_invocation = true;
+        terminal.invocation_id = Some(ObservationText::parse("invocation-2").unwrap());
         let (_temporary, coordinator, _submissions) = fixture(
             vec![observation(LifecycleState::Inactive), terminal],
             Ok(accepted()),
@@ -1427,7 +1615,7 @@ mod tests {
         coordinator
             .manager
             .change_epoch_at
-            .store(1, Ordering::Relaxed);
+            .store(2, Ordering::Relaxed);
         let value = request(LifecycleAction::Up);
         let now = value.operation_id.timestamp_ms();
 
@@ -1449,6 +1637,7 @@ mod tests {
     fn proven_success_clears_interlock_while_rejection_and_ambiguity_stay_distinct() {
         let mut terminal = observation(LifecycleState::ActiveRunning);
         terminal.new_invocation = true;
+        terminal.invocation_id = Some(ObservationText::parse("invocation-2").unwrap());
         let (_temporary, coordinator, submissions) = fixture(
             vec![
                 observation(LifecycleState::Inactive),

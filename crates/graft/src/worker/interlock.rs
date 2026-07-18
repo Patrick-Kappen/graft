@@ -139,6 +139,11 @@ impl InterlockStore {
     ///
     /// Returns an error for excess, malformed, unsafe, duplicate, or oversized records.
     pub fn load(&self) -> Result<Vec<InterlockRecord>, InterlockError> {
+        let _transaction = lock_directory(&self.directory, false)?;
+        self.load_unlocked()
+    }
+
+    fn load_unlocked(&self) -> Result<Vec<InterlockRecord>, InterlockError> {
         validate_directory(&self.directory, self.uid, self.gid)?;
         let mut entries = fs::read_dir(&self.directory).map_err(InterlockError::Io)?;
         let mut records = Vec::new();
@@ -219,11 +224,12 @@ impl InterlockStore {
         allow_replace: bool,
     ) -> Result<(), InterlockError> {
         validate_directory(&self.directory, self.uid, self.gid)?;
+        let _transaction = lock_directory(&self.directory, true)?;
         let bytes = serde_json::to_vec(record).map_err(InterlockError::Json)?;
         if bytes.is_empty() || bytes.len() > MAX_INTERLOCK_BYTES {
             return Err(InterlockError::RecordTooLarge);
         }
-        let existing = self.load()?;
+        let existing = self.load_unlocked()?;
         let replacing = existing
             .iter()
             .any(|value| value.operation_id == record.operation_id);
@@ -295,11 +301,42 @@ impl InterlockStore {
     /// Returns an error when the record or directory cannot be synchronized.
     pub fn remove(&self, operation_id: OperationIdentifier) -> Result<(), InterlockError> {
         validate_directory(&self.directory, self.uid, self.gid)?;
+        let _transaction = lock_directory(&self.directory, true)?;
         let path = self
             .directory
             .join(format!("{}.json", operation_id.to_canonical_string()));
         fs::remove_file(path).map_err(InterlockError::Io)?;
         sync_directory(&self.directory)
+    }
+}
+
+fn lock_directory(path: &Path, exclusive: bool) -> Result<DirectoryGuard, InterlockError> {
+    let directory = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW)
+        .open(path)
+        .map_err(InterlockError::Io)?;
+    let operation = if exclusive {
+        libc::LOCK_EX
+    } else {
+        libc::LOCK_SH
+    };
+    // SAFETY: `directory` owns a live descriptor and the flock does not outlive it.
+    if unsafe { libc::flock(directory.as_raw_fd(), operation) } != 0 {
+        return Err(InterlockError::Io(std::io::Error::last_os_error()));
+    }
+    Ok(DirectoryGuard { directory })
+}
+
+#[derive(Debug)]
+struct DirectoryGuard {
+    directory: File,
+}
+
+impl Drop for DirectoryGuard {
+    fn drop(&mut self) {
+        // SAFETY: the guard owns the locked descriptor until this drop call.
+        let _ = unsafe { libc::flock(self.directory.as_raw_fd(), libc::LOCK_UN) };
     }
 }
 
@@ -472,6 +509,30 @@ mod tests {
         assert_eq!(store.load().unwrap(), vec![value.clone()]);
         store.remove(value.operation_id).unwrap();
         assert!(store.load().unwrap().is_empty());
+    }
+
+    #[test]
+    fn concurrent_transactions_hide_temporary_files_and_preserve_records() {
+        let (_temporary, store) = fixture();
+        let first = record();
+        let mut second = first.clone();
+        second.operation_id =
+            OperationIdentifier::parse("018f0f77-8c4d-7b2a-8e6a-4b8a7d3a1c22").unwrap();
+
+        std::thread::scope(|scope| {
+            let first_write = scope.spawn(|| store.persist_new(&first));
+            let second_write = scope.spawn(|| store.persist_new(&second));
+            first_write.join().unwrap().unwrap();
+            second_write.join().unwrap().unwrap();
+        });
+        let loaded = store.load().unwrap();
+        assert_eq!(loaded.len(), 2);
+        assert!(loaded
+            .iter()
+            .any(|value| value.operation_id == first.operation_id));
+        assert!(loaded
+            .iter()
+            .any(|value| value.operation_id == second.operation_id));
     }
 
     #[test]
