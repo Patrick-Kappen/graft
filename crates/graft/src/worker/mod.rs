@@ -2,6 +2,7 @@
 
 pub mod activation;
 mod clock;
+pub mod coordinator;
 mod discovery;
 mod dispatcher;
 mod framing;

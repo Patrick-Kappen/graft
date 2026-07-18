@@ -91,7 +91,7 @@ pub enum MutationQuery {
 }
 
 /// Bounded in-memory operation registry; not desired-state persistence.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MutationRegistry {
     worker_epoch: ConnectionIdentifier,
     records: BTreeMap<(u32, OperationIdentifier), MutationRecord>,
@@ -107,6 +107,18 @@ impl MutationRegistry {
             records: BTreeMap::new(),
             active_workloads: BTreeMap::new(),
         }
+    }
+
+    /// Classifies admission without reserving identity or workload state.
+    #[must_use]
+    pub fn preview(
+        &self,
+        principal_uid: u32,
+        request: &LifecycleRequest,
+        logical_now_ms: u64,
+    ) -> MutationAdmission {
+        let mut candidate = self.clone();
+        candidate.admit(principal_uid, request.clone(), logical_now_ms)
     }
 
     /// Admits, joins, or rejects one immutable mutation.
