@@ -8,6 +8,7 @@ mod framing;
 pub mod interlock;
 pub mod lifecycle;
 mod limits;
+pub mod mutation;
 pub mod observation;
 pub mod protocol;
 mod server;
