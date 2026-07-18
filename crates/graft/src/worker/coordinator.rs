@@ -13,7 +13,9 @@ use super::lifecycle::{
     decide_lifecycle, LifecycleAction, LifecycleAdapterError, LifecycleDecision,
     LifecycleManagerAdapter, LifecycleRequest, LifecycleState, ManagerAction,
 };
-use super::mutation::{MutationAdmission, MutationPhase, MutationRegistry, MutationTerminal};
+use super::mutation::{
+    MutationAdmission, MutationPhase, MutationQuery, MutationRegistry, MutationTerminal,
+};
 
 /// Result of one lifecycle submission or duplicate join attempt.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -77,6 +79,20 @@ impl<M: LifecycleManagerAdapter> LifecycleCoordinator<M> {
             interlocks,
             registry: Mutex::new(MutationRegistry::new(worker_epoch)),
         }
+    }
+
+    /// Queries retained operation state without manager submission or joining.
+    #[must_use]
+    pub fn query(
+        &self,
+        principal_uid: u32,
+        request: &LifecycleRequest,
+        logical_now_ms: u64,
+    ) -> MutationQuery {
+        let Ok(mut registry) = self.registry.lock() else {
+            return MutationQuery::CacheLost;
+        };
+        registry.query(principal_uid, request, logical_now_ms)
     }
 
     /// Reconciles durable records without reconstructing mutation results.
@@ -626,6 +642,10 @@ mod tests {
             LifecycleExecution::Terminal(MutationTerminal::Succeeded)
         );
         assert!(coordinator.interlocks.load().unwrap().is_empty());
+        assert_eq!(
+            coordinator.query(1000, &value, now),
+            MutationQuery::Terminal(MutationTerminal::Succeeded)
+        );
         assert_eq!(
             coordinator.execute(
                 1000,
