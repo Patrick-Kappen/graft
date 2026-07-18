@@ -44,12 +44,29 @@ enum ManagerArgument {
     User,
 }
 
+pub(crate) struct Prepared {
+    arguments: Arguments,
+    listener: std::os::unix::net::UnixListener,
+}
+
+pub(crate) fn prepare() -> Result<Prepared> {
+    let arguments = Arguments::parse();
+    let listener = activation::take_listener().context("socket activation validation failed")?;
+    Ok(Prepared {
+        arguments,
+        listener,
+    })
+}
+
 pub(crate) async fn run(
+    prepared: Prepared,
     capabilities: CapabilitySet,
     dispatcher: Arc<dyn SemanticDispatcher>,
 ) -> Result<()> {
-    let arguments = Arguments::parse();
-    let listener = activation::take_listener().context("socket activation validation failed")?;
+    let Prepared {
+        arguments,
+        listener,
+    } = prepared;
     let target = match arguments.target {
         TargetArgument::System => WorkerTarget::System,
         TargetArgument::User => WorkerTarget::User,

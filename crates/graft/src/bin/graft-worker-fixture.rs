@@ -6,11 +6,14 @@ use graft::worker::{MockDispatcher, SemanticDispatcher};
 
 mod graft_worker_common;
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    graft_worker_common::run(
-        CapabilitySet::new([Capability::Observe])?,
-        Arc::new(MockDispatcher) as Arc<dyn SemanticDispatcher>,
-    )
-    .await
+fn main() -> Result<()> {
+    let prepared = graft_worker_common::prepare()?;
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?
+        .block_on(graft_worker_common::run(
+            prepared,
+            CapabilitySet::new([Capability::Observe])?,
+            Arc::new(MockDispatcher) as Arc<dyn SemanticDispatcher>,
+        ))
 }
