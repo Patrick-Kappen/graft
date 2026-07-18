@@ -2,12 +2,20 @@
 
 pub mod activation;
 mod clock;
+mod discovery;
 mod dispatcher;
 mod framing;
 mod limits;
+pub mod observation;
 pub mod protocol;
 mod server;
 
+pub use discovery::{
+    BackendSelector, DiscoveryDispatcher, ManagerStatusAdapter, RuntimeStatusAdapter,
+    UnavailableManagerAdapter, UnavailableRuntimeAdapter,
+};
+#[cfg(feature = "worker-test-fixtures")]
+pub use discovery::{MockManagerAdapter, MockRuntimeAdapter};
 #[cfg(feature = "worker-test-fixtures")]
 pub use dispatcher::MockDispatcher;
 pub use dispatcher::{

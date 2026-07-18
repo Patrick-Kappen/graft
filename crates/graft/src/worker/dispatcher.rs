@@ -3,9 +3,9 @@
 use std::future::Future;
 use std::pin::Pin;
 
-use crate::protocol::{ConnectionIdentifier, RequestIdentifier, WorkerTarget};
+use crate::protocol::{ConnectionIdentifier, RequestIdentifier, SafeSummary, WorkerTarget};
 
-use super::protocol::SemanticRequest;
+use super::protocol::{ReadOnlyResponse, SemanticRequest, WorkerErrorCode};
 
 /// Kernel-authenticated Unix peer credentials captured at accept time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,10 +43,12 @@ pub struct DispatchContext {
 }
 
 /// Bounded server-core execution plan returned by a semantic handler.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DispatchPlan {
     /// Operation is unavailable in this worker slice.
     Unsupported,
+    /// Typed unary discovery/status outcome.
+    Unary(Box<Result<ReadOnlyResponse, DispatchFailure>>),
     /// Deterministic unary fixture.
     #[cfg(feature = "worker-test-fixtures")]
     MockUnary {
@@ -61,6 +63,26 @@ pub enum DispatchPlan {
         /// Delay between items.
         interval_ms: u64,
     },
+}
+
+/// Semantic failure returned without transport metadata.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DispatchFailure {
+    /// Stable error code.
+    pub code: WorkerErrorCode,
+    /// Safe bounded summary.
+    pub summary: SafeSummary,
+}
+
+impl DispatchFailure {
+    /// Creates a semantic failure from a fixed safe message.
+    #[must_use]
+    pub fn new(code: WorkerErrorCode, summary: &'static str) -> Self {
+        Self {
+            code,
+            summary: SafeSummary::parse(summary).expect("fixed dispatcher summary is valid"),
+        }
+    }
 }
 
 /// Typed semantic boundary; implementations receive no socket or raw JSON.
@@ -101,7 +123,10 @@ impl SemanticDispatcher for MockDispatcher {
     ) -> Pin<Box<dyn Future<Output = DispatchPlan> + Send + 'a>> {
         Box::pin(async move {
             match request {
-                SemanticRequest::Reserved => DispatchPlan::Unsupported,
+                SemanticRequest::ListStatus(_)
+                | SemanticRequest::GetStatus { .. }
+                | SemanticRequest::Inspect { .. }
+                | SemanticRequest::Reserved => DispatchPlan::Unsupported,
                 SemanticRequest::MockUnary { delay_ms }
                 | SemanticRequest::MockLifecycle { delay_ms } => DispatchPlan::MockUnary {
                     delay_ms: *delay_ms,

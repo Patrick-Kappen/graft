@@ -1,9 +1,11 @@
 # Runtime observability contract
 
-> **Status:** approved design for future implementation. The current release
-> does not expose `graft status`, `graft inspect`, or `graft logs`. This contract
-> defines the typed read-only surface consumed by the future CLI, TUI, and
-> controller through the [local worker API](worker-api.md).
+> **Status:** partially implemented. The user worker now exposes typed,
+> manifest-bound list-status, get-status, and inspect operations with explicit
+> layer availability and mock backend adapters. Controlled systemd and Podman
+> adapters, public CLI commands, logs, metrics, storage, events, and follow
+> streams remain future work. This contract defines the complete read-only
+> surface consumed through the [local worker API](worker-api.md).
 
 This document defines workload identity, layered snapshots, lifecycle evidence,
 logs, metrics, storage accounting, events, freshness, diagnostics,

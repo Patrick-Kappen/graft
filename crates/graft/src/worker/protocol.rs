@@ -4,6 +4,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::protocol::{ConnectionIdentifier, RequestIdentifier, SafeSummary};
 
+use super::observation::{
+    InspectSnapshot, ListStatusRequest, StatusPage, WorkloadSelector, WorkloadSnapshot,
+};
+
 /// Client frame accepted after a successful handshake.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
@@ -72,6 +76,18 @@ pub struct Cancel {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SemanticRequest {
+    /// Lists one bounded stable page of user-scope status summaries.
+    ListStatus(ListStatusRequest),
+    /// Gets one manifest-bound layered status snapshot.
+    GetStatus {
+        /// Exact current workload identity.
+        selector: WorkloadSelector,
+    },
+    /// Gets one full allowlisted inspect snapshot.
+    Inspect {
+        /// Exact current workload identity.
+        selector: WorkloadSelector,
+    },
     /// Internal production placeholder that is never accepted from the wire.
     #[serde(skip)]
     Reserved,
@@ -137,11 +153,25 @@ pub struct Response {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "result", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ResponseResult {
+    /// Read-only discovery or status operation completed.
+    ReadOnly(Box<ReadOnlyResponse>),
     /// Fixture operation completed.
     #[cfg(feature = "worker-test-fixtures")]
     MockComplete,
     /// Request failed safely.
     Error(WorkerError),
+}
+
+/// Successful read-only operation result.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "response", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ReadOnlyResponse {
+    /// One stable page of summaries.
+    StatusPage(StatusPage),
+    /// One layered status snapshot.
+    Status(WorkloadSnapshot),
+    /// One full allowlisted inspect snapshot.
+    Inspect(InspectSnapshot),
 }
 
 /// Sequenced fixture stream item.
@@ -261,4 +291,18 @@ pub enum WorkerErrorCode {
     InvalidAcknowledgement,
     /// Semantic operation is unavailable in this build.
     Unsupported,
+    /// Peer or fixed context is not authorized, without existence disclosure.
+    Unauthorized,
+    /// Current manifest cannot be loaded coherently.
+    ManifestUnavailable,
+    /// Request targets an old manifest generation.
+    StaleManifest,
+    /// Workload is not visible under the current authorization.
+    WorkloadNotFound,
+    /// Pagination cursor no longer matches current visible state.
+    PageCursorExpired,
+    /// Typed request values violate semantic bounds.
+    InvalidRequest,
+    /// Internal read-only state is temporarily unavailable.
+    Unavailable,
 }

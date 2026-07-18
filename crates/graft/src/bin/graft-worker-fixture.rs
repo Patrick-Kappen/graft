@@ -14,6 +14,6 @@ fn main() -> Result<()> {
         .block_on(graft_worker_common::run(
             prepared,
             CapabilitySet::new([Capability::Observe])?,
-            Arc::new(MockDispatcher) as Arc<dyn SemanticDispatcher>,
+            Some(Arc::new(MockDispatcher) as Arc<dyn SemanticDispatcher>),
         ))
 }
