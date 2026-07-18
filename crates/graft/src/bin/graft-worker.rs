@@ -1,8 +1,5 @@
-use std::sync::Arc;
-
 use anyhow::Result;
-use graft::protocol::CapabilitySet;
-use graft::worker::{SemanticDispatcher, UnsupportedDispatcher};
+use graft::protocol::{Capability, CapabilitySet};
 
 mod graft_worker_common;
 
@@ -13,7 +10,7 @@ fn main() -> Result<()> {
         .build()?
         .block_on(graft_worker_common::run(
             prepared,
-            CapabilitySet::new([])?,
-            Arc::new(UnsupportedDispatcher) as Arc<dyn SemanticDispatcher>,
+            CapabilitySet::new([Capability::Observe, Capability::Inspect])?,
+            None,
         ))
 }

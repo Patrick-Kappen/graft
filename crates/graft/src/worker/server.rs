@@ -12,7 +12,7 @@ use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::{mpsc, oneshot, watch, Notify, Semaphore};
 
 use crate::protocol::{
-    encode_frame_exact, encoded_frame_len, negotiate_handshake, CapabilitySet,
+    encode_frame_exact, encoded_frame_len, negotiate_handshake, Capability, CapabilitySet,
     ClientHandshakeFrame, ConnectionIdentifier, EffectiveLimits, FrameDirection, HandshakeError,
     ManifestState, ProtocolError, ProtocolErrorCode, ProtocolVersionRange, SafeSummary,
     ServerHandshakeConfig, ServerHandshakeFrame, SoftwareVersion, WorkerContext,
@@ -20,7 +20,8 @@ use crate::protocol::{
 
 use super::clock::WorkerEpoch;
 use super::dispatcher::{
-    DispatchContext, DispatchPlan, PeerCredentials, PrincipalKey, SemanticDispatcher,
+    DispatchContext, DispatchFailure, DispatchPlan, PeerCredentials, PrincipalKey,
+    SemanticDispatcher,
 };
 #[cfg(feature = "worker-test-fixtures")]
 use super::framing::PARTIAL_FRAME_TIMEOUT;
@@ -322,6 +323,7 @@ impl Connection {
                             peer,
                             principal: PrincipalKey { target: config.context.target(), uid },
                             limits: server_hello.effective_limits,
+                            capabilities: server_hello.capabilities.clone(),
                             epoch: epoch.clone(),
                             dispatcher: config.dispatcher.clone(),
                             registry: writer_registry.clone(),
@@ -697,6 +699,7 @@ struct RequestContext {
     peer: PeerCredentials,
     principal: PrincipalKey,
     limits: EffectiveLimits,
+    capabilities: CapabilitySet,
     epoch: Arc<WorkerEpoch>,
     dispatcher: Arc<dyn SemanticDispatcher>,
     registry: AdmissionRegistry,
@@ -722,7 +725,10 @@ enum OperationDeadlineClass {
 
 const fn operation_deadline_class(operation: &SemanticRequest) -> OperationDeadlineClass {
     match operation {
-        SemanticRequest::Reserved => OperationDeadlineClass::Unary,
+        SemanticRequest::ListStatus(_)
+        | SemanticRequest::GetStatus { .. }
+        | SemanticRequest::Inspect { .. }
+        | SemanticRequest::Reserved => OperationDeadlineClass::Unary,
         #[cfg(feature = "worker-test-fixtures")]
         SemanticRequest::MockUnary { .. } | SemanticRequest::MockStream { .. } => {
             OperationDeadlineClass::Unary
@@ -788,6 +794,29 @@ async fn spawn_request(context: RequestContext) {
     };
     if !identifier_reserved {
         queue_duplicate_error(&context).await;
+        return;
+    }
+    let required_capability = match &context.request.operation {
+        SemanticRequest::ListStatus(_) | SemanticRequest::GetStatus { .. } => {
+            Some(Capability::Observe)
+        }
+        SemanticRequest::Inspect { .. } => Some(Capability::Inspect),
+        SemanticRequest::Reserved => None,
+        #[cfg(feature = "worker-test-fixtures")]
+        SemanticRequest::MockUnary { .. }
+        | SemanticRequest::MockLifecycle { .. }
+        | SemanticRequest::MockStream { .. } => None,
+    };
+    if required_capability.is_some_and(|capability| !context.capabilities.contains(capability)) {
+        if let Ok(mut active) = context.active.lock() {
+            active.remove(&context.request.request_id);
+        }
+        send_error(
+            &context,
+            WorkerErrorCode::Unsupported,
+            "operation capability was not negotiated",
+        )
+        .await;
         return;
     }
     let deadline_maximum = match operation_deadline_class(&context.request.operation) {
@@ -976,6 +1005,7 @@ async fn run_request(
         }
     };
     match plan {
+        DispatchPlan::Unary(result) => queue_unary_dispatch(&context, *result).await,
         DispatchPlan::Unsupported => {
             queue_frame(
                 &context,
@@ -1014,6 +1044,26 @@ async fn run_request(
             .await;
         }
     }
+}
+
+async fn queue_unary_dispatch(
+    context: &RequestContext,
+    result: Result<super::protocol::ReadOnlyResponse, DispatchFailure>,
+) {
+    let result = match result {
+        Ok(response) => ResponseResult::ReadOnly(Box::new(response)),
+        Err(error) => dispatch_error(context.epoch.identifier(), error),
+    };
+    queue_frame(
+        context,
+        ServerFrame::Response(Response {
+            server_connection_id: context.expected_connection,
+            request_id: context.request.request_id,
+            result,
+        }),
+        None,
+    )
+    .await;
 }
 
 #[cfg(feature = "worker-test-fixtures")]
@@ -1538,6 +1588,27 @@ async fn queue_encoded(
     }
 }
 
+fn dispatch_error(worker_epoch: ConnectionIdentifier, error: DispatchFailure) -> ResponseResult {
+    let retry = match error.code {
+        WorkerErrorCode::StaleManifest
+        | WorkerErrorCode::WorkloadNotFound
+        | WorkerErrorCode::PageCursorExpired => RetryClassification::AfterStateRefresh,
+        WorkerErrorCode::Unauthorized => RetryClassification::AfterAuthorization,
+        WorkerErrorCode::ManifestUnavailable | WorkerErrorCode::Unavailable => {
+            RetryClassification::AfterBackendRecovery
+        }
+        WorkerErrorCode::Overloaded => RetryClassification::SameRequestWithBackoff,
+        _ => RetryClassification::Never,
+    };
+    ResponseResult::Error(WorkerError {
+        code: error.code,
+        summary: error.summary,
+        retry,
+        phase: OperationPhase::Execution,
+        worker_epoch,
+    })
+}
+
 fn worker_error(
     worker_epoch: ConnectionIdentifier,
     code: WorkerErrorCode,
@@ -1549,14 +1620,21 @@ fn worker_error(
         WorkerErrorCode::Overloaded | WorkerErrorCode::WorkerShutdown => {
             RetryClassification::SameRequestWithBackoff
         }
-        WorkerErrorCode::RequestConflict | WorkerErrorCode::RequestNotFound => {
-            RetryClassification::AfterStateRefresh
+        WorkerErrorCode::RequestConflict
+        | WorkerErrorCode::RequestNotFound
+        | WorkerErrorCode::StaleManifest
+        | WorkerErrorCode::WorkloadNotFound
+        | WorkerErrorCode::PageCursorExpired => RetryClassification::AfterStateRefresh,
+        WorkerErrorCode::Unauthorized => RetryClassification::AfterAuthorization,
+        WorkerErrorCode::ManifestUnavailable | WorkerErrorCode::Unavailable => {
+            RetryClassification::AfterBackendRecovery
         }
         WorkerErrorCode::ConnectionMismatch
         | WorkerErrorCode::Deadline
         | WorkerErrorCode::Cancelled
         | WorkerErrorCode::InvalidAcknowledgement
-        | WorkerErrorCode::Unsupported => RetryClassification::Never,
+        | WorkerErrorCode::Unsupported
+        | WorkerErrorCode::InvalidRequest => RetryClassification::Never,
     };
     ResponseResult::Error(WorkerError {
         code,

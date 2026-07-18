@@ -10,7 +10,10 @@ use graft::protocol::{
     PROTOCOL_MAJOR, PROTOCOL_MAX_MINOR, PROTOCOL_MIN_MINOR,
 };
 use graft::worker::activation;
-use graft::worker::{serve, SemanticDispatcher, ServerConfig};
+use graft::worker::{
+    serve, DiscoveryDispatcher, SemanticDispatcher, ServerConfig, UnavailableManagerAdapter,
+    UnavailableRuntimeAdapter, UnsupportedDispatcher,
+};
 
 #[derive(Debug, Parser)]
 struct Arguments {
@@ -61,7 +64,7 @@ pub(crate) fn prepare() -> Result<Prepared> {
 pub(crate) async fn run(
     prepared: Prepared,
     capabilities: CapabilitySet,
-    dispatcher: Arc<dyn SemanticDispatcher>,
+    dispatcher: Option<Arc<dyn SemanticDispatcher>>,
 ) -> Result<()> {
     let Prepared {
         arguments,
@@ -74,6 +77,11 @@ pub(crate) async fn run(
     let manager = match arguments.manager {
         ManagerArgument::System => ManagerKind::System,
         ManagerArgument::User => ManagerKind::User,
+    };
+    let capabilities = if target == WorkerTarget::User {
+        capabilities
+    } else {
+        CapabilitySet::new([])?
     };
     if arguments.effective_uid != rustix::process::geteuid().as_raw() {
         bail!("configured effective UID does not match the worker process");
@@ -120,6 +128,15 @@ pub(crate) async fn run(
             reason: manifest_unavailable_reason(&error),
         },
     };
+    let dispatcher = dispatcher.unwrap_or_else(|| match target {
+        WorkerTarget::User => Arc::new(DiscoveryDispatcher::new(
+            loader,
+            arguments.effective_uid,
+            Arc::new(UnavailableManagerAdapter),
+            Arc::new(UnavailableRuntimeAdapter),
+        )) as Arc<dyn SemanticDispatcher>,
+        WorkerTarget::System => Arc::new(UnsupportedDispatcher) as Arc<dyn SemanticDispatcher>,
+    });
     let config = ServerConfig {
         context,
         protocol: ProtocolVersionRange::new(
