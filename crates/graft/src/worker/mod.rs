@@ -5,6 +5,8 @@ mod clock;
 mod discovery;
 mod dispatcher;
 mod framing;
+pub mod interlock;
+pub mod lifecycle;
 mod limits;
 pub mod observation;
 pub mod protocol;
