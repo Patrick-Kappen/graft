@@ -153,6 +153,7 @@ pub struct QueuedJob {
 /// Complete normalized manager input to one lifecycle decision.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
+#[allow(clippy::struct_excessive_bools)]
 pub struct LifecycleObservation {
     /// Current normalized state.
     pub state: LifecycleState,
@@ -162,6 +163,10 @@ pub struct LifecycleObservation {
     pub failed_quiescent: bool,
     /// Whether a jobless automatic restart or cleanup is safely correlatable.
     pub correlatable_jobless_transition: bool,
+    /// Whether operation-correlated execution success was proven.
+    pub correlated_execution_succeeded: bool,
+    /// Whether a new invocation relative to pre-submission state was proven.
+    pub new_invocation: bool,
 }
 
 /// Manager action selected by the worker.
@@ -378,6 +383,8 @@ mod tests {
             queued_job: None,
             failed_quiescent: true,
             correlatable_jobless_transition: false,
+            correlated_execution_succeeded: false,
+            new_invocation: false,
         }
     }
 
