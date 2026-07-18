@@ -166,6 +166,7 @@ enum MutationState {
 struct MutationRecord {
     request: LifecycleRequest,
     accepted_ms: u64,
+    disposition: Option<LifecycleDisposition>,
     state: MutationState,
 }
 
@@ -190,6 +191,80 @@ pub enum MutationAdmission {
     Overloaded,
 }
 
+/// Safe client action for a non-terminal query result.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MutationGuidance {
+    /// Poll the same immutable operation identity.
+    Poll,
+    /// Submit a new operation identity only when still desired.
+    SubmitNewOperation,
+    /// Do not retry until operator reconciliation restores provenance.
+    Reconcile,
+    /// Correct immutable query fields before retrying.
+    CorrectIdentity,
+}
+
+/// Stable typed code for a non-terminal query result.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MutationQueryCode {
+    /// Operation remains accepted.
+    InProgress,
+    /// Current-epoch operation was not found.
+    NotFound,
+    /// Operation identifier is outside its replay window.
+    OperationIdExpired,
+    /// Originating worker cache is unavailable.
+    CacheLost,
+    /// Known immutable identity does not match.
+    QueryIdentityMismatch,
+}
+
+/// Correlated payload for an accepted non-terminal operation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub struct MutationInProgress {
+    /// Principal-scoped operation identity.
+    pub operation_id: OperationIdentifier,
+    /// Origin worker epoch supplied by the request.
+    pub origin_worker_epoch: ConnectionIdentifier,
+    /// Current worker epoch answering the query.
+    pub worker_epoch: ConnectionIdentifier,
+    /// Immutable selector.
+    pub selector: WorkloadSelector,
+    /// Requested action.
+    pub action: LifecycleAction,
+    /// Server logical acceptance time.
+    pub accepted_ms: u64,
+    /// Current typed phase.
+    pub phase: MutationPhase,
+    /// Manager-work relationship once commitment began.
+    pub disposition: Option<LifecycleDisposition>,
+    /// Stable result code.
+    pub code: MutationQueryCode,
+    /// Safe client action.
+    pub guidance: MutationGuidance,
+}
+
+/// Correlated payload for a recordless or mismatched query.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub struct MutationQueryError {
+    /// Queried operation identity.
+    pub operation_id: OperationIdentifier,
+    /// Origin worker epoch supplied by the request.
+    pub origin_worker_epoch: ConnectionIdentifier,
+    /// Current worker epoch answering the query.
+    pub worker_epoch: ConnectionIdentifier,
+    /// Server logical query time.
+    pub observed_ms: u64,
+    /// Stable result code.
+    pub code: MutationQueryCode,
+    /// Safe client action.
+    pub guidance: MutationGuidance,
+}
+
 /// Result of a non-mutating operation-result query.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "query_result", content = "value", rename_all = "snake_case")]
@@ -197,15 +272,15 @@ pub enum MutationQuery {
     /// Retained terminal result.
     Terminal(Box<RetainedMutationResult>),
     /// Current accepted phase.
-    InProgress(MutationPhase),
+    InProgress(MutationInProgress),
     /// Current-epoch identifier is fresh but unknown.
-    NotFound,
+    NotFound(MutationQueryError),
     /// Current-epoch identifier is unknown and expired.
-    Expired,
+    Expired(MutationQueryError),
     /// Originating worker epoch was lost.
-    CacheLost,
+    CacheLost(MutationQueryError),
     /// Known ID does not match action or selector.
-    IdentityMismatch,
+    IdentityMismatch(MutationQueryError),
 }
 
 /// Bounded in-memory operation registry; not desired-state persistence.
@@ -225,18 +300,6 @@ impl MutationRegistry {
             records: BTreeMap::new(),
             active_workloads: BTreeMap::new(),
         }
-    }
-
-    /// Classifies admission without reserving identity or workload state.
-    #[must_use]
-    pub fn preview(
-        &self,
-        principal_uid: u32,
-        request: &LifecycleRequest,
-        logical_now_ms: u64,
-    ) -> MutationAdmission {
-        let mut candidate = self.clone();
-        candidate.admit(principal_uid, request.clone(), logical_now_ms)
     }
 
     /// Admits, joins, or rejects one immutable mutation.
@@ -286,10 +349,49 @@ impl MutationRegistry {
             MutationRecord {
                 request,
                 accepted_ms: logical_now_ms,
+                disposition: None,
                 state: MutationState::InProgress(MutationPhase::Accepted),
             },
         );
         MutationAdmission::Accepted
+    }
+
+    /// Removes an accepted operation before manager commitment.
+    #[must_use]
+    pub fn reject_accepted(
+        &mut self,
+        principal_uid: u32,
+        operation_id: OperationIdentifier,
+    ) -> bool {
+        let key = (principal_uid, operation_id);
+        let Some(record) = self.records.get(&key) else {
+            return false;
+        };
+        if record.state != MutationState::InProgress(MutationPhase::Accepted) {
+            return false;
+        }
+        let workload_key = (principal_uid, record.request.selector.clone());
+        self.active_workloads.remove(&workload_key);
+        self.records.remove(&key).is_some()
+    }
+
+    /// Records manager-work disposition and advances commitment.
+    #[must_use]
+    pub fn commit(
+        &mut self,
+        principal_uid: u32,
+        operation_id: OperationIdentifier,
+        disposition: LifecycleDisposition,
+    ) -> bool {
+        let Some(record) = self.records.get_mut(&(principal_uid, operation_id)) else {
+            return false;
+        };
+        if matches!(record.state, MutationState::Terminal { .. }) {
+            return false;
+        }
+        record.disposition = Some(disposition);
+        record.state = MutationState::InProgress(MutationPhase::Committing);
+        true
     }
 
     /// Advances one known in-progress operation.
@@ -348,21 +450,52 @@ impl MutationRegistry {
         logical_now_ms: u64,
     ) -> MutationQuery {
         self.expire(logical_now_ms);
+        let query_error = |code, guidance| MutationQueryError {
+            operation_id: request.operation_id,
+            origin_worker_epoch: request.origin_worker_epoch,
+            worker_epoch: self.worker_epoch,
+            observed_ms: logical_now_ms,
+            code,
+            guidance,
+        };
         if request.origin_worker_epoch != self.worker_epoch {
-            return MutationQuery::CacheLost;
+            return MutationQuery::CacheLost(query_error(
+                MutationQueryCode::CacheLost,
+                MutationGuidance::Reconcile,
+            ));
         }
         let Some(record) = self.records.get(&(principal_uid, request.operation_id)) else {
             return if request.operation_id.is_fresh_at(logical_now_ms) {
-                MutationQuery::NotFound
+                MutationQuery::NotFound(query_error(
+                    MutationQueryCode::NotFound,
+                    MutationGuidance::SubmitNewOperation,
+                ))
             } else {
-                MutationQuery::Expired
+                MutationQuery::Expired(query_error(
+                    MutationQueryCode::OperationIdExpired,
+                    MutationGuidance::SubmitNewOperation,
+                ))
             };
         };
         if record.request.action != request.action || record.request.selector != request.selector {
-            return MutationQuery::IdentityMismatch;
+            return MutationQuery::IdentityMismatch(query_error(
+                MutationQueryCode::QueryIdentityMismatch,
+                MutationGuidance::CorrectIdentity,
+            ));
         }
         match record.state {
-            MutationState::InProgress(phase) => MutationQuery::InProgress(phase),
+            MutationState::InProgress(phase) => MutationQuery::InProgress(MutationInProgress {
+                operation_id: request.operation_id,
+                origin_worker_epoch: request.origin_worker_epoch,
+                worker_epoch: self.worker_epoch,
+                selector: request.selector.clone(),
+                action: request.action,
+                accepted_ms: record.accepted_ms,
+                phase,
+                disposition: record.disposition,
+                code: MutationQueryCode::InProgress,
+                guidance: MutationGuidance::Poll,
+            }),
             MutationState::Terminal { ref result, .. } => MutationQuery::Terminal(result.clone()),
         }
     }
@@ -529,15 +662,33 @@ mod tests {
             registry.admit(1000, value.clone(), now),
             MutationAdmission::OldEpoch
         );
-        assert_eq!(registry.query(1000, &value, now), MutationQuery::CacheLost);
+        assert!(matches!(
+            registry.query(1000, &value, now),
+            MutationQuery::CacheLost(MutationQueryError {
+                code: MutationQueryCode::CacheLost,
+                guidance: MutationGuidance::Reconcile,
+                ..
+            })
+        ));
         let current = LifecycleRequest {
             origin_worker_epoch: worker_epoch,
             ..value
         };
-        assert_eq!(registry.query(1000, &current, now), MutationQuery::NotFound);
-        assert_eq!(
+        assert!(matches!(
+            registry.query(1000, &current, now),
+            MutationQuery::NotFound(MutationQueryError {
+                code: MutationQueryCode::NotFound,
+                guidance: MutationGuidance::SubmitNewOperation,
+                ..
+            })
+        ));
+        assert!(matches!(
             registry.query(1000, &current, now + OPERATION_PAST_WINDOW_MS),
-            MutationQuery::Expired
-        );
+            MutationQuery::Expired(MutationQueryError {
+                code: MutationQueryCode::OperationIdExpired,
+                guidance: MutationGuidance::SubmitNewOperation,
+                ..
+            })
+        ));
     }
 }
