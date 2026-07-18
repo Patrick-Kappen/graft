@@ -13,7 +13,7 @@ use crate::manifest::WorkloadLifecycle;
 use crate::protocol::ConnectionIdentifier;
 
 use super::discovery::BackendSelector;
-use super::lifecycle::{LifecycleAction, ManagerEpoch, OperationIdentifier};
+use super::lifecycle::{LifecycleAction, LifecycleState, ManagerEpoch, OperationIdentifier};
 use super::observation::{ObservationText, WorkloadSelector};
 
 /// Maximum retained interlocks per worker.
@@ -61,6 +61,8 @@ pub struct InterlockRecord {
     pub action: LifecycleAction,
     /// Exact worker-derived backend identities required for reconciliation.
     pub backend_selector: BackendSelector,
+    /// Manager state captured before commitment.
+    pub initial_state: LifecycleState,
     /// Current durable phase.
     pub phase: InterlockPhase,
     /// Manager epoch when known.
@@ -330,6 +332,7 @@ fn validate_directory(path: &Path, uid: u32, gid: u32) -> Result<(), InterlockEr
 fn validate_file(file: &File, uid: u32, gid: u32, mode: u32) -> Result<(), InterlockError> {
     let metadata = file.metadata().map_err(InterlockError::Io)?;
     if !metadata.is_file()
+        || metadata.nlink() != 1
         || metadata.uid() != uid
         || metadata.gid() != gid
         || metadata.permissions().mode() & 0o7777 != mode
@@ -399,6 +402,7 @@ mod tests {
                 generated_service: ObservationText::parse("alpha.service").unwrap(),
                 container_name: ObservationText::parse("alpha").unwrap(),
             },
+            initial_state: LifecycleState::Inactive,
             phase: InterlockPhase::Prepared,
             manager_epoch: None,
             job_id: None,
@@ -433,6 +437,11 @@ mod tests {
         assert!(matches!(store.load(), Err(InterlockError::UnsafeObject)));
 
         fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+        let hardlink = store.directory.parent().unwrap().join("record-link");
+        fs::hard_link(&path, &hardlink).unwrap();
+        assert!(matches!(store.load(), Err(InterlockError::UnsafeObject)));
+        fs::remove_file(hardlink).unwrap();
+
         fs::write(&path, vec![b'x'; MAX_INTERLOCK_BYTES + 1]).unwrap();
         assert!(matches!(store.load(), Err(InterlockError::RecordTooLarge)));
 
