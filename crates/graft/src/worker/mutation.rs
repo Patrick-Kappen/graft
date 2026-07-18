@@ -99,6 +99,20 @@ pub struct LifecycleTerminalResult {
     pub failure_phase: Option<LifecycleFailurePhase>,
 }
 
+/// Stable pre-commitment terminal error code.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MutationTerminalCode {
+    /// Caller cancelled before commitment.
+    CancelledBeforeCommitment,
+    /// Caller deadline elapsed before commitment.
+    DeadlineBeforeCommitment,
+    /// Caller disconnected before commitment.
+    DisconnectedBeforeCommitment,
+    /// Previously observed manager job changed before commitment.
+    JobChangedBeforeCommitment,
+}
+
 /// Accepted operation that ended before manager-work commitment.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
@@ -107,12 +121,20 @@ pub struct MutationTerminalError {
     pub operation_id: OperationIdentifier,
     /// Origin worker epoch.
     pub origin_worker_epoch: ConnectionIdentifier,
+    /// Current worker epoch retaining the result.
+    pub worker_epoch: ConnectionIdentifier,
     /// Immutable selector.
     pub selector: WorkloadSelector,
     /// Requested action.
     pub action: LifecycleAction,
-    /// Final caller departure that won commitment.
-    pub departure: CallerDeparture,
+    /// Final caller departure that won commitment, when caller-driven.
+    pub departure: Option<CallerDeparture>,
+    /// Stable actionable error code.
+    pub code: MutationTerminalCode,
+    /// Phase at which the operation terminalized.
+    pub phase: MutationPhase,
+    /// Safe retry guidance.
+    pub guidance: MutationGuidance,
     /// Server logical terminal time.
     pub completed_ms: u64,
 }
@@ -155,6 +177,7 @@ pub enum MutationTerminal {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum MutationState {
+    Reserved,
     InProgress(MutationPhase),
     Terminal {
         result: Box<RetainedMutationResult>,
@@ -175,6 +198,8 @@ struct MutationRecord {
 pub enum MutationAdmission {
     /// New immutable operation was accepted.
     Accepted,
+    /// Identical identity is reserved but not durably accepted.
+    JoinedReservation,
     /// Identical operation is already in progress.
     JoinedInProgress(MutationPhase),
     /// Identical terminal result remains retained.
@@ -317,6 +342,7 @@ impl MutationRegistry {
                 return MutationAdmission::IdentityConflict;
             }
             return match record.state {
+                MutationState::Reserved => MutationAdmission::JoinedReservation,
                 MutationState::InProgress(phase) => MutationAdmission::JoinedInProgress(phase),
                 MutationState::Terminal { ref result, .. } => {
                     MutationAdmission::JoinedTerminal(result.clone())
@@ -350,13 +376,26 @@ impl MutationRegistry {
                 request,
                 accepted_ms: logical_now_ms,
                 disposition: None,
-                state: MutationState::InProgress(MutationPhase::Accepted),
+                state: MutationState::Reserved,
             },
         );
         MutationAdmission::Accepted
     }
 
-    /// Removes an accepted operation before manager commitment.
+    /// Publishes durable acceptance for one reserved identity.
+    #[must_use]
+    pub fn accept(&mut self, principal_uid: u32, operation_id: OperationIdentifier) -> bool {
+        let Some(record) = self.records.get_mut(&(principal_uid, operation_id)) else {
+            return false;
+        };
+        if record.state != MutationState::Reserved {
+            return false;
+        }
+        record.state = MutationState::InProgress(MutationPhase::Accepted);
+        true
+    }
+
+    /// Removes a reservation or accepted operation before manager commitment.
     #[must_use]
     pub fn reject_accepted(
         &mut self,
@@ -367,7 +406,10 @@ impl MutationRegistry {
         let Some(record) = self.records.get(&key) else {
             return false;
         };
-        if record.state != MutationState::InProgress(MutationPhase::Accepted) {
+        if !matches!(
+            record.state,
+            MutationState::Reserved | MutationState::InProgress(MutationPhase::Accepted)
+        ) {
             return false;
         }
         let workload_key = (principal_uid, record.request.selector.clone());
@@ -484,6 +526,10 @@ impl MutationRegistry {
             ));
         }
         match record.state {
+            MutationState::Reserved => MutationQuery::NotFound(query_error(
+                MutationQueryCode::NotFound,
+                MutationGuidance::Poll,
+            )),
             MutationState::InProgress(phase) => MutationQuery::InProgress(MutationInProgress {
                 operation_id: request.operation_id,
                 origin_worker_epoch: request.origin_worker_epoch,
@@ -503,7 +549,7 @@ impl MutationRegistry {
     fn expire(&mut self, logical_now_ms: u64) {
         self.records.retain(|(uid, _), record| {
             let keep = match record.state {
-                MutationState::InProgress(_) => true,
+                MutationState::Reserved | MutationState::InProgress(_) => true,
                 MutationState::Terminal { completed_ms, .. } => {
                     let acceptance_boundary =
                         record.accepted_ms.saturating_add(OPERATION_PAST_WINDOW_MS);
@@ -598,6 +644,11 @@ mod tests {
             registry.admit(1000, value.clone(), now),
             MutationAdmission::Accepted
         );
+        assert_eq!(
+            registry.admit(1000, value.clone(), now),
+            MutationAdmission::JoinedReservation
+        );
+        assert!(registry.accept(1000, value.operation_id));
         assert_eq!(
             registry.admit(1000, value.clone(), now),
             MutationAdmission::JoinedInProgress(MutationPhase::Accepted)

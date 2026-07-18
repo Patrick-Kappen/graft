@@ -165,7 +165,7 @@ pub enum CorrelatedResult {
 }
 
 /// Complete normalized manager input to one lifecycle decision.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub struct LifecycleObservation {
     /// Logical time at which this evidence was captured.
@@ -180,7 +180,9 @@ pub struct LifecycleObservation {
     pub correlatable_jobless_transition: bool,
     /// Operation-correlated process/invocation result.
     pub execution_result: CorrelatedResult,
-    /// Whether a new invocation relative to pre-submission state was proven.
+    /// Stable selected-unit invocation identity when available.
+    pub invocation_id: Option<super::observation::ObservationText>,
+    /// Whether this invocation is attributable relative to pre-submission state.
     pub new_invocation: bool,
     /// Operation-correlated stop and cleanup result.
     pub stop_result: CorrelatedResult,
@@ -222,6 +224,7 @@ pub enum LifecycleDecision {
 
 /// Applies global state/job rules and the approved action/lifecycle matrices.
 #[must_use]
+#[allow(clippy::needless_pass_by_value)]
 pub fn decide_lifecycle(
     action: LifecycleAction,
     lifecycle: WorkloadLifecycle,
@@ -256,15 +259,15 @@ pub fn decide_lifecycle(
     }
 
     match action {
-        LifecycleAction::Up => decide_up(lifecycle, observation),
-        LifecycleAction::Down => decide_down(observation),
-        LifecycleAction::Restart => decide_restart(lifecycle, observation),
+        LifecycleAction::Up => decide_up(lifecycle, &observation),
+        LifecycleAction::Down => decide_down(&observation),
+        LifecycleAction::Restart => decide_restart(lifecycle, &observation),
     }
 }
 
-const fn decide_up(
+fn decide_up(
     lifecycle: WorkloadLifecycle,
-    observation: LifecycleObservation,
+    observation: &LifecycleObservation,
 ) -> LifecycleDecision {
     match observation.state {
         LifecycleState::Inactive | LifecycleState::Failed => {
@@ -287,7 +290,7 @@ const fn decide_up(
     }
 }
 
-const fn decide_down(observation: LifecycleObservation) -> LifecycleDecision {
+fn decide_down(observation: &LifecycleObservation) -> LifecycleDecision {
     match observation.state {
         LifecycleState::Inactive => LifecycleDecision::NoChange,
         LifecycleState::Failed if observation.failed_quiescent => LifecycleDecision::NoChange,
@@ -305,9 +308,9 @@ const fn decide_down(observation: LifecycleObservation) -> LifecycleDecision {
     }
 }
 
-const fn decide_restart(
+fn decide_restart(
     lifecycle: WorkloadLifecycle,
-    observation: LifecycleObservation,
+    observation: &LifecycleObservation,
 ) -> LifecycleDecision {
     match observation.state {
         LifecycleState::Inactive | LifecycleState::Failed => {
@@ -349,8 +352,13 @@ pub enum CommitmentOutcome {
 }
 
 /// Request-local interest gate serialized with manager-work commitment.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct CommitmentGate {
+    state: std::sync::Arc<std::sync::Mutex<CommitmentState>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CommitmentState {
     callers: u32,
     committed: bool,
     final_departure: Option<CallerDeparture>,
@@ -359,46 +367,57 @@ pub struct CommitmentGate {
 impl CommitmentGate {
     /// Creates a gate with the originating caller interested.
     #[must_use]
-    pub const fn new() -> Self {
+    pub fn new() -> Self {
         Self {
-            callers: 1,
-            committed: false,
-            final_departure: None,
+            state: std::sync::Arc::new(std::sync::Mutex::new(CommitmentState {
+                callers: 1,
+                committed: false,
+                final_departure: None,
+            })),
         }
     }
 
     /// Adds one duplicate caller before or after commitment.
     #[must_use]
     pub fn join(&mut self) -> bool {
-        let Some(callers) = self.callers.checked_add(1) else {
+        let Ok(mut state) = self.state.lock() else {
             return false;
         };
-        self.callers = callers;
+        let Some(callers) = state.callers.checked_add(1) else {
+            return false;
+        };
+        state.callers = callers;
         true
     }
 
     /// Removes one caller and records only the final pre-commitment departure.
     pub fn depart(&mut self, reason: CallerDeparture) {
-        self.callers = self.callers.saturating_sub(1);
-        if self.callers == 0 && !self.committed && self.final_departure.is_none() {
-            self.final_departure = Some(reason);
+        let Ok(mut state) = self.state.lock() else {
+            return;
+        };
+        state.callers = state.callers.saturating_sub(1);
+        if state.callers == 0 && !state.committed && state.final_departure.is_none() {
+            state.final_departure = Some(reason);
         }
     }
 
     /// Attempts the single manager-work commitment linearization point.
     #[must_use]
     pub fn commit(&mut self) -> CommitmentOutcome {
-        if let Some(reason) = self.final_departure {
+        let Ok(mut state) = self.state.lock() else {
+            return CommitmentOutcome::Departed(CallerDeparture::Disconnected);
+        };
+        if let Some(reason) = state.final_departure {
             return CommitmentOutcome::Departed(reason);
         }
-        self.committed = true;
+        state.committed = true;
         CommitmentOutcome::Committed
     }
 
     /// Returns whether manager work has committed.
     #[must_use]
-    pub const fn is_committed(&self) -> bool {
-        self.committed
+    pub fn is_committed(&self) -> bool {
+        self.state.lock().is_ok_and(|state| state.committed)
     }
 }
 
@@ -499,6 +518,7 @@ mod tests {
             failed_quiescent: true,
             correlatable_jobless_transition: false,
             execution_result: CorrelatedResult::None,
+            invocation_id: None,
             new_invocation: false,
             stop_result: CorrelatedResult::None,
         }
@@ -532,6 +552,17 @@ mod tests {
             .unwrap()
             .insert("raw_unit".into(), serde_json::json!("foreign.service"));
         assert!(serde_json::from_value::<LifecycleRequest>(value).is_err());
+    }
+
+    #[test]
+    fn cloned_commitment_gate_counts_duplicate_interest() {
+        let mut origin = CommitmentGate::new();
+        let mut duplicate = origin.clone();
+        assert!(duplicate.join());
+        origin.depart(CallerDeparture::Disconnected);
+
+        assert_eq!(duplicate.commit(), CommitmentOutcome::Committed);
+        assert!(origin.is_committed());
     }
 
     #[test]
@@ -730,11 +761,15 @@ mod tests {
             correlated: true,
         });
         assert_eq!(
-            decide_lifecycle(LifecycleAction::Up, WorkloadLifecycle::LongRunning, value,),
+            decide_lifecycle(
+                LifecycleAction::Up,
+                WorkloadLifecycle::LongRunning,
+                value.clone(),
+            ),
             LifecycleDecision::JoinExisting
         );
         assert_eq!(
-            decide_lifecycle(LifecycleAction::Down, WorkloadLifecycle::Job, value),
+            decide_lifecycle(LifecycleAction::Down, WorkloadLifecycle::Job, value.clone()),
             LifecycleDecision::Submit(ManagerAction::CancelStartThenStop)
         );
         assert_eq!(
