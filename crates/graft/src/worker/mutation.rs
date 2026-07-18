@@ -6,13 +6,126 @@ use serde::{Deserialize, Serialize};
 
 use crate::protocol::ConnectionIdentifier;
 
-use super::lifecycle::{LifecycleRequest, OperationIdentifier, OPERATION_PAST_WINDOW_MS};
+use super::lifecycle::{
+    CallerDeparture, LifecycleAction, LifecycleRequest, LifecycleState, ManagerEpoch,
+    OperationIdentifier, OPERATION_PAST_WINDOW_MS,
+};
 use super::observation::WorkloadSelector;
 
 /// Maximum retained lifecycle records per principal.
 pub const MAX_PRINCIPAL_MUTATIONS: usize = 256;
 /// Maximum retained lifecycle records per worker.
 pub const MAX_WORKER_MUTATIONS: usize = 1_024;
+/// Maximum encoded bytes retained for one terminal lifecycle result.
+pub const MAX_RETAINED_RESULT_BYTES: usize = 32 * 1_024;
+
+/// Relationship between one request and manager work.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LifecycleDisposition {
+    /// Initial state already satisfied the operation.
+    NoChange,
+    /// This worker submitted manager work.
+    WorkerSubmitted,
+    /// This worker joined or observed compatible existing work.
+    ExistingManagerWork,
+}
+
+/// Typed lifecycle failure phase.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LifecycleFailurePhase {
+    /// Manager submission or verified cancellation failed.
+    Submission,
+    /// Stop or cleanup failed.
+    Stop,
+    /// Started process or invocation failed.
+    Execution,
+    /// Correlation evidence became unavailable.
+    Observation,
+}
+
+/// Authorization class attached to retained lifecycle evidence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LifecycleAuthorization {
+    /// Same-effective-UID local user worker authorization.
+    OwnUser,
+}
+
+/// Immutable bounded terminal lifecycle result retained for duplicates/queries.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub struct LifecycleTerminalResult {
+    /// Principal-scoped operation identity.
+    pub operation_id: OperationIdentifier,
+    /// Worker epoch supplied by the immutable request.
+    pub origin_worker_epoch: ConnectionIdentifier,
+    /// Current worker epoch retaining this result.
+    pub worker_epoch: ConnectionIdentifier,
+    /// Manager epoch used for commitment when applicable.
+    pub manager_epoch: Option<ManagerEpoch>,
+    /// Complete immutable workload selector.
+    pub selector: WorkloadSelector,
+    /// Declared workload lifecycle.
+    pub lifecycle: crate::manifest::WorkloadLifecycle,
+    /// Requested action.
+    pub action: LifecycleAction,
+    /// Authorization class used at acceptance.
+    pub authorization: LifecycleAuthorization,
+    /// How manager work related to this request.
+    pub disposition: LifecycleDisposition,
+    /// Proven terminal classification.
+    pub outcome: MutationTerminal,
+    /// Normalized initial manager state.
+    pub initial_state: LifecycleState,
+    /// Final manager state when safely observed.
+    pub final_state: Option<LifecycleState>,
+    /// Correlated manager job identity when known.
+    pub job_id: Option<u32>,
+    /// Correlated invocation identity when known.
+    pub invocation_id: Option<super::observation::ObservationText>,
+    /// Server logical acceptance time.
+    pub accepted_ms: u64,
+    /// Manager submission time, absent for no-change/existing work.
+    pub submission_ms: Option<u64>,
+    /// Server logical terminal time.
+    pub completed_ms: u64,
+    /// Whether a dependency affected the terminal result.
+    pub dependencies_affected: bool,
+    /// Whether manifest generation changed after acceptance.
+    pub manifest_changed: bool,
+    /// Failure phase when outcome is not success.
+    pub failure_phase: Option<LifecycleFailurePhase>,
+}
+
+/// Accepted operation that ended before manager-work commitment.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub struct MutationTerminalError {
+    /// Principal-scoped operation identity.
+    pub operation_id: OperationIdentifier,
+    /// Origin worker epoch.
+    pub origin_worker_epoch: ConnectionIdentifier,
+    /// Immutable selector.
+    pub selector: WorkloadSelector,
+    /// Requested action.
+    pub action: LifecycleAction,
+    /// Final caller departure that won commitment.
+    pub departure: CallerDeparture,
+    /// Server logical terminal time.
+    pub completed_ms: u64,
+}
+
+/// Complete retained terminal payload.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "terminal", content = "value", rename_all = "snake_case")]
+pub enum RetainedMutationResult {
+    /// Manager/no-change lifecycle result.
+    Lifecycle(LifecycleTerminalResult),
+    /// Pre-commitment terminal error without manager disposition.
+    BeforeCommitment(MutationTerminalError),
+}
 
 /// Current accepted operation phase exposed by result queries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -44,7 +157,7 @@ pub enum MutationTerminal {
 enum MutationState {
     InProgress(MutationPhase),
     Terminal {
-        result: MutationTerminal,
+        result: Box<RetainedMutationResult>,
         completed_ms: u64,
     },
 }
@@ -64,7 +177,7 @@ pub enum MutationAdmission {
     /// Identical operation is already in progress.
     JoinedInProgress(MutationPhase),
     /// Identical terminal result remains retained.
-    JoinedTerminal(MutationTerminal),
+    JoinedTerminal(Box<RetainedMutationResult>),
     /// Same principal/ID was used with different immutable fields.
     IdentityConflict,
     /// Another operation owns this workload's mutation slot.
@@ -82,7 +195,7 @@ pub enum MutationAdmission {
 #[serde(tag = "query_result", content = "value", rename_all = "snake_case")]
 pub enum MutationQuery {
     /// Retained terminal result.
-    Terminal(MutationTerminal),
+    Terminal(Box<RetainedMutationResult>),
     /// Current accepted phase.
     InProgress(MutationPhase),
     /// Current-epoch identifier is fresh but unknown.
@@ -142,7 +255,9 @@ impl MutationRegistry {
             }
             return match record.state {
                 MutationState::InProgress(phase) => MutationAdmission::JoinedInProgress(phase),
-                MutationState::Terminal { result, .. } => MutationAdmission::JoinedTerminal(result),
+                MutationState::Terminal { ref result, .. } => {
+                    MutationAdmission::JoinedTerminal(result.clone())
+                }
             };
         }
         if request.origin_worker_epoch != self.worker_epoch {
@@ -201,9 +316,14 @@ impl MutationRegistry {
         &mut self,
         principal_uid: u32,
         operation_id: OperationIdentifier,
-        result: MutationTerminal,
+        result: RetainedMutationResult,
         logical_now_ms: u64,
     ) -> bool {
+        if serde_json::to_vec(&result).map_or(true, |encoded| {
+            encoded.len() > MAX_RETAINED_RESULT_BYTES
+        }) {
+            return false;
+        }
         let Some(record) = self.records.get_mut(&(principal_uid, operation_id)) else {
             return false;
         };
@@ -212,7 +332,7 @@ impl MutationRegistry {
         }
         let workload_key = (principal_uid, record.request.selector.clone());
         record.state = MutationState::Terminal {
-            result,
+            result: Box::new(result),
             completed_ms: logical_now_ms,
         };
         self.active_workloads.remove(&workload_key);
@@ -243,7 +363,7 @@ impl MutationRegistry {
         }
         match record.state {
             MutationState::InProgress(phase) => MutationQuery::InProgress(phase),
-            MutationState::Terminal { result, .. } => MutationQuery::Terminal(result),
+            MutationState::Terminal { ref result, .. } => MutationQuery::Terminal(result.clone()),
         }
     }
 
@@ -301,6 +421,35 @@ mod tests {
         }
     }
 
+    fn terminal_result(
+        request: &LifecycleRequest,
+        outcome: MutationTerminal,
+        now: u64,
+    ) -> RetainedMutationResult {
+        RetainedMutationResult::Lifecycle(LifecycleTerminalResult {
+            operation_id: request.operation_id,
+            origin_worker_epoch: request.origin_worker_epoch,
+            worker_epoch: request.origin_worker_epoch,
+            manager_epoch: None,
+            selector: request.selector.clone(),
+            lifecycle: crate::manifest::WorkloadLifecycle::LongRunning,
+            action: request.action,
+            authorization: LifecycleAuthorization::OwnUser,
+            disposition: LifecycleDisposition::WorkerSubmitted,
+            outcome,
+            initial_state: LifecycleState::Inactive,
+            final_state: Some(LifecycleState::ActiveRunning),
+            job_id: Some(7),
+            invocation_id: None,
+            accepted_ms: now,
+            submission_ms: Some(now),
+            completed_ms: now,
+            dependencies_affected: false,
+            manifest_changed: false,
+            failure_phase: None,
+        })
+    }
+
     #[test]
     fn identical_duplicates_join_and_changed_identity_conflicts() {
         let worker_epoch = epoch("018f0f77-8c4d-7b2a-8e6a-4b8a7d3a1c20");
@@ -356,10 +505,11 @@ mod tests {
             MutationAdmission::WorkloadBusy(_)
         ));
         assert!(registry.advance(1000, first.operation_id, MutationPhase::Observing));
-        assert!(registry.terminal(1000, first.operation_id, MutationTerminal::Succeeded, now));
+        let terminal = terminal_result(&first, MutationTerminal::Succeeded, now);
+        assert!(registry.terminal(1000, first.operation_id, terminal.clone(), now));
         assert_eq!(
             registry.query(1000, &first, now),
-            MutationQuery::Terminal(MutationTerminal::Succeeded)
+            MutationQuery::Terminal(Box::new(terminal))
         );
         assert_eq!(
             registry.admit(1000, second, now),

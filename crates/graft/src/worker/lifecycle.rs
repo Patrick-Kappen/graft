@@ -144,16 +144,29 @@ pub enum ManagerJobKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub struct QueuedJob {
+    /// Manager job identity within the captured manager epoch.
+    pub job_id: u32,
     /// Normalized manager job kind.
     pub kind: ManagerJobKind,
     /// Whether unit, job ID, and manager epoch correlation are proven.
     pub correlated: bool,
 }
 
+/// Operation-correlated execution or stop result.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CorrelatedResult {
+    /// No terminal correlated result is available.
+    None,
+    /// Correlated manager work succeeded.
+    Succeeded,
+    /// Correlated manager work failed.
+    Failed,
+}
+
 /// Complete normalized manager input to one lifecycle decision.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
-#[allow(clippy::struct_excessive_bools)]
 pub struct LifecycleObservation {
     /// Current normalized state.
     pub state: LifecycleState,
@@ -163,10 +176,12 @@ pub struct LifecycleObservation {
     pub failed_quiescent: bool,
     /// Whether a jobless automatic restart or cleanup is safely correlatable.
     pub correlatable_jobless_transition: bool,
-    /// Whether operation-correlated execution success was proven.
-    pub correlated_execution_succeeded: bool,
+    /// Operation-correlated process/invocation result.
+    pub execution_result: CorrelatedResult,
     /// Whether a new invocation relative to pre-submission state was proven.
     pub new_invocation: bool,
+    /// Operation-correlated stop and cleanup result.
+    pub stop_result: CorrelatedResult,
 }
 
 /// Manager action selected by the worker.
@@ -420,6 +435,17 @@ pub trait LifecycleManagerAdapter: Send + Sync + std::fmt::Debug {
         &self,
         selector: &BackendSelector,
     ) -> Result<LifecycleObservation, LifecycleAdapterError>;
+    /// Cancels one previously verified selected-service start job.
+    ///
+    /// # Errors
+    ///
+    /// Returns a typed rejection, ambiguity, epoch-change, or availability error.
+    fn cancel_start(
+        &self,
+        selector: &BackendSelector,
+        job_id: u32,
+    ) -> Result<(), LifecycleAdapterError>;
+
     /// Commits one worker-selected manager operation.
     ///
     /// # Errors
@@ -464,8 +490,9 @@ mod tests {
             queued_job: None,
             failed_quiescent: true,
             correlatable_jobless_transition: false,
-            correlated_execution_succeeded: false,
+            execution_result: CorrelatedResult::None,
             new_invocation: false,
+            stop_result: CorrelatedResult::None,
         }
     }
 
@@ -518,6 +545,74 @@ mod tests {
         assert!(OperationIdentifier::parse("00000000-0000-0000-0000-000000000000").is_err());
     }
 
+    fn expected_decision(
+        action: LifecycleAction,
+        lifecycle: WorkloadLifecycle,
+        state: LifecycleState,
+    ) -> LifecycleDecision {
+        match state {
+            LifecycleState::ManagerBusy | LifecycleState::ManagerTransitionConflict => {
+                LifecycleDecision::Conflict
+            }
+            LifecycleState::UnsupportedManagerState => LifecycleDecision::UnexpectedState,
+            LifecycleState::Unknown => LifecycleDecision::BackendUnavailable,
+            _ => match action {
+                LifecycleAction::Down => match state {
+                    LifecycleState::Inactive | LifecycleState::Failed => {
+                        LifecycleDecision::NoChange
+                    }
+                    LifecycleState::ActiveRunning | LifecycleState::ActiveExited => {
+                        LifecycleDecision::Submit(ManagerAction::Stop)
+                    }
+                    LifecycleState::Activating | LifecycleState::Deactivating => {
+                        LifecycleDecision::Conflict
+                    }
+                    _ => unreachable!(),
+                },
+                LifecycleAction::Up => match state {
+                    LifecycleState::Inactive | LifecycleState::Failed => {
+                        LifecycleDecision::Submit(ManagerAction::Start)
+                    }
+                    LifecycleState::Activating | LifecycleState::Deactivating => {
+                        LifecycleDecision::Conflict
+                    }
+                    LifecycleState::ActiveRunning
+                        if lifecycle == WorkloadLifecycle::LongRunning =>
+                    {
+                        LifecycleDecision::NoChange
+                    }
+                    LifecycleState::ActiveExited if lifecycle == WorkloadLifecycle::Setup => {
+                        LifecycleDecision::NoChange
+                    }
+                    LifecycleState::ActiveRunning | LifecycleState::ActiveExited => {
+                        LifecycleDecision::UnexpectedState
+                    }
+                    _ => unreachable!(),
+                },
+                LifecycleAction::Restart => match state {
+                    LifecycleState::Inactive | LifecycleState::Failed => {
+                        LifecycleDecision::Submit(ManagerAction::Restart)
+                    }
+                    LifecycleState::Activating | LifecycleState::Deactivating => {
+                        LifecycleDecision::Conflict
+                    }
+                    LifecycleState::ActiveRunning
+                        if lifecycle == WorkloadLifecycle::LongRunning =>
+                    {
+                        LifecycleDecision::Submit(ManagerAction::Restart)
+                    }
+                    LifecycleState::ActiveExited if lifecycle == WorkloadLifecycle::Setup => {
+                        LifecycleDecision::Submit(ManagerAction::Restart)
+                    }
+                    LifecycleState::ActiveRunning | LifecycleState::ActiveExited => {
+                        LifecycleDecision::UnexpectedState
+                    }
+                    _ => unreachable!(),
+                },
+            },
+        }
+    }
+
     #[test]
     fn lifecycle_matrix_covers_every_action_lifecycle_and_stable_state() {
         for lifecycle in [
@@ -542,16 +637,56 @@ mod tests {
                     LifecycleState::UnsupportedManagerState,
                     LifecycleState::Unknown,
                 ] {
-                    let decision = decide_lifecycle(action, lifecycle, observation(state));
-                    if state == LifecycleState::Unknown {
-                        assert_eq!(decision, LifecycleDecision::BackendUnavailable);
+                    assert_eq!(
+                        decide_lifecycle(action, lifecycle, observation(state)),
+                        expected_decision(action, lifecycle, state),
+                        "wrong matrix row: {action:?}/{lifecycle:?}/{state:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn every_queued_job_action_and_correlation_row_is_explicit() {
+        for action in [
+            LifecycleAction::Up,
+            LifecycleAction::Down,
+            LifecycleAction::Restart,
+        ] {
+            for kind in [
+                ManagerJobKind::Start,
+                ManagerJobKind::Stop,
+                ManagerJobKind::Restart,
+                ManagerJobKind::Other,
+            ] {
+                for correlated in [false, true] {
+                    let mut value = observation(LifecycleState::Activating);
+                    value.queued_job = Some(QueuedJob {
+                        job_id: 7,
+                        kind,
+                        correlated,
+                    });
+                    let expected = if correlated {
+                        match (action, kind) {
+                            (LifecycleAction::Up, ManagerJobKind::Start)
+                            | (LifecycleAction::Down, ManagerJobKind::Stop)
+                            | (LifecycleAction::Restart, ManagerJobKind::Restart) => {
+                                LifecycleDecision::JoinExisting
+                            }
+                            (LifecycleAction::Down, ManagerJobKind::Start) => {
+                                LifecycleDecision::Submit(ManagerAction::CancelStartThenStop)
+                            }
+                            _ => LifecycleDecision::Conflict,
+                        }
                     } else {
-                        assert_ne!(
-                            decision,
-                            LifecycleDecision::BackendUnavailable,
-                            "non-unknown state became unavailable: {action:?}/{lifecycle:?}/{state:?}"
-                        );
-                    }
+                        LifecycleDecision::Conflict
+                    };
+                    assert_eq!(
+                        decide_lifecycle(action, WorkloadLifecycle::LongRunning, value),
+                        expected,
+                        "wrong queued-job row: {action:?}/{kind:?}/{correlated}"
+                    );
                 }
             }
         }
@@ -582,6 +717,7 @@ mod tests {
         );
         let mut value = observation(LifecycleState::Activating);
         value.queued_job = Some(QueuedJob {
+            job_id: 7,
             kind: ManagerJobKind::Start,
             correlated: true,
         });
