@@ -299,27 +299,25 @@ git diff --check
 
 ### GitHub Actions execution
 
-GitHub CI is deliberately maintainer-dispatched for product and documentation
-changes. Pull-request pushes and merges do not start it automatically; a PR that
-changes `.github/workflows/ci.yml` itself is the narrow exception so branch
-protection can validate future CI changes. Those self-validation runs use a
-separate group and cannot race with manual-run cancellation. Run applicable local checks before
-requesting the protected GitHub checks on the final commit.
+GitHub CI runs automatically for every pull-request commit, including product
+and documentation changes. The required jobs therefore report their checks to
+the exact PR head SHA that GitHub evaluates for branch protection. A newer
+commit starts a new run and cannot inherit successful required checks from an
+earlier commit. Those pull-request runs use a separate concurrency group and
+cancel obsolete in-progress runs. Run applicable local checks before pushing
+the final commit.
 
 The required `workflow-lint`, `rust`, `coverage`, `security`, `docs`, and `nix`
-contexts remain branch-protection requirements. A pull request stays blocked
-until a maintainer dispatches them successfully for its latest commit. A newer
-dispatch for the same feature ref cancels its obsolete predecessor. Protected
+contexts remain branch-protection requirements. `main` requires them for the
+current merge candidate, with administrator enforcement enabled; direct pushes
+and administrator bypass cannot substitute for successful checks. Protected
 `main` and tag runs use unique groups and are never cancelled by another run.
-A new commit on an internal pull-request branch starts only a minimal
-cancellation workflow; it supersedes an in-progress expensive run without
-executing the quality matrix. It does not satisfy any required check context.
 
-External-fork refs cannot be selected directly by manual dispatch and remain
-isolated from internal cancellation groups. Direct CI for an untrusted fork is
-therefore unavailable in this manual model. A maintainer must first review and
-adopt the proposed change as trusted internal work; copying an unreviewed fork
-SHA into a dispatchable repository ref is not an accepted validation path.
+The CI workflow has read-only `contents` permission. Pull-request runs do not
+receive repository secrets from forks, so they do not execute privileged or
+secret-bearing work against untrusted code. Maintainers may still dispatch the
+workflow for a trusted internal ref when needed, but those runs are advisory:
+the pull-request-triggered run is the branch-protection evidence.
 Advisory activation, notify-protocol, and CDI VM jobs are opt-in and should be
 requested for changes affecting activation, user managers, Podman, Quadlet
 runtime behavior, CDI, rootfs materialisation, or shared security boundaries. Documentation deployment is separate, manual, and
