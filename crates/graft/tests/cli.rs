@@ -134,6 +134,93 @@ fn unsafe_source_stems_fail_for_context_and_set_without_references() {
 }
 
 #[test]
+fn identity_mismatch_fails_single_context_and_set_with_actionable_paths() {
+    let directory = tempfile::tempdir().expect("temporary directory can be created");
+    let worker = write_config(&directory, "worker.toml", MINIMAL_CONFIG);
+    let mismatched = write_config(
+        &directory,
+        "database-source.toml",
+        "version = 1\nname = \"database\"\n[deploy]\ntarget = \"system\"\n",
+    );
+
+    for args in [
+        vec![mismatched.as_os_str()],
+        vec![
+            worker.as_os_str(),
+            std::ffi::OsStr::new("--context"),
+            mismatched.as_os_str(),
+        ],
+        vec![
+            std::ffi::OsStr::new("--set"),
+            worker.as_os_str(),
+            mismatched.as_os_str(),
+        ],
+    ] {
+        let output = run_graft_with_args(args);
+        assert_failed_without_stdout(
+            &output,
+            &[
+                mismatched.to_string_lossy().as_ref(),
+                "stem is 'database-source'",
+                "configured name is 'database'",
+            ],
+        );
+    }
+}
+
+#[test]
+fn unsafe_canonical_names_fail_single_file_resolution() {
+    let directory = tempfile::tempdir().expect("temporary directory can be created");
+    let names = [
+        String::new(),
+        "bad name".to_string(),
+        "bad@name".to_string(),
+        "café".to_string(),
+        "a".repeat(246),
+    ];
+
+    for (index, name) in names.into_iter().enumerate() {
+        let file_name = format!("safe-{index}.toml");
+        let content = format!("version = 1\nname = {name:?}\n[deploy]\ntarget = \"system\"\n");
+        let config = write_config(&directory, &file_name, &content);
+
+        let output = run_graft(&config);
+
+        assert_failed_without_stdout(
+            &output,
+            &[config.to_string_lossy().as_ref(), "1 through 245 bytes"],
+        );
+    }
+}
+
+#[test]
+fn duplicate_canonical_identity_fails_set_without_graph_references() {
+    let directory = tempfile::tempdir().expect("temporary directory can be created");
+    let first_dir = directory.path().join("first");
+    let second_dir = directory.path().join("second");
+    fs::create_dir_all(&first_dir).expect("first source directory can be created");
+    fs::create_dir_all(&second_dir).expect("second source directory can be created");
+    let first = first_dir.join("worker.toml");
+    let second = second_dir.join("worker.toml");
+    fs::write(&first, MINIMAL_CONFIG).expect("first config can be written");
+    fs::write(&second, MINIMAL_CONFIG).expect("second config can be written");
+
+    let output = run_graft_with_args([
+        std::ffi::OsStr::new("--set"),
+        first.as_os_str(),
+        second.as_os_str(),
+    ]);
+
+    assert_failed_without_stdout(
+        &output,
+        &[
+            second.to_string_lossy().as_ref(),
+            "duplicate canonical workload identity 'worker' for target 'system'",
+        ],
+    );
+}
+
+#[test]
 fn explicit_supported_fields_survive_the_process_boundary() {
     let directory = tempfile::tempdir().expect("temporary directory can be created");
     let config = write_config(
@@ -202,6 +289,22 @@ fn directory_input_returns_read_error_with_path_context() {
 }
 
 #[test]
+fn non_toml_filename_suffix_fails_before_resolution() {
+    let directory = tempfile::tempdir().expect("temporary directory can be created");
+    let config = write_config(&directory, "worker.conf", MINIMAL_CONFIG);
+
+    let output = run_graft(&config);
+
+    assert_failed_without_stdout(
+        &output,
+        &[
+            config.to_string_lossy().as_ref(),
+            "filename must end with the exact '.toml' suffix",
+        ],
+    );
+}
+
+#[test]
 fn malformed_toml_returns_parser_error_with_path_context() {
     let directory = tempfile::tempdir().expect("temporary directory can be created");
     let config = write_config(&directory, "malformed.toml", "version = [\n");
@@ -262,7 +365,7 @@ fn unknown_field_fails_closed_without_stdout() {
 #[test]
 fn trace_logging_does_not_pollute_successful_output() {
     let directory = tempfile::tempdir().expect("temporary directory can be created");
-    let config = write_config(&directory, "trace.toml", MINIMAL_CONFIG);
+    let config = write_config(&directory, "worker.toml", MINIMAL_CONFIG);
 
     let output = Command::new(env!("CARGO_BIN_EXE_graft"))
         .arg(&config)
@@ -278,7 +381,7 @@ fn trace_logging_does_not_pollute_successful_output() {
 #[test]
 fn unwritable_stdout_returns_write_error() {
     let directory = tempfile::tempdir().expect("temporary directory can be created");
-    let config = write_config(&directory, "output-error.toml", MINIMAL_CONFIG);
+    let config = write_config(&directory, "worker.toml", MINIMAL_CONFIG);
     let full = fs::File::options()
         .write(true)
         .open("/dev/full")

@@ -70,8 +70,10 @@
       ]
     },
     "name": {
-      "description": "Container and Podman identity. Keep it equal to the TOML filename stem\nuntil the final unit identity contract is implemented.",
+      "description": "Canonical workload, source-unit, generated-service, and Podman identity.\nMust equal the TOML filename stem exactly.",
       "type": "string",
+      "maxLength": 245,
+      "minLength": 1,
       "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
     },
     "version": {
@@ -523,6 +525,8 @@
             "string",
             "null"
           ],
+          "maxLength": 245,
+          "minLength": 1,
           "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
         },
         "mode": {
@@ -718,8 +722,10 @@
       "type": "object",
       "properties": {
         "workload": {
-          "description": "Safe top-level Graft workload name.",
+          "description": "Canonical top-level Graft workload name.",
           "type": "string",
+          "maxLength": 245,
+          "minLength": 1,
           "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
         }
       },

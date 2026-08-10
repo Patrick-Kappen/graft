@@ -25,9 +25,13 @@ pub struct ContainerConfig {
     /// Schema version. Must be `1`.
     #[schemars(required, range(min = 1, max = 1))]
     pub version: Option<u32>,
-    /// Container and Podman identity. Keep it equal to the TOML filename stem
-    /// until the final unit identity contract is implemented.
-    #[schemars(required, regex(pattern = r"^[A-Za-z0-9][A-Za-z0-9._-]*$"))]
+    /// Canonical workload, source-unit, generated-service, and Podman identity.
+    /// Must equal the TOML filename stem exactly.
+    #[schemars(
+        required,
+        length(min = 1, max = 245),
+        regex(pattern = r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+    )]
     pub name: Option<String>,
     /// Parent graph nodes to inherit from.
     #[schemars(skip)]
@@ -84,8 +88,11 @@ pub enum DependencyTarget {
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct WorkloadDependencyTarget {
-    /// Safe top-level Graft workload name.
-    #[schemars(regex(pattern = r"^[A-Za-z0-9][A-Za-z0-9._-]*$"))]
+    /// Canonical top-level Graft workload name.
+    #[schemars(
+        length(min = 1, max = 245),
+        regex(pattern = r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+    )]
     pub workload: String,
 }
 
@@ -447,7 +454,10 @@ pub struct Network {
     /// Network namespace intent. Absence preserves Quadlet's default.
     pub mode: Option<NetworkMode>,
     /// Graft workload whose network namespace should be shared.
-    #[schemars(regex(pattern = r"^[A-Za-z0-9][A-Za-z0-9._-]*$"))]
+    #[schemars(
+        length(min = 1, max = 245),
+        regex(pattern = r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+    )]
     pub container: Option<String>,
     /// Ordered literal Quadlet `PublishPort=` entries.
     #[schemars(inner(length(min = 1)))]

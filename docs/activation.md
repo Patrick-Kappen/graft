@@ -192,8 +192,8 @@ first Graft contract exposes only the fixed `WantedBy` mapping above:
   typed dependency contract;
 - `UpheldBy` adds continuous activation semantics that overlap lifecycle and
   restart policy;
-- `Alias` changes unit identity and must wait for the identity contract in
-  [#107](https://github.com/Patrick-Kappen/graft/issues/107).
+- `Alias` would introduce a second public unit identity and is outside the
+  canonical `<name>.service` contract.
 
 Raw `[Install]` passthrough is forbidden by the
 [Capability policy](capability-policy.md). It is not an interim

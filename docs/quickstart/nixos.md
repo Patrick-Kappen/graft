@@ -71,8 +71,7 @@ graft-example-ready
 
 The generated Quadlet file is named `graft-example.container`, and the
 resulting systemd service is `graft-example.service`. The TOML filename stem and
-`name` intentionally match; see [issue #107](https://github.com/Patrick-Kappen/graft/issues/107)
-for the future identity contract.
+`name` must match exactly; both also select `ContainerName=graft-example`.
 
 The relevant generated Quadlet output is:
 

@@ -48,9 +48,9 @@ raw Quadlet sections, or Nix expressions. The generated schema accepts only
 implemented fields. Unknown input and explicitly configured reserved fields fail
 closed instead of disappearing.
 
-The filename stem currently selects the generated source-unit and service name,
-while top-level `name` selects `ContainerName=`. Keep them equal until the final
-identity contract in [#107](https://github.com/Patrick-Kappen/graft/issues/107).
+The filename stem and top-level `name` are one canonical identity and must match
+exactly. For `node-dev.toml`, Graft emits `node-dev.container`; Quadlet generates
+`node-dev.service`; and Podman receives `ContainerName=node-dev`.
 
 ## Two explicit authority scopes
 

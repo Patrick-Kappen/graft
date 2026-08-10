@@ -16,9 +16,11 @@ tested versions, not yet a minimum-version promise; see
 | `user` | current account's user manager; rootless only when non-root | `~/.config/containers/systemd/` |
 
 NixOS and Home Manager may place symlinks to immutable store files in those
-locations. The TOML filename currently selects the `.container` filename and
-resulting service stem; resolved top-level `name` selects `ContainerName=`. Keep
-them equal until [#107](https://github.com/Patrick-Kappen/graft/issues/107).
+locations. The TOML filename stem must equal resolved top-level `name` exactly.
+From that validated canonical value, Graft mechanically derives `<name>.toml`,
+`<name>.container`, `<name>.service`, and `ContainerName=<name>`. NixOS and Home
+Manager materialise the same identity relationship in their respective manager
+scopes; they do not reconcile mismatches or select aliases.
 
 ## Minimal rootfs-store output
 

@@ -17,9 +17,9 @@ ordering = "after"
 lifecycle = "part-of"
 ```
 
-`workload` is another top-level Graft `name`, not a TOML filename, Quadlet
-source-unit name, generated service name, or Podman runtime name. The resolver
-uses the explicit source set to map it to the referenced `.container` source
+`workload` is another top-level canonical Graft `name`, without a `.toml`,
+`.container`, or `.service` suffix. The resolver validates that the referenced
+source stem equals that name and mechanically derives its `.container` source
 unit.
 
 The referenced workload must:
@@ -97,8 +97,8 @@ or rendering a redundant `Requires=`.
 
 ## Resolution and output
 
-Given a Graft workload whose TOML source is `database.container`, the resolver
-emits concrete source-unit identities:
+Given the canonical workload `database` from `database.toml`, the resolver emits
+concrete source-unit identities:
 
 ```json
 {

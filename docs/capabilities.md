@@ -60,7 +60,7 @@ intentionally has no output there.
 | TOML field | Input and semantic validation | Resolved JSON | Nix materialisation | Quadlet/systemd output | Targets | Status |
 | --- | --- | --- | --- | --- | --- | --- |
 | `version` | Required integer; exactly `1` | Consumed during validation | — | — | Both | Current |
-| `name` | Required safe container name; keep equal to the TOML filename stem until [#107] | `name` | Selects rootfs/container identity | `ContainerName=` | Both | Current |
+| `name` | Required 1–245-byte canonical name; must equal the TOML filename stem exactly; duplicates fail per target | `name` | Selects rootfs and validated source-unit identity | `<name>.container`, `<name>.service`, and `ContainerName=<name>` | Both | Current |
 | `dependencies` | Optional typed dependency list; empty is omitted; duplicate or cyclic workload targets fail | Optional concrete `dependencies` relation lists | Passed to the shared renderer | Optional `[Unit]` section | Both | Current |
 | `dependencies[].target.workload` | Required safe Graft name for a workload target; validates existence, target, enablement, self-reference, ambiguity, and cycles | Concrete `.container` source-unit identity in applicable relation lists | Passed through mechanically | Quadlet translates the source unit to its generated service | Both | Current |
 | `dependencies[].target.externalUnit` | Exact concrete systemd unit name; strict line, character, suffix, length, and template validation; manager existence is not inspected | Concrete external identity in applicable relation lists | Passed through mechanically | Exact selected-manager unit identity | Target-specific | Current |
@@ -127,7 +127,7 @@ yet.
 | `parents.*`, `children.*` | Field-specific resolver error | Planned configuration graph: [#159] and [#173] |
 | `validation.level` | Error for `off`, `warn`, and `strict`; fail-closed behavior cannot be downgraded | Deferred until a validation-level contract exists |
 | `config.runtime.packageOps.add`, `remove`, and `replace` | Field-specific resolver error | Deferred merge/package mutation design |
-| `config.container.name` | Field-specific resolver error | Deferred identity contract: [#107] |
+| `config.container.name` | Field-specific resolver error | Forbidden second container identity; top-level `name` is canonical |
 | `config.container.pod`, `entrypoint`, `stopSignal`, `stopTimeout`, `timezone`, `notify`, `runInit`, `environmentHost`, and `health.*` | Field-specific resolver error | Planned health/graceful behavior: [#146]; pod and host-environment contracts remain deferred |
 | `config.container.annotations`, `ip`, `ip6`, `networkAlias`, `exposeHostPort`, `uidMap`, `gidMap`, `subUidMap`, `subGidMap`, `shmSize`, `mask`, `unmaskPaths`, `sysctl`, and `logDriver` | Field-specific resolver error | Planned or deferred through [#141], [#145], [#146], and [#193] |
 | `config.container.podmanArgs` and `globalArgs` | Field-specific resolver error | Forbidden raw runtime passthrough; future needs require typed intent |
@@ -213,7 +213,6 @@ Host installations may use a different version through their own nixpkgs pin.
 The capability and compatibility claims above apply only to the versions that
 Graft's tests actually exercise.
 
-[#107]: https://github.com/Patrick-Kappen/graft/issues/107
 [#129]: https://github.com/Patrick-Kappen/graft/issues/129
 [#140]: https://github.com/Patrick-Kappen/graft/issues/140
 [#141]: https://github.com/Patrick-Kappen/graft/issues/141

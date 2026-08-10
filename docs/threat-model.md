@@ -387,10 +387,10 @@ a system target this may activate a host unit. Graft does not validate that
 unit's implementation, authorization, drop-ins, or relationships outside the
 Graft graph.
 
-The public workload name, Quadlet filename stem, and `ContainerName=` are not
-yet one identity. The resolver carries an explicit mapping and rejects
-collisions in its known source set, but operators must keep names aligned until
-[#107] defines the final contract.
+The public workload name, TOML filename stem, Quadlet source unit, generated
+service, and `ContainerName=` form one validated canonical identity. Resolution
+rejects mismatches, unsafe or overlong values, and per-target duplicates before
+Nix materialisation; there is no normalization or alias fallback.
 
 Other Quadlet search paths or systemd drop-ins can shadow or alter generated
 behavior. Existing generator checks validate Graft's own complete fixture set,
@@ -476,15 +476,13 @@ A security-sensitive design or implementation must:
 Qualified CDI references are current through [#203], secure defaults and typed
 relaxations through [#163], and the [filesystem policy](filesystem-policy.md)
 through [#164]. Direct devices remain deferred pending host-aware attestation.
-Identity and rootfs-integrity gaps are tracked
-by [#107] and [#108]. Related isolation,
+Rootfs-integrity gaps are tracked by [#108]. Related isolation,
 mount, secret, resource, shadowing, remote, and temporary-agent work is linked in
 the risk sections above.
 
 Suspected violations of these boundaries must follow the private
 [security reporting policy][security-policy], not a public issue.
 
-[#107]: https://github.com/Patrick-Kappen/graft/issues/107
 [#108]: https://github.com/Patrick-Kappen/graft/issues/108
 [#139]: https://github.com/Patrick-Kappen/graft/issues/139
 [#143]: https://github.com/Patrick-Kappen/graft/issues/143

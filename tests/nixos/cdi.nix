@@ -35,15 +35,15 @@
     machine.wait_for_unit("multi-user.target")
 
     with subtest("resolved Quadlet contains CDI and hardening intent"):
-        source = "/etc/containers/systemd/cdi-runtime-system.container"
+        source = "/etc/containers/systemd/graft-cdi-runtime.container"
         machine.succeed(f"grep -Fx 'AddDevice=graft.test/device=fake' {source}")
         machine.succeed(f"grep -Fx 'ReadOnly=true' {source}")
         machine.succeed(f"grep -Fx 'DropCapability=all' {source}")
         machine.succeed(f"grep -Fx 'NoNewPrivileges=true' {source}")
 
     with subtest("CDI and hardening reach the container"):
-        machine.succeed("systemctl start cdi-runtime-system.service")
-        machine.succeed("test $(systemctl show cdi-runtime-system.service -P Result) = success")
-        machine.succeed("test $(systemctl show cdi-runtime-system.service -P ActiveState) = inactive")
+        machine.succeed("systemctl start graft-cdi-runtime.service")
+        machine.succeed("test $(systemctl show graft-cdi-runtime.service -P Result) = success")
+        machine.succeed("test $(systemctl show graft-cdi-runtime.service -P ActiveState) = inactive")
   '';
 }
