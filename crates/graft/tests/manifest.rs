@@ -250,6 +250,11 @@ fn manifest_rejects_context_schema_api_count_and_workload_mismatches() {
     set_workloads(&mut parent_store_path, vec![parent_path]);
     let (mut bad_workload_name, _) = pair("system");
     set_workloads(&mut bad_workload_name, vec![workload("@bad", 'a')]);
+    let (mut overlong_workload_name, _) = pair("system");
+    set_workloads(
+        &mut overlong_workload_name,
+        vec![workload(&"a".repeat(246), 'a')],
+    );
     let (mut hidden_container_name, _) = pair("system");
     let mut hidden_container = workload("alpha", 'a');
     hidden_container["containerName"] = ".hidden".into();
@@ -293,6 +298,7 @@ fn manifest_rejects_context_schema_api_count_and_workload_mismatches() {
         dot_store_path,
         parent_store_path,
         bad_workload_name,
+        overlong_workload_name,
         hidden_container_name,
         unsupported_workload_api,
     ] {

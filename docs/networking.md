@@ -60,9 +60,10 @@ mode = "container"
 container = "database"
 ```
 
-`container` is a typed reference to another Graft workload's top-level `name`.
-It is not a Podman runtime container name, TOML filename, systemd unit name, or
-free-form suffix for `container:`.
+`container` is a typed reference to another Graft workload's canonical
+top-level `name`, without a `.toml`, `.container`, or `.service` suffix. The
+same canonical text also identifies that workload's Podman container, but this
+field remains a workload reference rather than free-form `container:` syntax.
 
 The resolver translates the workload reference to the referenced Quadlet source
 unit. If that unit is `database.container`, Graft renders:
@@ -191,11 +192,10 @@ read environment-provided roots, or infer hidden state.
 
 This index is not configuration merging. Parent/child precedence, overlays, and
 provenance remain owned by
-[#159](https://github.com/Patrick-Kappen/graft/issues/159). Unit and container
-identity are still subject to
-[#107](https://github.com/Patrick-Kappen/graft/issues/107); until that issue
-unifies them, the index provides the explicit mapping from public workload name
-to actual Quadlet source-unit stem.
+[#159](https://github.com/Patrick-Kappen/graft/issues/159). The resolver first
+proves that each source stem equals its canonical workload name, then derives
+the referenced `<name>.container` mechanically; the index does not reconcile or
+alias separate unit and container identities.
 
 ## State and failure behavior
 

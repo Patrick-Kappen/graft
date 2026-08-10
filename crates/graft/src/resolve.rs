@@ -18,7 +18,7 @@ const SUPPORTED_VERSION: u32 = 1;
 const GRAFT_PAUSE_PACKAGE: &str = "graft-pause";
 const GRAFT_PAUSE_COMMAND: &str = "/bin/graft-pause";
 const ROOTFS_STORE_MODE: &str = "rootfs-store";
-const MAX_SOURCE_UNIT_STEM_BYTES: usize = 245;
+const MAX_CANONICAL_NAME_BYTES: usize = 245;
 const SYSTEMD_UNIT_SUFFIXES: [&str; 11] = [
     "service",
     "socket",
@@ -316,7 +316,6 @@ struct WorkloadKey {
 
 #[derive(Debug)]
 struct IndexedWorkload {
-    unit_name: String,
     origin: String,
     enabled: bool,
     lifecycle: ServiceLifecycle,
@@ -400,17 +399,17 @@ pub fn resolve_with_context(
     config: &ContainerConfig,
     sources: &[ConfigSource<'_>],
 ) -> Result<ResolvedContainer> {
-    validate_source_unit_identities(sources)?;
-
-    if !requires_config_index(sources) {
-        return resolve_internal(config, None);
-    }
+    validate_source_identities(sources)?;
 
     if !sources
         .iter()
         .any(|source| std::ptr::eq(source.config, config))
     {
         bail!("current workload is missing from explicit config context");
+    }
+
+    if !requires_config_index(sources) {
+        return resolve_internal(config, None);
     }
 
     let index = ConfigIndex::build(sources)?;
@@ -424,7 +423,7 @@ pub fn resolve_with_context(
 /// Returns an error when any source, cross-workload reference, or container
 /// configuration is invalid.
 pub fn resolve_set(sources: &[ConfigSource<'_>]) -> Result<Vec<ResolvedContainer>> {
-    validate_source_unit_identities(sources)?;
+    validate_source_identities(sources)?;
 
     let index = requires_config_index(sources)
         .then(|| ConfigIndex::build(sources))
@@ -439,25 +438,50 @@ pub fn resolve_set(sources: &[ConfigSource<'_>]) -> Result<Vec<ResolvedContainer
         .collect()
 }
 
-fn validate_source_unit_identities(sources: &[ConfigSource<'_>]) -> Result<()> {
+fn validate_source_identities(sources: &[ConfigSource<'_>]) -> Result<()> {
+    let mut identities = BTreeSet::new();
+
     for source in sources {
-        validate_source_unit_identity(source)?;
+        validate_source_identity(source)?;
+        let target = resolve_deploy_target(
+            source
+                .config
+                .deploy
+                .as_ref()
+                .and_then(|deploy| deploy.target.as_ref()),
+        )
+        .with_context(|| format!("invalid canonical workload identity at '{}'", source.origin))?;
+        if !identities.insert((target, source.unit_name)) {
+            bail!(
+                "duplicate canonical workload identity '{}' for target '{}' at '{}'; workload, source-unit, generated-service, and container identities must be unique within a target",
+                source.unit_name,
+                target.as_str(),
+                source.origin
+            );
+        }
     }
 
     Ok(())
 }
 
-fn validate_source_unit_identity(source: &ConfigSource<'_>) -> Result<()> {
-    let name = source.unit_name;
-    let valid = (1..=MAX_SOURCE_UNIT_STEM_BYTES).contains(&name.len())
-        && name.bytes().enumerate().all(|(position, byte)| {
-            byte.is_ascii_alphanumeric() || (position > 0 && matches!(byte, b'.' | b'_' | b'-'))
-        });
-
-    if !valid {
+fn validate_source_identity(source: &ConfigSource<'_>) -> Result<()> {
+    if !is_safe_canonical_name(source.unit_name) {
         bail!(
-            "Quadlet source-unit stem at '{}' must match ^[A-Za-z0-9][A-Za-z0-9_.-]*$ and contain 1 through {MAX_SOURCE_UNIT_STEM_BYTES} bytes",
+            "Quadlet source-unit stem at '{}' must match ^[A-Za-z0-9][A-Za-z0-9_.-]*$ and contain 1 through {MAX_CANONICAL_NAME_BYTES} bytes",
             source.origin
+        );
+    }
+
+    let configured_name = resolve_name(source.config)
+        .with_context(|| format!("invalid canonical workload name at '{}'", source.origin))?;
+    if source.unit_name != configured_name {
+        bail!(
+            "canonical workload identity mismatch at '{}': TOML filename stem is '{}' but configured name is '{}'; rename the file to '{}.toml' or set name = {:?}",
+            source.origin,
+            source.unit_name,
+            configured_name,
+            configured_name,
+            source.unit_name
         );
     }
 
@@ -1550,8 +1574,8 @@ fn dependency_requests(dependencies: Option<&[Dependency]>) -> Result<Vec<Depend
             DependencyTarget::Workload(target) => {
                 let WorkloadDependencyTarget { workload } = target;
                 validate_not_empty_or_whitespace("dependency workload reference", workload)?;
-                if !is_safe_container_name(workload) {
-                    bail!("dependency workload reference contains unsupported characters");
+                if !is_safe_canonical_name(workload) {
+                    bail!("dependency workload reference must be a canonical workload name");
                 }
                 DependencyTargetRequest::Workload(workload.clone())
             }
@@ -1628,26 +1652,14 @@ fn validate_external_unit_name(name: &str) -> Result<()> {
 impl ConfigIndex {
     fn build(sources: &[ConfigSource<'_>]) -> Result<Self> {
         let mut workloads = BTreeMap::new();
-        let mut unit_names = BTreeSet::new();
 
         for source in sources {
             let (key, workload) = index_source(source)
                 .with_context(|| format!("invalid config context: {}", source.origin))?;
-            if !unit_names.insert((key.target, source.unit_name)) {
-                bail!(
-                    "duplicate Quadlet source unit '{}' for target '{}' in config context {}",
-                    source.unit_name,
-                    key.target.as_str(),
-                    source.origin
-                );
-            }
-            if workloads.insert(key.clone(), workload).is_some() {
-                bail!(
-                    "duplicate workload name '{}' for target '{}' in config context {}",
-                    key.name,
-                    key.target.as_str(),
-                    source.origin
-                );
+            if workloads.insert(key, workload).is_some() {
+                return Err(anyhow::anyhow!(
+                    "validated canonical workload identity unexpectedly duplicated"
+                ));
             }
         }
 
@@ -1903,18 +1915,17 @@ impl ConfigIndex {
             target: current.target,
             name: reference.to_string(),
         };
-        let workload = self
-            .workloads
+        self.workloads
             .get(&referenced)
             .ok_or_else(|| anyhow::anyhow!("validated reference disappeared"))?;
-        Ok(format!("{}.container", workload.unit_name))
+        Ok(format!("{}.container", referenced.name))
     }
 }
 
 fn index_source(source: &ConfigSource<'_>) -> Result<(WorkloadKey, IndexedWorkload)> {
     validate_version(source.config)?;
     validate_no_unsupported_intent(source.config)?;
-    validate_source_unit_identity(source)?;
+    validate_source_identity(source)?;
 
     let key = workload_key(source.config)?;
     let network = source
@@ -1927,7 +1938,6 @@ fn index_source(source: &ConfigSource<'_>) -> Result<(WorkloadKey, IndexedWorklo
         Some(NetworkRequest::None) | None => None,
     };
     let workload = IndexedWorkload {
-        unit_name: source.unit_name.to_string(),
         origin: source.origin.to_string(),
         enabled: source
             .config
@@ -2098,8 +2108,8 @@ fn resolve_network_request(network: Option<&Network>) -> Result<Option<NetworkRe
         }
         (Some(NetworkMode::Container), Some(reference)) => {
             validate_not_empty_or_whitespace("network container reference", reference)?;
-            if !is_safe_container_name(reference) {
-                bail!("network container reference contains unsupported characters");
+            if !is_safe_canonical_name(reference) {
+                bail!("network container reference must be a canonical workload name");
             }
             Ok(Some(NetworkRequest::Container(reference)))
         }
@@ -2135,23 +2145,20 @@ fn resolve_name(config: &ContainerConfig) -> Result<String> {
         bail!("container name is required");
     };
 
-    validate_not_empty_or_whitespace("container name", name)?;
-
-    if !is_safe_container_name(name) {
-        bail!("container name contains unsupported characters");
+    if !is_safe_canonical_name(name) {
+        bail!(
+            "container name must match ^[A-Za-z0-9][A-Za-z0-9_.-]*$ and contain 1 through {MAX_CANONICAL_NAME_BYTES} bytes"
+        );
     }
 
     Ok(name.clone())
 }
 
-fn is_safe_container_name(name: &str) -> bool {
-    let mut chars = name.chars();
-    let Some(first) = chars.next() else {
-        return false;
-    };
-
-    first.is_ascii_alphanumeric()
-        && chars.all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.'))
+fn is_safe_canonical_name(name: &str) -> bool {
+    (1..=MAX_CANONICAL_NAME_BYTES).contains(&name.len())
+        && name.bytes().enumerate().all(|(position, byte)| {
+            byte.is_ascii_alphanumeric() || (position > 0 && matches!(byte, b'.' | b'_' | b'-'))
+        })
 }
 
 fn validate_runtime_mode(runtime: Option<&Runtime>) -> Result<()> {
@@ -3063,16 +3070,35 @@ mod tests {
     }
 
     #[test]
-    fn unsafe_name_returns_error() {
-        let config = ContainerConfig {
-            version: Some(SUPPORTED_VERSION),
-            name: Some("bad/name".to_string()),
-            ..ContainerConfig::default()
-        };
+    fn unsafe_canonical_names_fail_direct_resolution() {
+        let invalid = [
+            "bad/name".to_string(),
+            "bad name".to_string(),
+            "bad@name".to_string(),
+            ".hidden".to_string(),
+            "café".to_string(),
+            "a".repeat(MAX_CANONICAL_NAME_BYTES + 1),
+        ];
 
-        let result = resolve(&config);
+        for name in invalid {
+            let mut config = named_config();
+            config.name = Some(name);
 
-        assert!(result.is_err());
+            let error = resolve(&config).unwrap_err();
+
+            assert!(error.to_string().contains("1 through 245 bytes"));
+        }
+    }
+
+    #[test]
+    fn maximum_length_canonical_name_resolves_directly() {
+        let name = "a".repeat(MAX_CANONICAL_NAME_BYTES);
+        let mut config = named_config();
+        config.name = Some(name.clone());
+
+        let resolved = resolve(&config).unwrap();
+
+        assert_eq!(resolved.name, name);
     }
 
     #[test]
@@ -4775,7 +4801,7 @@ mod tests {
             contextual_workload("database", ResolvedDeployTarget::User, None, None, None);
         let sources = [
             ConfigSource::new("worker", &worker),
-            ConfigSource::new("database-source", &database),
+            ConfigSource::new("database", &database),
         ];
 
         let resolved = resolve_with_context(&worker, &sources).unwrap();
@@ -4783,11 +4809,11 @@ mod tests {
         assert_eq!(
             resolved.dependencies,
             Some(ResolvedDependencies {
-                requires: vec!["database-source.container".to_string()],
+                requires: vec!["database.container".to_string()],
                 wants: Vec::new(),
-                after: vec!["database-source.container".to_string()],
+                after: vec!["database.container".to_string()],
                 before: Vec::new(),
-                part_of: vec!["database-source.container".to_string()],
+                part_of: vec!["database.container".to_string()],
                 binds_to: Vec::new(),
             })
         );
@@ -4891,13 +4917,14 @@ mod tests {
             None,
             None,
         )]);
-        let sources = [ConfigSource::new("worker", &worker)];
+        let sources = [ConfigSource::new("dev", &worker)];
 
         let error = resolve_with_context(&worker, &sources).unwrap_err();
         let diagnostic = format!("{error:#}");
 
         assert!(
-            diagnostic.contains("dependency workload reference contains unsupported characters")
+            diagnostic.contains("dependency workload reference must be a canonical workload name"),
+            "{diagnostic}"
         );
     }
 
@@ -5166,7 +5193,7 @@ mod tests {
             contextual_workload("database", ResolvedDeployTarget::User, None, None, None);
         let sources = [
             ConfigSource::new("worker", &worker),
-            ConfigSource::new("database-source", &database),
+            ConfigSource::new("database", &database),
         ];
 
         let resolved = resolve_with_context(&worker, &sources).unwrap();
@@ -5175,7 +5202,7 @@ mod tests {
             resolved.network,
             Some(ResolvedNetwork {
                 namespace: Some(ResolvedNetworkNamespace::Container {
-                    unit: "database-source.container".to_string(),
+                    unit: "database.container".to_string(),
                 }),
                 publish: None,
             })
@@ -5414,49 +5441,62 @@ mod tests {
     }
 
     #[test]
-    fn duplicate_workload_name_in_target_returns_error() {
-        let first = contextual_workload(
-            "database",
-            ResolvedDeployTarget::System,
-            None,
-            None,
-            Some(container_network("owner")),
-        );
+    fn duplicate_canonical_identity_in_target_returns_error_without_graph_references() {
+        let first = contextual_workload("database", ResolvedDeployTarget::System, None, None, None);
         let second = first.clone();
         let sources = [
-            ConfigSource::new("first", &first),
-            ConfigSource::new("second", &second),
+            ConfigSource::with_origin("database", "first/database.toml", &first),
+            ConfigSource::with_origin("database", "second/database.toml", &second),
         ];
 
         let error = resolve_with_context(&first, &sources).unwrap_err();
 
         assert_eq!(
             error.to_string(),
-            "duplicate workload name 'database' for target 'system' in config context second"
+            "duplicate canonical workload identity 'database' for target 'system' at 'second/database.toml'; workload, source-unit, generated-service, and container identities must be unique within a target"
         );
     }
 
     #[test]
-    fn duplicate_source_unit_name_in_target_returns_error() {
-        let worker = contextual_workload(
-            "worker",
-            ResolvedDeployTarget::System,
-            None,
-            None,
-            Some(container_network("database")),
-        );
-        let database =
+    fn same_canonical_identity_is_allowed_in_separate_manager_scopes() {
+        let system =
             contextual_workload("database", ResolvedDeployTarget::System, None, None, None);
+        let user = contextual_workload("database", ResolvedDeployTarget::User, None, None, None);
         let sources = [
-            ConfigSource::new("shared", &worker),
-            ConfigSource::new("shared", &database),
+            ConfigSource::with_origin("database", "system/database.toml", &system),
+            ConfigSource::with_origin("database", "user/database.toml", &user),
         ];
 
-        let error = resolve_with_context(&worker, &sources).unwrap_err();
+        let resolved = resolve_set(&sources).unwrap();
 
-        assert_eq!(
-            error.to_string(),
-            "duplicate Quadlet source unit 'shared' for target 'system' in config context shared"
+        assert_eq!(resolved.len(), 2);
+        assert!(resolved.iter().all(|workload| workload.name == "database"));
+        assert!(resolved
+            .iter()
+            .any(|workload| workload.deploy.target == ResolvedDeployTarget::System));
+        assert!(resolved
+            .iter()
+            .any(|workload| workload.deploy.target == ResolvedDeployTarget::User));
+    }
+
+    #[test]
+    fn canonical_identity_mismatch_reports_origin_stem_and_name() {
+        let config =
+            contextual_workload("database", ResolvedDeployTarget::System, None, None, None);
+        let sources = [ConfigSource::with_origin(
+            "source",
+            "/configs/source.toml",
+            &config,
+        )];
+
+        let error = resolve_with_context(&config, &sources).unwrap_err();
+        let diagnostic = error.to_string();
+
+        assert!(diagnostic.contains("/configs/source.toml"), "{diagnostic}");
+        assert!(diagnostic.contains("stem is 'source'"), "{diagnostic}");
+        assert!(
+            diagnostic.contains("configured name is 'database'"),
+            "{diagnostic}"
         );
     }
 
@@ -5497,7 +5537,7 @@ mod tests {
 
         assert_eq!(
             error.to_string(),
-            "network container reference contains unsupported characters"
+            "network container reference must be a canonical workload name"
         );
     }
 
@@ -5515,7 +5555,7 @@ mod tests {
             r"bad\name",
             "bad\nname",
             "café",
-            &"a".repeat(MAX_SOURCE_UNIT_STEM_BYTES + 1),
+            &"a".repeat(MAX_CANONICAL_NAME_BYTES + 1),
         ];
 
         for unit_name in invalid {
@@ -5538,18 +5578,25 @@ mod tests {
 
     #[test]
     fn source_unit_identity_policy_applies_to_context_and_set_resolution() {
-        let config = named_config();
-        let safe_short = ConfigSource::with_origin("a", "a.toml", &config);
-        let safe_boundary_name = "a".repeat(MAX_SOURCE_UNIT_STEM_BYTES);
+        let short = contextual_workload("a", ResolvedDeployTarget::System, None, None, None);
+        let safe_boundary_name = "a".repeat(MAX_CANONICAL_NAME_BYTES);
+        let boundary = contextual_workload(
+            &safe_boundary_name,
+            ResolvedDeployTarget::System,
+            None,
+            None,
+            None,
+        );
+        let safe_short = ConfigSource::with_origin("a", "a.toml", &short);
         let safe_boundary =
-            ConfigSource::with_origin(&safe_boundary_name, "boundary.toml", &config);
+            ConfigSource::with_origin(&safe_boundary_name, "boundary.toml", &boundary);
 
-        assert!(resolve_with_context(&config, &[safe_short, safe_boundary]).is_ok());
+        assert!(resolve_with_context(&short, &[safe_short, safe_boundary]).is_ok());
         assert!(resolve_set(&[safe_short, safe_boundary]).is_ok());
 
-        let unsafe_source = ConfigSource::with_origin("bad@name", "bad@name.toml", &config);
+        let unsafe_source = ConfigSource::with_origin("bad@name", "bad@name.toml", &short);
         for result in [
-            resolve_with_context(&config, &[safe_short, unsafe_source]).map(|_| ()),
+            resolve_with_context(&short, &[safe_short, unsafe_source]).map(|_| ()),
             resolve_set(&[safe_short, unsafe_source]).map(|_| ()),
         ] {
             let error = result.unwrap_err();

@@ -19,6 +19,8 @@ pub const MANIFEST_SCHEMA_MIN_MINOR: u16 = 0;
 pub const MANIFEST_SCHEMA_MAX_MINOR: u16 = 0;
 /// Maximum number of workloads in one manifest.
 pub const MAX_MANIFEST_WORKLOADS: usize = 1_024;
+/// Maximum bytes in a canonical workload identity.
+pub const MAX_WORKLOAD_NAME_BYTES: usize = 245;
 /// Maximum dependencies in one workload record.
 pub const MAX_WORKLOAD_DEPENDENCIES: usize = 256;
 /// Maximum bytes in a bounded manifest string.
@@ -828,7 +830,7 @@ struct WorkloadName(String);
 impl WorkloadName {
     fn new(value: &str) -> Option<Self> {
         let mut bytes = value.bytes();
-        if value.len() > MAX_MANIFEST_STRING_BYTES
+        if value.len() > MAX_WORKLOAD_NAME_BYTES
             || !bytes
                 .next()
                 .is_some_and(|byte| byte.is_ascii_alphanumeric())

@@ -95,6 +95,9 @@ fn resolve_cli(cli: &Cli) -> Result<CliOutput> {
 
 fn resolve_set(paths: &[PathBuf]) -> Result<BTreeMap<String, ResolvedContainer>> {
     let loaded = load_sources(paths)?;
+    let sources = config_sources(&loaded);
+    let resolved = resolve::resolve_set(&sources)?;
+
     let mut file_names = BTreeSet::new();
     for source in &loaded {
         if !file_names.insert(source.file_name.as_str()) {
@@ -105,8 +108,6 @@ fn resolve_set(paths: &[PathBuf]) -> Result<BTreeMap<String, ResolvedContainer>>
         }
     }
 
-    let sources = config_sources(&loaded);
-    let resolved = resolve::resolve_set(&sources)?;
     Ok(loaded
         .iter()
         .zip(resolved)
@@ -135,10 +136,14 @@ fn load_source(path: &Path) -> Result<LoadedSource> {
         .and_then(|name| name.to_str())
         .with_context(|| format!("config path has no UTF-8 filename: {}", path.display()))?
         .to_string();
-    let unit_name = path
-        .file_stem()
-        .and_then(|stem| stem.to_str())
-        .with_context(|| format!("config path has no UTF-8 filename stem: {}", path.display()))?
+    let unit_name = file_name
+        .strip_suffix(".toml")
+        .with_context(|| {
+            format!(
+                "config filename must end with the exact '.toml' suffix: {}",
+                path.display()
+            )
+        })?
         .to_string();
 
     Ok(LoadedSource {
@@ -182,7 +187,7 @@ mod tests {
     fn resolves_container_reference_from_explicit_context() {
         let directory = tempdir().unwrap();
         let worker = directory.path().join("worker.toml");
-        let database = directory.path().join("database-source.toml");
+        let database = directory.path().join("database.toml");
         fs::write(
             &worker,
             r#"
@@ -217,7 +222,7 @@ target = "system"
         assert_eq!(
             namespace,
             ResolvedNetworkNamespace::Container {
-                unit: "database-source.container".to_string()
+                unit: "database.container".to_string()
             }
         );
     }
@@ -226,7 +231,7 @@ target = "system"
     fn resolves_workload_dependency_from_explicit_set() {
         let directory = tempdir().unwrap();
         let worker = directory.path().join("worker.toml");
-        let database = directory.path().join("database-source.toml");
+        let database = directory.path().join("database.toml");
         fs::write(
             &worker,
             r#"
@@ -262,14 +267,8 @@ target = "system"
             .expect("set CLI should return containers by TOML filename");
         let dependencies = resolved["worker.toml"].dependencies.as_ref().unwrap();
 
-        assert_eq!(
-            dependencies.requires,
-            ["database-source.container".to_string()]
-        );
-        assert_eq!(
-            dependencies.after,
-            ["database-source.container".to_string()]
-        );
+        assert_eq!(dependencies.requires, ["database.container".to_string()]);
+        assert_eq!(dependencies.after, ["database.container".to_string()]);
 
         let single_output = CliOutput::Single(Box::new(resolved["worker.toml"].clone()));
         assert!(set_output(single_output).is_none());

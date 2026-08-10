@@ -37,16 +37,46 @@ for the complete status boundary.
 | Field | Type | Default | Contract |
 | --- | --- | --- | --- |
 | `version` | integer | required | Must be exactly `1`. |
-| `name` | string | required | Must match `^[A-Za-z0-9][A-Za-z0-9._-]*$`. |
+| `name` | string | required | Canonical identity: 1–245 ASCII bytes, matching `^[A-Za-z0-9][A-Za-z0-9._-]*$`, and exactly equal to the TOML filename stem. |
 | `dependencies` | list of tables | optional | Typed activation, ordering, and lifecycle relationships. |
 | `deploy` | table | optional | Materialisation target, enable state, and startup intent. |
 | `config` | table | optional | Runtime, container, filesystem, network, security, and service intent. |
 
-The generated `.container` filename and systemd service stem currently come
-from the TOML filename, while `ContainerName=` comes from `name`. Keep the file
-stem and `name` equal until
-[#107](https://github.com/Patrick-Kappen/graft/issues/107) defines the final
-identity contract.
+For `api.toml` containing `name = "api"`, Graft uses one canonical identity:
+
+| Surface | Derived identity |
+| --- | --- |
+| TOML source | `api.toml` |
+| Quadlet source unit | `api.container` |
+| Generated systemd service | `api.service` |
+| Podman container | `api` |
+
+The comparison is byte-for-byte and case-sensitive. Graft does not normalize,
+escape, infer, or alias either value. Duplicate canonical identities fail within
+one deploy target even when no dependency or network graph needs an index. The
+same name may be used independently in system and user manager scopes.
+
+### Migrating mismatched identities
+
+A mismatched existing workload fails resolution before Nix materialisation. For
+`system.toml` with `name = "nix-check-system"`, choose deliberately:
+
+- rename the file to `nix-check-system.toml` to preserve the Podman container
+  name; the source unit and service change from `system.container` and
+  `system.service` to `nix-check-system.container` and
+  `nix-check-system.service`; or
+- change `name` to `system` to preserve `system.container` and
+  `system.service`; the Podman container name changes from `nix-check-system`
+  to `system`.
+
+After applying the new configuration, stop and remove the old systemd unit and
+old Podman container that are no longer canonical. Check both the selected
+manager (`systemctl` or `systemctl --user`) and Podman scope before cleanup;
+Graft does not choose a migration or delete old identities automatically.
+Repository Nix fixtures that had this mismatch were renamed to their existing
+`name` values. They therefore preserve their prior container identities and
+intentionally change their source-unit and service identities. Dedicated unsafe
+stem and identity-mismatch fixtures remain mismatched only as rejection tests.
 
 ## Deployment
 
@@ -409,7 +439,8 @@ for a non-root account; the module does not reject UID 0.
 
 Both modules read `configRoot` first and then `configRoots` in order. Every
 configured root must exist. New files must be tracked before Git flakes can see
-them. Duplicate TOML filenames across roots and duplicate effective workload
-names within one target fail materialisation. Importing the underlying module
+them. Duplicate TOML filenames across roots and duplicate canonical workload,
+source-unit, generated-service, or container identities within one target fail
+before materialisation. Importing the underlying module
 files directly requires an explicit package; the exported flake modules provide
 it with `mkDefault`.

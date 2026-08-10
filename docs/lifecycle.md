@@ -10,7 +10,11 @@
 
 Graft models every workload as a systemd-managed service while distinguishing
 three process lifecycles through typed workload intent. Users should not need to
-choose raw systemd `Type=` or `RemainAfterExit=` values.
+choose raw systemd `Type=` or `RemainAfterExit=` values. A workload named
+`api` must come from `api.toml`; Quadlet receives `api.container`, generates
+`api.service`, and Podman receives container name `api`. Lifecycle operations,
+logs, inspect, dependencies, and future `api.timer` activation all use that same
+canonical name plus an explicit system or user target.
 
 ## Intent contract
 
