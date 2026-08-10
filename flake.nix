@@ -561,6 +561,8 @@
           duplicateNameNixosEval = evalNixosWithRoots [ ./tests/nix/duplicate-name ];
           duplicateFilenameHomeManagerEval = evalHomeManagerWithRoots [ ./tests/nix/duplicate-filename ];
           duplicateNameHomeManagerEval = evalHomeManagerWithRoots [ ./tests/nix/duplicate-name ];
+          unsafeSourceStemsNixosEval = evalNixosWithRoots [ ./tests/nix/unsafe-source-stems ];
+          unsafeSourceStemsHomeManagerEval = evalHomeManagerWithRoots [ ./tests/nix/unsafe-source-stems ];
           duplicateFilenameNixosFails =
             !(builtins.tryEval (builtins.deepSeq duplicateFilenameNixosEval.config.environment.etc true))
             .success;
@@ -571,6 +573,12 @@
             .success;
           duplicateNameHomeManagerFails =
             !(builtins.tryEval (builtins.deepSeq duplicateNameHomeManagerEval.config.xdg.configFile true))
+            .success;
+          unsafeSourceStemsNixosFails =
+            !(builtins.tryEval (builtins.deepSeq unsafeSourceStemsNixosEval.config.environment.etc true))
+            .success;
+          unsafeSourceStemsHomeManagerFails =
+            !(builtins.tryEval (builtins.deepSeq unsafeSourceStemsHomeManagerEval.config.xdg.configFile true))
             .success;
         in
         {
@@ -654,6 +662,7 @@
             assert !(nixosEval.config.environment.etc ? "containers/systemd/disabled-startup-user.container");
             assert duplicateFilenameNixosFails;
             assert duplicateNameNixosFails;
+            assert unsafeSourceStemsNixosFails;
             assert quickstartNixosEval.config.virtualisation.podman.enable;
             assert assertHasInfixes quickstartNixosRendered (
               expectedQuickstartInfixes ++ [ ''Environment="GRAFT_EXAMPLE=nixos-system"'' ]
@@ -744,6 +753,7 @@
               !(homeManagerEval.config.xdg.configFile ? "containers/systemd/disabled-startup-user.container");
             assert duplicateFilenameHomeManagerFails;
             assert duplicateNameHomeManagerFails;
+            assert unsafeSourceStemsHomeManagerFails;
             assert assertHasInfixes quickstartHomeManagerRendered (
               expectedQuickstartInfixes ++ [ ''Environment="GRAFT_EXAMPLE=home-manager-user"'' ]
             );

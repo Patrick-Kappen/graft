@@ -18,6 +18,7 @@ const SUPPORTED_VERSION: u32 = 1;
 const GRAFT_PAUSE_PACKAGE: &str = "graft-pause";
 const GRAFT_PAUSE_COMMAND: &str = "/bin/graft-pause";
 const ROOTFS_STORE_MODE: &str = "rootfs-store";
+const MAX_SOURCE_UNIT_STEM_BYTES: usize = 245;
 const SYSTEMD_UNIT_SUFFIXES: [&str; 11] = [
     "service",
     "socket",
@@ -399,6 +400,8 @@ pub fn resolve_with_context(
     config: &ContainerConfig,
     sources: &[ConfigSource<'_>],
 ) -> Result<ResolvedContainer> {
+    validate_source_unit_identities(sources)?;
+
     if !requires_config_index(sources) {
         return resolve_internal(config, None);
     }
@@ -421,6 +424,8 @@ pub fn resolve_with_context(
 /// Returns an error when any source, cross-workload reference, or container
 /// configuration is invalid.
 pub fn resolve_set(sources: &[ConfigSource<'_>]) -> Result<Vec<ResolvedContainer>> {
+    validate_source_unit_identities(sources)?;
+
     let index = requires_config_index(sources)
         .then(|| ConfigIndex::build(sources))
         .transpose()?;
@@ -432,6 +437,31 @@ pub fn resolve_set(sources: &[ConfigSource<'_>]) -> Result<Vec<ResolvedContainer
                 .with_context(|| format!("failed to resolve config: {}", source.origin))
         })
         .collect()
+}
+
+fn validate_source_unit_identities(sources: &[ConfigSource<'_>]) -> Result<()> {
+    for source in sources {
+        validate_source_unit_identity(source)?;
+    }
+
+    Ok(())
+}
+
+fn validate_source_unit_identity(source: &ConfigSource<'_>) -> Result<()> {
+    let name = source.unit_name;
+    let valid = (1..=MAX_SOURCE_UNIT_STEM_BYTES).contains(&name.len())
+        && name.bytes().enumerate().all(|(position, byte)| {
+            byte.is_ascii_alphanumeric() || (position > 0 && matches!(byte, b'.' | b'_' | b'-'))
+        });
+
+    if !valid {
+        bail!(
+            "Quadlet source-unit stem at '{}' must match ^[A-Za-z0-9][A-Za-z0-9_.-]*$ and contain 1 through {MAX_SOURCE_UNIT_STEM_BYTES} bytes",
+            source.origin
+        );
+    }
+
+    Ok(())
 }
 
 fn requires_config_index(sources: &[ConfigSource<'_>]) -> bool {
@@ -1884,12 +1914,7 @@ impl ConfigIndex {
 fn index_source(source: &ConfigSource<'_>) -> Result<(WorkloadKey, IndexedWorkload)> {
     validate_version(source.config)?;
     validate_no_unsupported_intent(source.config)?;
-    if !is_safe_container_name(source.unit_name) {
-        bail!(
-            "Quadlet source unit name contains unsupported characters: {}",
-            source.unit_name
-        );
-    }
+    validate_source_unit_identity(source)?;
 
     let key = workload_key(source.config)?;
     let network = source
@@ -5477,16 +5502,64 @@ mod tests {
     }
 
     #[test]
-    fn unsafe_source_unit_name_returns_error() {
-        let config = network_config(container_network("database"));
-        let sources = [ConfigSource::new("bad/unit", &config)];
+    fn source_unit_identity_is_validated_without_graph_references() {
+        let config = named_config();
+        let invalid = [
+            "",
+            ".",
+            ".toml",
+            "bad name",
+            "bad@name",
+            "bad%name",
+            "bad/name",
+            r"bad\name",
+            "bad\nname",
+            "café",
+            &"a".repeat(MAX_SOURCE_UNIT_STEM_BYTES + 1),
+        ];
 
-        let error = resolve_with_context(&config, &sources).unwrap_err();
+        for unit_name in invalid {
+            let sources = [ConfigSource::with_origin(
+                unit_name,
+                "invalid-source.toml",
+                &config,
+            )];
 
-        assert_eq!(
-            format!("{error:#}"),
-            "invalid config context: bad/unit: Quadlet source unit name contains unsupported characters: bad/unit"
-        );
+            let error = resolve_with_context(&config, &sources).unwrap_err();
+            let diagnostic = format!("{error:#}");
+
+            assert!(diagnostic.contains("invalid-source.toml"), "{diagnostic}");
+            assert!(
+                diagnostic.contains("Quadlet source-unit stem"),
+                "{diagnostic}"
+            );
+        }
+    }
+
+    #[test]
+    fn source_unit_identity_policy_applies_to_context_and_set_resolution() {
+        let config = named_config();
+        let safe_short = ConfigSource::with_origin("a", "a.toml", &config);
+        let safe_boundary_name = "a".repeat(MAX_SOURCE_UNIT_STEM_BYTES);
+        let safe_boundary =
+            ConfigSource::with_origin(&safe_boundary_name, "boundary.toml", &config);
+
+        assert!(resolve_with_context(&config, &[safe_short, safe_boundary]).is_ok());
+        assert!(resolve_set(&[safe_short, safe_boundary]).is_ok());
+
+        let unsafe_source = ConfigSource::with_origin("bad@name", "bad@name.toml", &config);
+        for result in [
+            resolve_with_context(&config, &[safe_short, unsafe_source]).map(|_| ()),
+            resolve_set(&[safe_short, unsafe_source]).map(|_| ()),
+        ] {
+            let error = result.unwrap_err();
+            let diagnostic = format!("{error:#}");
+            assert!(diagnostic.contains("bad@name.toml"), "{diagnostic}");
+            assert!(
+                diagnostic.contains("Quadlet source-unit stem"),
+                "{diagnostic}"
+            );
+        }
     }
 
     #[test]

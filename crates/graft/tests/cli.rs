@@ -20,8 +20,16 @@ fn write_config(directory: &TempDir, file_name: &str, content: &str) -> PathBuf 
 }
 
 fn run_graft(path: &Path) -> Output {
+    run_graft_with_args([path.as_os_str()])
+}
+
+fn run_graft_with_args<I, S>(args: I) -> Output
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<std::ffi::OsStr>,
+{
     Command::new(env!("CARGO_BIN_EXE_graft"))
-        .arg(path)
+        .args(args)
         .env_remove("RUST_LOG")
         .output()
         .expect("graft process can be started")
@@ -64,6 +72,65 @@ fn minimal_config_writes_resolved_json_with_one_trailing_newline() {
     assert_eq!(resolved["security"]["noNewPrivileges"], true);
     assert!(output.stdout.ends_with(b"\n"));
     assert!(!output.stdout.ends_with(b"\n\n"));
+}
+
+#[test]
+fn unsafe_source_stems_fail_across_cli_invocations() {
+    let directory = tempfile::tempdir().expect("temporary directory can be created");
+    let unsafe_file_names = vec![
+        ".toml".to_string(),
+        "bad name.toml".to_string(),
+        "bad@name.toml".to_string(),
+        "bad%name.toml".to_string(),
+        "bad\\name.toml".to_string(),
+        format!("{}.toml", "a".repeat(246)),
+    ];
+
+    for file_name in unsafe_file_names {
+        let config = write_config(&directory, &file_name, MINIMAL_CONFIG);
+        let output = run_graft(&config);
+
+        assert_failed_without_stdout(
+            &output,
+            &[
+                config.to_string_lossy().as_ref(),
+                "Quadlet source-unit stem",
+            ],
+        );
+    }
+}
+
+#[test]
+fn unsafe_source_stems_fail_for_context_and_set_without_references() {
+    let directory = tempfile::tempdir().expect("temporary directory can be created");
+    let worker = write_config(&directory, "worker.toml", MINIMAL_CONFIG);
+    let unsafe_context = write_config(&directory, "bad@context.toml", MINIMAL_CONFIG);
+
+    let context_output = run_graft_with_args([
+        worker.as_os_str(),
+        std::ffi::OsStr::new("--context"),
+        unsafe_context.as_os_str(),
+    ]);
+    assert_failed_without_stdout(
+        &context_output,
+        &[
+            unsafe_context.to_string_lossy().as_ref(),
+            "Quadlet source-unit stem",
+        ],
+    );
+
+    let set_output = run_graft_with_args([
+        std::ffi::OsStr::new("--set"),
+        worker.as_os_str(),
+        unsafe_context.as_os_str(),
+    ]);
+    assert_failed_without_stdout(
+        &set_output,
+        &[
+            unsafe_context.to_string_lossy().as_ref(),
+            "Quadlet source-unit stem",
+        ],
+    );
 }
 
 #[test]

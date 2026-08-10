@@ -34,11 +34,22 @@ let
 
   tomlEntries = lib.concatMap tomlEntriesForRoot configuredRoots;
   duplicateTomlNames = duplicates (map (entry: entry.name) tomlEntries);
+  unsafeSourceUnitNames = lib.filter (
+    entry:
+    let
+      stem = lib.removeSuffix ".toml" entry.name;
+    in
+    builtins.stringLength stem > 245 || builtins.match "^[A-Za-z0-9][A-Za-z0-9._-]*$" stem == null
+  ) tomlEntries;
   checkedTomlEntries =
-    if duplicateTomlNames == [ ] then
-      tomlEntries
+    if duplicateTomlNames != [ ] then
+      throw "${optionName}: duplicate container TOML filename(s): ${lib.concatStringsSep ", " duplicateTomlNames}"
+    else if unsafeSourceUnitNames != [ ] then
+      throw "${optionName}: unsafe Quadlet source-unit stem(s): ${
+        lib.concatStringsSep ", " (map (entry: entry.name) unsafeSourceUnitNames)
+      }"
     else
-      throw "${optionName}: duplicate container TOML filename(s): ${lib.concatStringsSep ", " duplicateTomlNames}";
+      tomlEntries;
 
   contextLinks = lib.concatMapStrings (
     entry: "ln -s ${lib.escapeShellArg "${entry.path}"} context/${lib.escapeShellArg entry.name}\n"
