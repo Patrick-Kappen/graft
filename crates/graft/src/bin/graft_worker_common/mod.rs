@@ -16,6 +16,7 @@ use graft::worker::{
 };
 
 #[derive(Debug, Parser)]
+#[command(name = "graft-worker", version)]
 struct Arguments {
     #[arg(long, value_enum)]
     target: TargetArgument,
