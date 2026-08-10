@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 use uuid::Uuid;
 
-use crate::manifest::{ManifestError, ManifestLoader, WorkloadRecord};
+use crate::manifest::{GenerationSnapshot, ManifestError, ManifestLoader, WorkloadRecord};
 use crate::protocol::{
     encoded_frame_len, FrameDirection, ManifestGeneration, WorkerTarget, MAX_OUTBOUND_FRAME_BYTES,
 };
@@ -242,11 +242,8 @@ impl DiscoveryDispatcher {
         Ok(())
     }
 
-    fn snapshots(
-        &self,
-        worker_epoch: crate::protocol::ConnectionIdentifier,
-    ) -> Result<(ManifestGeneration, Vec<WorkloadSnapshot>), DispatchFailure> {
-        let generation = self.loader.load().map_err(|error| {
+    fn load_generation(&self) -> Result<(ManifestGeneration, GenerationSnapshot), DispatchFailure> {
+        let snapshot = self.loader.load().map_err(|error| {
             if matches!(error, ManifestError::ContextMismatch) {
                 DispatchFailure::new(
                     WorkerErrorCode::Unauthorized,
@@ -259,26 +256,35 @@ impl DiscoveryDispatcher {
                 )
             }
         })?;
-        let manifest = generation.manifest();
+        let manifest = snapshot.manifest();
         if manifest.target() != WorkerTarget::User {
             return Err(DispatchFailure::new(
                 WorkerErrorCode::Unauthorized,
                 "request is not authorized for this worker context",
             ));
         }
-        let generation_id =
+        let generation =
             ManifestGeneration::parse(manifest.generation_id().as_str()).map_err(|_| {
                 DispatchFailure::new(
                     WorkerErrorCode::ManifestUnavailable,
                     "current manifest is invalid",
                 )
             })?;
-        let snapshots = manifest
+        Ok((generation, snapshot))
+    }
+
+    fn snapshots(
+        &self,
+        worker_epoch: crate::protocol::ConnectionIdentifier,
+    ) -> Result<(ManifestGeneration, Vec<WorkloadSnapshot>), DispatchFailure> {
+        let (generation, snapshot) = self.load_generation()?;
+        let snapshots = snapshot
+            .manifest()
             .workloads()
             .iter()
-            .map(|workload| self.snapshot(worker_epoch, &generation_id, workload))
+            .map(|workload| self.snapshot(worker_epoch, &generation, workload))
             .collect::<Result<Vec<_>, _>>()?;
-        Ok((generation_id, snapshots))
+        Ok((generation, snapshots))
     }
 
     #[allow(clippy::too_many_lines)]
@@ -418,11 +424,11 @@ impl DiscoveryDispatcher {
         })
     }
 
-    fn find_snapshot(
+    fn find_workload<'a>(
         generation: &ManifestGeneration,
-        snapshots: Vec<WorkloadSnapshot>,
+        workloads: &'a [WorkloadRecord],
         selector: &WorkloadSelector,
-    ) -> Result<WorkloadSnapshot, DispatchFailure> {
+    ) -> Result<&'a WorkloadRecord, DispatchFailure> {
         if selector.target != WorkerTarget::User {
             return Err(DispatchFailure::new(
                 WorkerErrorCode::Unauthorized,
@@ -435,11 +441,11 @@ impl DiscoveryDispatcher {
                 "request targets a stale manifest generation",
             ));
         }
-        snapshots
-            .into_iter()
-            .find(|snapshot| {
-                snapshot.selector.name == selector.name
-                    && snapshot.selector.workload_id == selector.workload_id
+        workloads
+            .iter()
+            .find(|workload| {
+                workload.name() == selector.name.as_str()
+                    && workload.workload_id().as_str() == selector.workload_id.as_str()
             })
             .ok_or_else(|| {
                 DispatchFailure::new(
@@ -579,21 +585,33 @@ impl DiscoveryDispatcher {
                 "semantic operation is unavailable",
             ));
         }
-        let (generation, snapshots) = self.snapshots(context.worker_epoch)?;
         match request {
-            SemanticRequest::ListStatus(request) => Ok(ReadOnlyResponse::StatusPage(self.list(
-                context.worker_epoch,
-                context.principal.uid,
-                request,
-                generation,
-                snapshots,
-            )?)),
-            SemanticRequest::GetStatus { selector } => Ok(ReadOnlyResponse::Status(
-                Self::find_snapshot(&generation, snapshots, selector)?,
-            )),
+            SemanticRequest::ListStatus(request) => {
+                let (generation, snapshots) = self.snapshots(context.worker_epoch)?;
+                Ok(ReadOnlyResponse::StatusPage(self.list(
+                    context.worker_epoch,
+                    context.principal.uid,
+                    request,
+                    generation,
+                    snapshots,
+                )?))
+            }
+            SemanticRequest::GetStatus { selector } => {
+                let (generation, snapshot) = self.load_generation()?;
+                let workload =
+                    Self::find_workload(&generation, snapshot.manifest().workloads(), selector)?;
+                Ok(ReadOnlyResponse::Status(self.snapshot(
+                    context.worker_epoch,
+                    &generation,
+                    workload,
+                )?))
+            }
             SemanticRequest::Inspect { selector } => {
+                let (generation, snapshot) = self.load_generation()?;
+                let workload =
+                    Self::find_workload(&generation, snapshot.manifest().workloads(), selector)?;
                 Ok(ReadOnlyResponse::Inspect(InspectSnapshot {
-                    snapshot: Self::find_snapshot(&generation, snapshots, selector)?,
+                    snapshot: self.snapshot(context.worker_epoch, &generation, workload)?,
                     manager_supported: self.manager.is_supported(),
                     runtime_supported: self.runtime.is_supported(),
                 }))
