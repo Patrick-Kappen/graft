@@ -126,6 +126,8 @@ impl SemanticDispatcher for MockDispatcher {
                 SemanticRequest::ListStatus(_)
                 | SemanticRequest::GetStatus { .. }
                 | SemanticRequest::Inspect { .. }
+                | SemanticRequest::Lifecycle(_)
+                | SemanticRequest::QueryLifecycle(_)
                 | SemanticRequest::Reserved => DispatchPlan::Unsupported,
                 SemanticRequest::MockUnary { delay_ms }
                 | SemanticRequest::MockLifecycle { delay_ms } => DispatchPlan::MockUnary {

@@ -728,7 +728,9 @@ const fn operation_deadline_class(operation: &SemanticRequest) -> OperationDeadl
         SemanticRequest::ListStatus(_)
         | SemanticRequest::GetStatus { .. }
         | SemanticRequest::Inspect { .. }
+        | SemanticRequest::QueryLifecycle(_)
         | SemanticRequest::Reserved => OperationDeadlineClass::Unary,
+        SemanticRequest::Lifecycle(_) => OperationDeadlineClass::Lifecycle,
         #[cfg(feature = "worker-test-fixtures")]
         SemanticRequest::MockUnary { .. } | SemanticRequest::MockStream { .. } => {
             OperationDeadlineClass::Unary
@@ -801,6 +803,9 @@ async fn spawn_request(context: RequestContext) {
             Some(Capability::Observe)
         }
         SemanticRequest::Inspect { .. } => Some(Capability::Inspect),
+        SemanticRequest::Lifecycle(_) | SemanticRequest::QueryLifecycle(_) => {
+            Some(Capability::Lifecycle)
+        }
         SemanticRequest::Reserved => None,
         #[cfg(feature = "worker-test-fixtures")]
         SemanticRequest::MockUnary { .. }
