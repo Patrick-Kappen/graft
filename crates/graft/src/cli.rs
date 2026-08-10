@@ -12,7 +12,7 @@ use crate::config::ContainerConfig;
 use crate::resolve::{self, ConfigSource, ResolvedContainer};
 
 #[derive(Parser)]
-#[command(name = "graft", about = "TOML → resolved JSON generator")]
+#[command(name = "graft", version, about = "TOML → resolved JSON generator")]
 struct Cli {
     /// TOML container config to resolve.
     #[arg(required_unless_present = "set_files")]

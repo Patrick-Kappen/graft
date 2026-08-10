@@ -58,6 +58,21 @@ fn assert_failed_without_stdout(output: &Output, expected_stderr: &[&str]) {
 }
 
 #[test]
+fn version_reports_the_packaged_semantic_version() {
+    let output = run_graft_with_args(["--version"]);
+
+    assert!(output.status.success(), "graft --version should succeed");
+    assert!(
+        output.stderr.is_empty(),
+        "version output should not use stderr"
+    );
+    assert_eq!(
+        output.stdout,
+        format!("graft {}\n", env!("CARGO_PKG_VERSION")).as_bytes()
+    );
+}
+
+#[test]
 fn minimal_config_writes_resolved_json_with_one_trailing_newline() {
     let directory = tempfile::tempdir().expect("temporary directory can be created");
     let config = write_config(&directory, "worker.toml", MINIMAL_CONFIG);

@@ -195,6 +195,27 @@ fn malformed_and_oversized_initial_frames_receive_typed_protocol_errors() {
 }
 
 #[test]
+fn worker_version_reports_the_packaged_semantic_version() {
+    let output = Command::new(env!("CARGO_BIN_EXE_graft-worker"))
+        .arg("--version")
+        .output()
+        .expect("worker version process can be started");
+
+    assert!(
+        output.status.success(),
+        "graft-worker --version should succeed"
+    );
+    assert!(
+        output.stderr.is_empty(),
+        "version output should not use stderr"
+    );
+    assert_eq!(
+        output.stdout,
+        format!("graft-worker {}\n", env!("CARGO_PKG_VERSION")).as_bytes()
+    );
+}
+
+#[test]
 fn real_worker_process_handshake_uses_inherited_unix_socket_and_fresh_epoch() {
     let mut first = spawn_worker();
     let mut first_stream = connect(&first.socket_path);
