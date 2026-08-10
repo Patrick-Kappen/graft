@@ -11,6 +11,14 @@
         "aarch64-linux"
       ];
       forAllSystems = nixpkgs.lib.genAttrs systems;
+      graftCargoMetadata = builtins.fromTOML (builtins.readFile ./crates/graft/Cargo.toml);
+      graftVersion = graftCargoMetadata.package.version;
+      requireVersionParity =
+        cargoVersion: nixVersion:
+        if cargoVersion == nixVersion then
+          nixVersion
+        else
+          throw "Graft Cargo/Nix version mismatch: ${cargoVersion} != ${nixVersion}";
     in
     {
       nixosModules.graft = { lib, pkgs, ... }: {
@@ -28,7 +36,7 @@
           pkgs = nixpkgs.legacyPackages.${system};
           graftPackage = pkgs.rustPlatform.buildRustPackage {
             pname = "graft";
-            version = "0.3.0-alpha.1";
+            version = requireVersionParity graftVersion graftVersion;
             src = ./crates/graft;
             cargoLock.lockFile = ./crates/graft/Cargo.lock;
 
@@ -576,6 +584,13 @@
             .success;
         in
         {
+          version-parity =
+            assert !(builtins.tryEval (requireVersionParity graftVersion "deliberate-drift")).success;
+            pkgs.runCommand "graft-version-parity" { } ''
+              test ${lib.escapeShellArg graftPackage.version} = ${lib.escapeShellArg graftVersion}
+              touch "$out"
+            '';
+
           nixos-module-eval =
             assert renderAssertions {
               rendered = nixosRendered;
