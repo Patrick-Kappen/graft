@@ -2,11 +2,13 @@
 
 mod canonical;
 mod filesystem;
+mod render;
 mod schema;
 
 use thiserror::Error;
 
 pub use filesystem::{GenerationOwner, GenerationSnapshot, ManifestLoader};
+pub use render::{render, RenderInput, RenderedDocuments};
 pub use schema::{
     AbsoluteSystemEndpoint, BackendRequirement, EndpointAddress, EndpointDescriptor,
     HostIdentifier, LifecycleCapability, Manifest, ManifestSchemaVersion, ObservabilityCapability,
