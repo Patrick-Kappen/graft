@@ -4,10 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::protocol::{ManagerKind, ProtocolVersionRange, WorkerTarget};
 
-use super::{
-    schema, EndpointDescriptor, HostIdentifier, Manifest, ManifestError, ProducerIdentity,
-    WorkloadRecord,
-};
+use super::{schema, HostIdentifier, ManifestError, ProducerIdentity, WorkloadRecord};
 
 /// Typed, already-resolved facts from which a discovery generation is rendered.
 ///
@@ -70,22 +67,6 @@ impl RenderedDocuments {
     #[must_use]
     pub fn endpoint_json(&self) -> &[u8] {
         &self.endpoint
-    }
-
-    /// Parses the rendered manifest using the public consumer boundary.
-    ///
-    /// # Errors
-    /// Returns an error only if an internal serialization invariant is broken.
-    pub fn manifest(&self) -> Result<Manifest, ManifestError> {
-        Manifest::from_json(&self.manifest)
-    }
-
-    /// Parses the rendered endpoint using the public consumer boundary.
-    ///
-    /// # Errors
-    /// Returns an error only if an internal serialization invariant is broken.
-    pub fn endpoint(&self) -> Result<EndpointDescriptor, ManifestError> {
-        EndpointDescriptor::from_json(&self.endpoint)
     }
 }
 
