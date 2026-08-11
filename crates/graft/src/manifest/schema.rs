@@ -9,7 +9,11 @@ use crate::protocol::{
     ManagerKind, ProtocolVersionRange, WorkerTarget, PROTOCOL_MAJOR, PROTOCOL_MAX_MINOR,
 };
 
-use super::{canonical, ManifestError};
+use super::{
+    canonical,
+    render::{RenderInput, RenderedDocuments},
+    ManifestError,
+};
 
 /// Manifest schema major version supported by this worker.
 pub const MANIFEST_SCHEMA_MAJOR: u16 = 1;
@@ -294,6 +298,80 @@ struct ManifestPreimage<'a> {
     manager: ManagerKind,
     workload_count: u32,
     workloads: &'a [WorkloadRecord],
+}
+
+pub(super) fn render_documents(input: RenderInput) -> Result<RenderedDocuments, ManifestError> {
+    let RenderInput {
+        producer,
+        host_id,
+        target,
+        manager,
+        worker_api_range,
+        workloads,
+    } = input;
+    let workload_count =
+        u32::try_from(workloads.len()).map_err(|_| ManifestError::WorkloadCount)?;
+    let preimage = ManifestPreimage {
+        schema_version: ManifestSchemaVersion::current(),
+        worker_api_range,
+        producer: &producer,
+        host_id,
+        target,
+        manager,
+        workload_count,
+        workloads: &workloads,
+    };
+    let digest = Sha256Identity::from_computed(canonical::sha256_hex(
+        &canonical::to_canonical_json(&preimage)?,
+    ));
+    let manifest = Manifest {
+        schema_version: ManifestSchemaVersion::current(),
+        worker_api_range,
+        producer,
+        host_id,
+        target,
+        manager,
+        generation_id: digest.clone(),
+        digest: digest.clone(),
+        workload_count,
+        workloads,
+    };
+    manifest.validate()?;
+    let manifest_json = canonical::to_canonical_json(&manifest)?;
+
+    let socket_address = match target {
+        WorkerTarget::System => EndpointAddress::AbsoluteSystem(AbsoluteSystemEndpoint),
+        WorkerTarget::User => EndpointAddress::LinuxUserRuntimeRelative(UserRuntimeEndpoint),
+    };
+    let endpoint_preimage = EndpointPreimage {
+        schema_version: manifest.schema_version,
+        worker_api_range,
+        producer: &manifest.producer,
+        host_id,
+        target,
+        manager,
+        generation_id: &digest,
+        manifest_digest: &digest,
+        socket_address: &socket_address,
+    };
+    let endpoint_digest = Sha256Identity::from_computed(canonical::sha256_hex(
+        &canonical::to_canonical_json(&endpoint_preimage)?,
+    ));
+    let endpoint = EndpointDescriptor {
+        schema_version: manifest.schema_version,
+        worker_api_range,
+        producer: manifest.producer.clone(),
+        host_id,
+        target,
+        manager,
+        generation_id: digest.clone(),
+        manifest_digest: digest,
+        socket_address,
+        endpoint_digest,
+    };
+    endpoint.validate()?;
+    let endpoint_json = canonical::to_canonical_json(&endpoint)?;
+    Ok(RenderedDocuments::new(manifest_json, endpoint_json))
 }
 
 impl Manifest {
