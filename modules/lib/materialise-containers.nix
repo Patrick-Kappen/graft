@@ -51,6 +51,10 @@ let
     else
       tomlEntries;
 
+  sourcePaths = builtins.listToAttrs (
+    map (entry: lib.nameValuePair entry.name entry.path) checkedTomlEntries
+  );
+
   contextLinks = lib.concatMapStrings (
     entry: "ln -s ${lib.escapeShellArg "${entry.path}"} context/${lib.escapeShellArg entry.name}\n"
   ) checkedTomlEntries;
@@ -204,6 +208,20 @@ let
         ${./check-closure-limits.sh}
     ''
   ) containers;
+
+  manifestFacts = lib.mapAttrs (sourceIdentity: ctr: {
+    inherit sourceIdentity;
+    sourcePath = sourcePaths.${sourceIdentity};
+    resolved = ctr;
+    enabled = true;
+    workloadName = ctr.name;
+    quadletSourceUnit = "${ctr.name}.container";
+    generatedService = "${ctr.name}.service";
+    containerName = ctr.name;
+    rootfs = containerEnvs.${sourceIdentity};
+    closureInfo = finalClosures.${sourceIdentity};
+    quadletSource = quadletFiles.${sourceIdentity};
+  }) containers;
 in
 {
   inherit
@@ -211,6 +229,8 @@ in
     containerInners
     containerEnvs
     finalClosures
+    manifestFacts
     quadletFiles
+    resolvedJsonFile
     ;
 }

@@ -132,6 +132,106 @@
           collisionFailure =
             pkgs.testers.testBuildFailure
               collisionMaterialised.containerInners."collision-system.toml";
+
+          manifestMaterialisedFor =
+            target:
+            import ./modules/lib/materialise-containers.nix {
+              inherit lib pkgs target;
+              cfg = {
+                package = graftPackage;
+                configRoot = ./tests/nix/containers;
+                configRoots = [
+                  ./tests/nix/containers-extra
+                  ./tests/nix/dependencies
+                ];
+              };
+              optionName = if target == "system" then "services.graft" else "programs.graft";
+            };
+          manifestProducer = {
+            name = "graft";
+            version = graftVersion;
+            buildId = "graft-test-build";
+          };
+          manifestWorkerApiRange = {
+            major = 1;
+            min_minor = 0;
+            max_minor = 0;
+          };
+          manifestRequiredBackend = {
+            runtime = "podman";
+            minimumVersion = "5.0.0";
+          };
+          lowerManifestInput =
+            target: materialised:
+            import ./modules/lib/lower-manifest-input.nix {
+              inherit
+                lib
+                pkgs
+                materialised
+                target
+                ;
+              producer = manifestProducer;
+              hostId = "018f0f77-8c4d-7b2a-8e6a-4b8a7d3a1c20";
+              manager = target;
+              workerApiRange = manifestWorkerApiRange;
+              requiredBackend = manifestRequiredBackend;
+            };
+          systemManifestMaterialised = manifestMaterialisedFor "system";
+          userManifestMaterialised = manifestMaterialisedFor "user";
+          systemManifestInput = lowerManifestInput "system" systemManifestMaterialised;
+          userManifestInput = lowerManifestInput "user" userManifestMaterialised;
+          renderManifestInput =
+            name: input:
+            pkgs.runCommand name { } ''
+              ${lib.getExe' graftPackage "graft-manifest-render"} ${input} "$out"
+            '';
+          systemManifestDocuments = renderManifestInput "graft-system-manifest-documents" systemManifestInput.file;
+          userManifestDocuments = renderManifestInput "graft-user-manifest-documents" userManifestInput.file;
+          updateManifestWorkload =
+            name: update: value:
+            value
+            // {
+              workloads = map (
+                workload: if workload.name == name then update workload else workload
+              ) value.workloads;
+            };
+          systemManifestRecord =
+            name:
+            lib.findFirst (
+              workload: workload.name == name
+            ) (throw "missing system manifest test workload '${name}'") systemManifestInput.value.workloads;
+          incompleteManifestInput = pkgs.writeText "graft-incomplete-manifest-input.json" (
+            builtins.toJSON (
+              updateManifestWorkload "nix-check-system" (
+                workload: builtins.removeAttrs workload [ "rootfsStorePath" ]
+              ) systemManifestInput.value
+            )
+          );
+          duplicateManifestInput = pkgs.writeText "graft-duplicate-manifest-input.json" (
+            builtins.toJSON (
+              updateManifestWorkload "nix-check-plain-system" (
+                workload: workload // { inherit (systemManifestRecord "nix-check-system") workloadId; }
+              ) systemManifestInput.value
+            )
+          );
+          mismatchedManifestInput = pkgs.writeText "graft-mismatched-manifest-input.json" (
+            builtins.toJSON (
+              updateManifestWorkload "nix-check-system" (
+                workload: workload // { generatedService = "other.service"; }
+              ) systemManifestInput.value
+            )
+          );
+          failedManifestRender = name: input: pkgs.testers.testBuildFailure (renderManifestInput name input);
+          incompleteManifestFailure = failedManifestRender "graft-incomplete-manifest-render" incompleteManifestInput;
+          duplicateManifestFailure = failedManifestRender "graft-duplicate-manifest-render" duplicateManifestInput;
+          mismatchedManifestFailure = failedManifestRender "graft-mismatched-manifest-render" mismatchedManifestInput;
+          expectedSystemManifestSources = pkgs.writeText "graft-system-manifest-sources.json" (
+            builtins.toJSON (builtins.attrNames systemManifestMaterialised.containers)
+          );
+          expectedUserManifestSources = pkgs.writeText "graft-user-manifest-sources.json" (
+            builtins.toJSON (builtins.attrNames userManifestMaterialised.containers)
+          );
+
           largeClosureMembers = lib.genList (
             index: builtins.toFile "graft-closure-member-${lib.fixedWidthString 3 "0" (toString index)}" ""
           ) 511;
@@ -594,6 +694,89 @@
               test ${lib.escapeShellArg graftPackage.version} = ${lib.escapeShellArg graftVersion}
               touch "$out"
             '';
+
+          manifest-lowering =
+            pkgs.runCommand "graft-manifest-lowering"
+              {
+                nativeBuildInputs = [ pkgs.jq ];
+              }
+              ''
+                set -euo pipefail
+
+                check_context() {
+                  input=$1
+                  documents=$2
+                  target=$3
+                  expected_sources=$4
+
+                  test -f "$documents/manifest.json"
+                  test -f "$documents/endpoint.json"
+                  test "$(find "$documents" -mindepth 1 -maxdepth 1 -type f | wc -l)" -eq 2
+
+                  jq -S '.workloads' "$input" > input-workloads.json
+                  jq -S '.workloads' "$documents/manifest.json" > manifest-workloads.json
+                  cmp input-workloads.json manifest-workloads.json
+
+                  jq -S '.' "$expected_sources" > expected-sources.json
+                  jq -S '[.workloads[].sourceIdentity]' "$input" > actual-sources.json
+                  cmp expected-sources.json actual-sources.json
+                  ! grep -Eq '"(sourcePath|quadletSource|closureInfo|resolved|environment|command|secret|credential)"[[:space:]]*:' "$input"
+
+                  jq -e --arg target "$target" '
+                    .target == $target
+                    and .manager == $target
+                    and (.workloads as $workloads
+                      | [$workloads[].name] == ([$workloads[].name] | sort)
+                      and all($workloads[];
+                        .enabled == true
+                        and .target == $target
+                        and .sourceIdentity == (.name + ".toml")
+                        and .quadletSourceUnit == (.name + ".container")
+                        and .generatedService == (.name + ".service")
+                        and .containerName == .name
+                        and .lifecycleCapabilities == []
+                        and .observabilityCapabilities == ["manifest"]
+                        and (.rootfsStorePath | startswith("/nix/store/"))))
+                  ' "$input"
+                  jq -e --arg target "$target" '
+                    .target == $target
+                    and .manager == $target
+                    and .generationId == .manifestDigest
+                    and (.workloads | length) == .workloadCount
+                    and (has("uid") | not)
+                  ' "$documents/manifest.json"
+                  jq -e '
+                    .generationId == .manifestDigest
+                    and (.socketAddress | has("kind"))
+                    and (has("uid") | not)
+                  ' "$documents/endpoint.json"
+                }
+
+                check_context \
+                  ${systemManifestInput.file} \
+                  ${systemManifestDocuments} \
+                  system \
+                  ${expectedSystemManifestSources}
+                check_context \
+                  ${userManifestInput.file} \
+                  ${userManifestDocuments} \
+                  user \
+                  ${expectedUserManifestSources}
+
+                jq -e '
+                  ([.workloads[].lifecycle] | unique) == ["job", "long_running", "setup"]
+                  and ([.workloads[].startupIntent] | unique) == ["disabled", "manager_target"]
+                  and any(.workloads[];
+                    .name == "dependency-client-system"
+                    and (.dependencyServices | index("dependency-owner-system.service")))
+                ' ${systemManifestInput.file}
+
+                touch "$out"
+              '';
+
+          manifest-lowering-rejects-incomplete = incompleteManifestFailure;
+          manifest-lowering-rejects-duplicate = duplicateManifestFailure;
+          manifest-lowering-rejects-mismatch = mismatchedManifestFailure;
 
           nixos-module-eval =
             assert renderAssertions {
