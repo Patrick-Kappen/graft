@@ -3,7 +3,7 @@ use serde_json::{json, Value};
 
 const HOST_ID: &str = "018f0f77-8c4d-7b2a-8e6a-4b8a7d3a1c20";
 
-fn input(target: &str, workloads: Vec<Value>) -> RenderInput {
+fn input(target: &str, workloads: &[Value]) -> RenderInput {
     let manager = if target == "system" { "system" } else { "user" };
     serde_json::from_value(json!({
         "producer":{"name":"graft","version":"0.3.0-alpha.1","buildId":"graft-test-build"},
@@ -37,7 +37,7 @@ fn workload(name: &str, identity: char) -> Value {
 
 #[test]
 fn renderer_emits_fixed_canonical_system_vectors_accepted_by_public_parsers() {
-    let rendered = render(input("system", vec![])).unwrap();
+    let rendered = render(input("system", &[])).unwrap();
     let manifest: Value = serde_json::from_slice(rendered.manifest_json()).unwrap();
     let endpoint: Value = serde_json::from_slice(rendered.endpoint_json()).unwrap();
 
@@ -57,17 +57,15 @@ fn renderer_emits_fixed_canonical_system_vectors_accepted_by_public_parsers() {
 
 #[test]
 fn renderer_derives_context_endpoint_and_rejects_unordered_or_inconsistent_facts() {
-    let user = render(input("user", vec![])).unwrap();
+    let user = render(input("user", &[])).unwrap();
     let endpoint: Value = serde_json::from_slice(user.endpoint_json()).unwrap();
     assert_eq!(
         endpoint["socketAddress"],
         json!({"kind":"linux_user_runtime_relative","value":"graft/user/worker.sock"})
     );
 
-    let unordered = input(
-        "system",
-        vec![workload("beta", 'b'), workload("alpha", 'a')],
-    );
+    let unordered_workloads = vec![workload("beta", 'b'), workload("alpha", 'a')];
+    let unordered = input("system", &unordered_workloads);
     assert!(matches!(
         render(unordered),
         Err(ManifestError::WorkloadOrder)
@@ -76,14 +74,14 @@ fn renderer_derives_context_endpoint_and_rejects_unordered_or_inconsistent_facts
     let mut inconsistent = workload("alpha", 'a');
     inconsistent["containerName"] = "other".into();
     assert!(matches!(
-        render(input("system", vec![inconsistent])),
+        render(input("system", &[inconsistent])),
         Err(ManifestError::WorkloadIdentityMismatch)
     ));
 }
 
 #[test]
 fn renderer_input_refuses_unknown_secret_bearing_fields() {
-    let mut value = serde_json::to_value(input("system", vec![])).unwrap();
+    let mut value = serde_json::to_value(input("system", &[])).unwrap();
     value["token"] = "secret".into();
     assert!(serde_json::from_value::<RenderInput>(value).is_err());
 }
