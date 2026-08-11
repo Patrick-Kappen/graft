@@ -23,28 +23,6 @@ pub struct RenderInput {
     pub(super) workloads: Vec<WorkloadRecord>,
 }
 
-impl RenderInput {
-    /// Creates a typed discovery-document preimage.
-    #[must_use]
-    pub fn new(
-        producer: ProducerIdentity,
-        host_id: HostIdentifier,
-        target: WorkerTarget,
-        manager: ManagerKind,
-        worker_api_range: ProtocolVersionRange,
-        workloads: Vec<WorkloadRecord>,
-    ) -> Self {
-        Self {
-            producer,
-            host_id,
-            target,
-            manager,
-            worker_api_range,
-            workloads,
-        }
-    }
-}
-
 /// Canonical immutable discovery documents and their computed identities.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RenderedDocuments {
