@@ -371,6 +371,11 @@ pub(super) fn render_documents(input: RenderInput) -> Result<RenderedDocuments, 
     };
     endpoint.validate()?;
     let endpoint_json = canonical::to_canonical_json(&endpoint)?;
+
+    let parsed_manifest = Manifest::from_json(&manifest_json)?;
+    let parsed_endpoint = EndpointDescriptor::from_json(&endpoint_json)?;
+    validate_pair(&parsed_manifest, &parsed_endpoint)?;
+
     Ok(RenderedDocuments::new(manifest_json, endpoint_json))
 }
 

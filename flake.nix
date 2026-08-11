@@ -40,6 +40,10 @@
             src = ./crates/graft;
             cargoLock.lockFile = ./crates/graft/Cargo.lock;
 
+            postInstall = ''
+              test -x "$out/bin/graft-manifest-render"
+            '';
+
             meta = {
               description = "TOML-driven Podman Quadlet containers, built from the Nix store";
               homepage = "https://github.com/Patrick-Kappen/graft";
