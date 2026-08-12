@@ -2,12 +2,14 @@
 
 mod canonical;
 mod filesystem;
+mod publication;
 mod render;
 mod schema;
 
 use thiserror::Error;
 
 pub use filesystem::{GenerationOwner, GenerationSnapshot, ManifestLoader};
+pub use publication::{publish_system_generation, PublicationError};
 pub use render::{render, RenderInput, RenderedDocuments};
 pub use schema::{
     AbsoluteSystemEndpoint, BackendRequirement, EndpointAddress, EndpointDescriptor,

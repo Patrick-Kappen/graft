@@ -42,6 +42,7 @@
 
             postInstall = ''
               test -x "$out/bin/graft-manifest-render"
+              test -x "$out/bin/graft-manifest-publish-system"
             '';
 
             meta = {
@@ -59,6 +60,11 @@
         // pkgs.lib.optionalAttrs (system == "x86_64-linux") {
           activation-runtime-test = pkgs.testers.runNixOSTest (
             import ./tests/nixos/activation.nix {
+              inherit pkgs graftPackage;
+            }
+          );
+          system-manifest-publication-runtime-test = pkgs.testers.runNixOSTest (
+            import ./tests/nixos/system-manifest-publication.nix {
               inherit pkgs graftPackage;
             }
           );
@@ -147,6 +153,7 @@
               };
               optionName = if target == "system" then "services.graft" else "programs.graft";
             };
+          manifestHostId = "018f0f77-8c4d-7b2a-8e6a-4b8a7d3a1c20";
           manifestProducer = {
             name = "graft";
             version = graftVersion;
@@ -171,7 +178,7 @@
                 target
                 ;
               producer = manifestProducer;
-              hostId = "018f0f77-8c4d-7b2a-8e6a-4b8a7d3a1c20";
+              hostId = manifestHostId;
               manager = target;
               workerApiRange = manifestWorkerApiRange;
               requiredBackend = manifestRequiredBackend;
@@ -301,6 +308,34 @@
                 default = { };
               };
 
+              users.groups = lib.mkOption {
+                type = lib.types.attrsOf lib.types.anything;
+                default = { };
+              };
+
+              system.build.graftManifestGeneration = lib.mkOption {
+                type = lib.types.package;
+              };
+
+              system.activationScripts = lib.mkOption {
+                type = lib.types.attrsOf (
+                  lib.types.submodule {
+                    options = {
+                      deps = lib.mkOption {
+                        type = lib.types.listOf lib.types.str;
+                        default = [ ];
+                      };
+                      text = lib.mkOption { type = lib.types.lines; };
+                      supportsDryActivation = lib.mkOption {
+                        type = lib.types.bool;
+                        default = false;
+                      };
+                    };
+                  }
+                );
+                default = { };
+              };
+
               xdg.configFile = lib.mkOption {
                 type = lib.types.attrsOf (
                   lib.types.submodule (
@@ -329,6 +364,7 @@
               {
                 services.graft = {
                   enable = true;
+                  hostId = manifestHostId;
                   configRoot = ./tests/nix/containers;
                   configRoots = [ ./tests/nix/containers-extra ];
                 };
@@ -359,6 +395,7 @@
               {
                 services.graft = {
                   enable = true;
+                  hostId = manifestHostId;
                   configRoot = ./tests/nix/network;
                 };
               }
@@ -387,6 +424,7 @@
               {
                 services.graft = {
                   enable = true;
+                  hostId = manifestHostId;
                   configRoot = ./tests/nix/dependencies;
                 };
               }
@@ -415,6 +453,7 @@
               {
                 services.graft = {
                   enable = true;
+                  hostId = manifestHostId;
                   configRoot = ./tests/nix/cdi;
                 };
               }
@@ -461,6 +500,7 @@
               {
                 services.graft = {
                   enable = true;
+                  hostId = manifestHostId;
                   configRoot = ./tests/nix/closure;
                 };
               }
@@ -648,12 +688,74 @@
                 {
                   services.graft = {
                     enable = true;
+                    hostId = manifestHostId;
                     configRoot = ./tests/nix/containers;
                     configRoots = extraRoots;
                   };
                 }
               ];
             };
+          evalSystemPublication =
+            settings:
+            lib.evalModules {
+              specialArgs = { inherit pkgs; };
+              modules = [
+                moduleTestOptions
+                self.nixosModules.graft
+                {
+                  services.graft = {
+                    enable = true;
+                  }
+                  // settings;
+                }
+              ];
+            };
+          missingSystemHostIdEval = evalSystemPublication { };
+          missingSystemHostIdRejected = lib.any (
+            assertion: !assertion.assertion
+          ) missingSystemHostIdEval.config.assertions;
+          missingSystemPackageEval = lib.evalModules {
+            specialArgs = { inherit pkgs; };
+            modules = [
+              moduleTestOptions
+              ./modules/nixos.nix
+              {
+                services.graft = {
+                  enable = true;
+                  hostId = manifestHostId;
+                };
+              }
+            ];
+          };
+          missingSystemPackageRejected = lib.any (
+            assertion: !assertion.assertion
+          ) missingSystemPackageEval.config.assertions;
+          invalidSystemHostIds = [
+            ""
+            "018F0F77-8C4D-7B2A-8E6A-4B8A7D3A1C20"
+            "{018f0f77-8c4d-7b2a-8e6a-4b8a7d3a1c20}"
+            "018f0f778c4d7b2a8e6a4b8a7d3a1c20"
+            "g18f0f77-8c4d-7b2a-8e6a-4b8a7d3a1c20"
+            "018f0f77-8c4d-6b2a-8e6a-4b8a7d3a1c20"
+            "018f0f77-8c4d-7b2a-0e6a-4b8a7d3a1c20"
+            "018f0f77-8c4d-7b2a-8e6a-4b8a7d3a1c20-extra"
+          ];
+          invalidSystemHostIdsRejected = lib.all (
+            hostId:
+            !(builtins.tryEval (
+              builtins.deepSeq (evalSystemPublication { inherit hostId; }).config.services.graft.hostId true
+            )).success
+          ) invalidSystemHostIds;
+          systemPublicationGeneration = nixosEval.config.system.build.graftManifestGeneration;
+          systemPublicationActivation = nixosEval.config.system.activationScripts.graftManifestPublication;
+          expectedSystemPublicationSources = pkgs.writeText "graft-system-publication-sources.json" (
+            builtins.toJSON (
+              map (path: "${lib.removeSuffix ".container" (builtins.baseNameOf path)}.toml") (
+                builtins.attrNames nixosEval.config.environment.etc
+              )
+            )
+          );
+
           evalHomeManagerWithRoots =
             extraRoots:
             lib.evalModules {
@@ -777,6 +879,78 @@
           manifest-lowering-rejects-incomplete = incompleteManifestFailure;
           manifest-lowering-rejects-duplicate = duplicateManifestFailure;
           manifest-lowering-rejects-mismatch = mismatchedManifestFailure;
+
+          system-manifest-publication =
+            assert missingSystemHostIdRejected;
+            assert missingSystemPackageRejected;
+            assert invalidSystemHostIdsRejected;
+            assert nixosEval.config.users.groups ? graft;
+            assert lib.all (dependency: lib.elem dependency systemPublicationActivation.deps) [
+              "users"
+              "groups"
+              "etc"
+            ];
+            assert lib.hasInfix "graft-manifest-publish-system" (
+              builtins.unsafeDiscardStringContext systemPublicationActivation.text
+            );
+            assert lib.hasInfix (builtins.unsafeDiscardStringContext (
+              builtins.baseNameOf systemPublicationGeneration
+            )) (builtins.unsafeDiscardStringContext systemPublicationActivation.text);
+            assert !lib.hasInfix "XDG_" systemPublicationActivation.text;
+            assert !lib.hasInfix "/home/" systemPublicationActivation.text;
+            pkgs.runCommand "graft-system-manifest-publication"
+              {
+                nativeBuildInputs = [ pkgs.jq ];
+              }
+              ''
+                set -euo pipefail
+                generation=${systemPublicationGeneration}
+
+                test "$(stat -c '%a:%F' "$generation")" = "555:directory"
+                test "$(stat -c '%a:%F' "$generation/manifest.json")" = "444:regular file"
+                test "$(stat -c '%a:%F' "$generation/endpoint.json")" = "444:regular file"
+                test "$(find "$generation" -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort)" = $'endpoint.json\nmanifest.json'
+
+                jq -e --arg host ${lib.escapeShellArg manifestHostId} --arg version ${lib.escapeShellArg graftVersion} '
+                  .hostId == $host
+                  and .target == "system"
+                  and .manager == "system"
+                  and .producer == {
+                    name: "graft",
+                    version: $version,
+                    buildId: "source"
+                  }
+                  and .generationId == .manifestDigest
+                  and (.workloads | length) == .workloadCount
+                  and (has("uid") | not)
+                ' "$generation/manifest.json"
+                jq -e --arg host ${lib.escapeShellArg manifestHostId} --arg version ${lib.escapeShellArg graftVersion} '
+                  .hostId == $host
+                  and .target == "system"
+                  and .manager == "system"
+                  and .producer == {
+                    name: "graft",
+                    version: $version,
+                    buildId: "source"
+                  }
+                  and .generationId == .manifestDigest
+                  and (has("uid") | not)
+                ' "$generation/endpoint.json"
+
+                manifest_generation=$(jq -r '.generationId' "$generation/manifest.json")
+                endpoint_generation=$(jq -r '.generationId' "$generation/endpoint.json")
+                endpoint_manifest=$(jq -r '.manifestDigest' "$generation/endpoint.json")
+                test -n "$manifest_generation"
+                test "$endpoint_generation" = "$manifest_generation"
+                test "$endpoint_manifest" = "$manifest_generation"
+
+                jq -S '.' ${expectedSystemPublicationSources} > expected-sources.json
+                jq -S '[.workloads[].sourceIdentity]' "$generation/manifest.json" > actual-sources.json
+                cmp expected-sources.json actual-sources.json
+                ! grep -Eqi '"(environment|command|secret|credential|uid)"[[:space:]]*:' "$generation/manifest.json" "$generation/endpoint.json"
+
+                touch "$out"
+              '';
 
           nixos-module-eval =
             assert renderAssertions {

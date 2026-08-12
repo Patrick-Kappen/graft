@@ -44,8 +44,11 @@ outputs = { graft, nixpkgs, ... }: {
 ```
 
 The exported module supplies the Graft package by default. No `specialArgs`
-wiring is required by the copied module. Keep its `containers/graft-example.toml`
-relative to `module.nix`, or update `configRoot` to the copied location.
+wiring is required by the copied module. Replace the example `hostId` with one
+stable, fleet-issued canonical lowercase UUIDv7; it is non-secret and must not
+be generated anew during each evaluation. Keep its
+`containers/graft-example.toml` relative to `module.nix`, or update
+`configRoot` to the copied location.
 
 The example uses only the public `bash` package from the host's pinned
 nixpkgs. Graft also adds its built-in `graft-pause` package.
@@ -61,6 +64,8 @@ sudo systemctl daemon-reload
 sudo systemctl start graft-example.service
 sudo systemctl status graft-example.service
 sudo journalctl -u graft-example.service --no-pager
+sudo readlink /etc/graft/current
+sudo cat /etc/graft/current/manifest.json
 ```
 
 The service should log:

@@ -20,6 +20,10 @@ name = "graft-manifest-render"
 path = "src/bin/graft-manifest-render.rs"
 
 [[bin]]
+name = "graft-manifest-publish-system"
+path = "src/bin/graft-manifest-publish-system.rs"
+
+[[bin]]
 name = "graft-worker-fixture"
 path = "src/bin/graft-worker-fixture.rs"
 required-features = ["worker-test-fixtures"]
