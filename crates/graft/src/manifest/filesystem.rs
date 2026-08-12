@@ -44,6 +44,7 @@ impl GenerationOwner {
 /// One parsed manifest/endpoint pair retained with its opened generation.
 #[derive(Debug)]
 pub struct GenerationSnapshot {
+    generation_path: PathBuf,
     generation: File,
     manifest_file: File,
     endpoint_file: File,
@@ -54,6 +55,12 @@ pub struct GenerationSnapshot {
 }
 
 impl GenerationSnapshot {
+    /// Returns the direct immutable-store generation path.
+    #[must_use]
+    pub fn generation_path(&self) -> &Path {
+        &self.generation_path
+    }
+
     /// Returns the validated manifest.
     #[must_use]
     pub const fn manifest(&self) -> &Manifest {
@@ -109,8 +116,14 @@ pub struct ManifestLoader {
 
 #[derive(Debug, Clone, Copy)]
 enum LoaderContext {
-    System { graft_gid: u32 },
+    System { uid: u32, gid: u32, graft_gid: u32 },
     User { uid: u32, gid: u32 },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProducerValidation {
+    Installed,
+    CoherentPair,
 }
 
 impl ManifestLoader {
@@ -121,7 +134,11 @@ impl ManifestLoader {
     pub fn system(graft_gid: u32, installed_producer: ProducerIdentity) -> Self {
         Self {
             parent: PathBuf::from(SYSTEM_PARENT),
-            context: LoaderContext::System { graft_gid },
+            context: LoaderContext::System {
+                uid: 0,
+                gid: 0,
+                graft_gid,
+            },
             installed_producer,
         }
     }
@@ -158,7 +175,43 @@ impl ManifestLoader {
         self.load_with_store_root(Path::new(STORE_ROOT))
     }
 
-    fn load_with_store_root(&self, store_root: &Path) -> Result<GenerationSnapshot, ManifestError> {
+    pub(super) fn system_at(
+        parent: PathBuf,
+        uid: u32,
+        gid: u32,
+        graft_gid: u32,
+        installed_producer: ProducerIdentity,
+    ) -> Self {
+        Self {
+            parent,
+            context: LoaderContext::System {
+                uid,
+                gid,
+                graft_gid,
+            },
+            installed_producer,
+        }
+    }
+
+    pub(super) fn load_with_store_root(
+        &self,
+        store_root: &Path,
+    ) -> Result<GenerationSnapshot, ManifestError> {
+        self.load_current_with_store_root(store_root, ProducerValidation::Installed)
+    }
+
+    pub(super) fn load_coherent_with_store_root(
+        &self,
+        store_root: &Path,
+    ) -> Result<GenerationSnapshot, ManifestError> {
+        self.load_current_with_store_root(store_root, ProducerValidation::CoherentPair)
+    }
+
+    fn load_current_with_store_root(
+        &self,
+        store_root: &Path,
+        producer_validation: ProducerValidation,
+    ) -> Result<GenerationSnapshot, ManifestError> {
         let parent_file = open_directory_path(&self.parent)?;
         self.validate_parent(&parent_file)?;
         validate_no_acl(&parent_file)?;
@@ -178,8 +231,7 @@ impl ManifestLoader {
             return Err(ManifestError::FileType);
         }
         let expected_pointer_owner = match self.context {
-            LoaderContext::System { .. } => (0, 0),
-            LoaderContext::User { uid, gid } => (uid, gid),
+            LoaderContext::System { uid, gid, .. } | LoaderContext::User { uid, gid } => (uid, gid),
         };
         if (pointer.st_uid, pointer.st_gid) != expected_pointer_owner {
             return Err(ManifestError::Ownership);
@@ -198,7 +250,28 @@ impl ManifestLoader {
             return Err(ManifestError::GenerationReference);
         }
         let target = PathBuf::from(std::ffi::OsString::from_vec(target_bytes));
-        validate_store_target(&target, store_root)?;
+        self.load_generation_with_store_root_policy(&target, store_root, producer_validation)
+    }
+
+    pub(super) fn load_generation_with_store_root(
+        &self,
+        target: &Path,
+        store_root: &Path,
+    ) -> Result<GenerationSnapshot, ManifestError> {
+        self.load_generation_with_store_root_policy(
+            target,
+            store_root,
+            ProducerValidation::Installed,
+        )
+    }
+
+    fn load_generation_with_store_root_policy(
+        &self,
+        target: &Path,
+        store_root: &Path,
+        producer_validation: ProducerValidation,
+    ) -> Result<GenerationSnapshot, ManifestError> {
+        validate_store_target(target, store_root)?;
         let store = open_directory_path(store_root)?;
         let generation_name = target
             .file_name()
@@ -212,7 +285,10 @@ impl ManifestLoader {
 
         let manifest_file = open_child(&generation, "manifest.json")?;
         let endpoint_file = open_child(&generation, "endpoint.json")?;
-        let owner_ids = owner.ids();
+        let owner_ids = match self.context {
+            LoaderContext::System { uid, gid, .. } => (uid, gid),
+            LoaderContext::User { .. } => owner.ids(),
+        };
         validate_document(&manifest_file, owner_ids, MAX_MANIFEST_BYTES)?;
         validate_document(&endpoint_file, owner_ids, MAX_ENDPOINT_BYTES)?;
 
@@ -222,11 +298,14 @@ impl ManifestLoader {
         let endpoint = EndpointDescriptor::from_json(&endpoint_bytes)?;
         validate_pair(&manifest, &endpoint)?;
         validate_loaded_context(&manifest, self.context)?;
-        if manifest.producer() != &self.installed_producer {
+        if producer_validation == ProducerValidation::Installed
+            && manifest.producer() != &self.installed_producer
+        {
             return Err(ManifestError::InstalledProducerMismatch);
         }
 
         Ok(GenerationSnapshot {
+            generation_path: target.to_path_buf(),
             generation,
             manifest_file,
             endpoint_file,
@@ -263,7 +342,7 @@ impl ManifestLoader {
 
 const fn expected_parent_owner(context: LoaderContext) -> (u32, u32) {
     match context {
-        LoaderContext::System { graft_gid } => (0, graft_gid),
+        LoaderContext::System { uid, graft_gid, .. } => (uid, graft_gid),
         LoaderContext::User { uid, gid } => (uid, gid),
     }
 }
@@ -273,9 +352,10 @@ fn select_owner(
     actual: (u32, u32),
 ) -> Result<GenerationOwner, ManifestError> {
     match context {
-        LoaderContext::System { .. } | LoaderContext::User { .. } if actual == (0, 0) => {
+        LoaderContext::System { uid, gid, .. } if actual == (uid, gid) => {
             Ok(GenerationOwner::MultiUser)
         }
+        LoaderContext::User { .. } if actual == (0, 0) => Ok(GenerationOwner::MultiUser),
         LoaderContext::User { uid, gid } if actual == (uid, gid) => {
             Ok(GenerationOwner::SingleUser { uid, gid })
         }
@@ -297,7 +377,7 @@ fn validate_loaded_context(
     Ok(())
 }
 
-fn validate_absolute_normal_path(path: &Path) -> Result<(), ManifestError> {
+pub(super) fn validate_absolute_normal_path(path: &Path) -> Result<(), ManifestError> {
     if !path.is_absolute() {
         return Err(ManifestError::GenerationReference);
     }
@@ -371,7 +451,7 @@ fn errno_to_manifest(error: rustix::io::Errno) -> ManifestError {
     ManifestError::Filesystem(io::Error::from_raw_os_error(error.raw_os_error()))
 }
 
-fn open_directory_path(path: &Path) -> Result<File, ManifestError> {
+pub(super) fn open_directory_path(path: &Path) -> Result<File, ManifestError> {
     validate_absolute_normal_path(path)?;
     let mut directory = open_nofollow(Path::new("/"), true)?;
     for component in path.components() {
@@ -382,7 +462,10 @@ fn open_directory_path(path: &Path) -> Result<File, ManifestError> {
     Ok(directory)
 }
 
-fn open_directory_child(directory: &File, name: &std::ffi::OsStr) -> Result<File, ManifestError> {
+pub(super) fn open_directory_child(
+    directory: &File,
+    name: &std::ffi::OsStr,
+) -> Result<File, ManifestError> {
     let descriptor = rustix::fs::openat(
         directory,
         name,
@@ -455,7 +538,7 @@ fn validate_mode(metadata: &Metadata, expected: u32) -> Result<(), ManifestError
     }
 }
 
-fn validate_no_acl(file: &File) -> Result<(), ManifestError> {
+pub(super) fn validate_no_acl(file: &File) -> Result<(), ManifestError> {
     let mut buffer = vec![0_u8; 64 * 1_024];
     let length = rustix::fs::flistxattr(file, &mut buffer).map_err(|error| {
         ManifestError::Filesystem(io::Error::from_raw_os_error(error.raw_os_error()))
@@ -808,11 +891,23 @@ mod tests {
     #[test]
     fn owner_policy_distinguishes_multi_user_single_user_and_foreign_store() {
         assert_eq!(
-            expected_parent_owner(LoaderContext::System { graft_gid: 42 }),
+            expected_parent_owner(LoaderContext::System {
+                uid: 0,
+                gid: 0,
+                graft_gid: 42
+            }),
             (0, 42)
         );
         assert_eq!(
-            select_owner(LoaderContext::System { graft_gid: 42 }, (0, 0)).unwrap(),
+            select_owner(
+                LoaderContext::System {
+                    uid: 0,
+                    gid: 0,
+                    graft_gid: 42
+                },
+                (0, 0)
+            )
+            .unwrap(),
             GenerationOwner::MultiUser
         );
         assert_eq!(
@@ -848,7 +943,15 @@ mod tests {
             (1001, 100)
         )
         .is_err());
-        assert!(select_owner(LoaderContext::System { graft_gid: 42 }, (1000, 100)).is_err());
+        assert!(select_owner(
+            LoaderContext::System {
+                uid: 0,
+                gid: 0,
+                graft_gid: 42
+            },
+            (1000, 100)
+        )
+        .is_err());
     }
 
     fn installed_producer() -> ProducerIdentity {

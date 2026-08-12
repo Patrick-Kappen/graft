@@ -12,6 +12,9 @@
   services.graft = {
     enable = true;
 
+    # Stable fleet-issued, non-secret canonical UUIDv7 host identity.
+    hostId = "018f0f77-8c4d-7b2a-8e6a-4b8a7d3a1c20";
+
     # The exported flake module supplies the Graft package by default.
     # Set package explicitly only to override it.
 

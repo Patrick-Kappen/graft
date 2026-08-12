@@ -214,6 +214,7 @@ jobs:
             .#checks.x86_64-linux.manifest-lowering-rejects-incomplete \
             .#checks.x86_64-linux.manifest-lowering-rejects-duplicate \
             .#checks.x86_64-linux.manifest-lowering-rejects-mismatch \
+            .#checks.x86_64-linux.system-manifest-publication \
             .#checks.x86_64-linux.closure-scoped-store \
             .#checks.x86_64-linux.rootfs-materialisation \
             .#checks.x86_64-linux.quadlet-base \
@@ -224,6 +225,10 @@ jobs:
             .#checks.x86_64-linux.quadlet-network \
             --print-out-paths
           nix flake check
+          nix build \
+            .#packages.x86_64-linux.system-manifest-publication-runtime-test \
+            --no-link \
+            --print-build-logs
           network_rootfs=$(nix build \
             .#checks.x86_64-linux.network-runtime-rootfs \
             --no-link \

@@ -1,10 +1,9 @@
 # Nix worker integration
 
-> **Status:** approved design for future implementation. The current release
-> materialises workloads but does not ship the worker or TUI described here.
-> Worker implementation remains in [#241]; this document fixes how NixOS and
-> Home Manager will install, isolate, authorize, activate, upgrade, and roll back
-> the local components.
+> **Status:** approved design under incremental implementation. NixOS now
+> publishes the system manifest generation and atomic pointer described here;
+> Home Manager publication, worker/socket installation, runtime integration, and
+> the TUI remain future work. Worker implementation remains in [#241].
 
 This contract supplies the concrete host-policy boundary required by the
 [control-plane](control-plane.md), [worker API](worker-api.md),
@@ -74,10 +73,11 @@ Once [#241] provides the binaries, enabling the complete integration:
 - installs the system worker service/socket and polkit actions; and
 - installs the activation hook that shares the lifecycle lock.
 
-Before that implementation lands, the current module continues to materialise
-only workloads and must not install a unit referencing a nonexistent worker.
-The implementation transition must be explicit and tested; documentation cannot
-claim these components are available early.
+The current NixOS module materialises workloads and publishes the immutable
+system manifest/endpoint pair through `/etc/graft/current`. It still must not
+install a unit referencing a nonexistent worker. Worker/socket, backend,
+polkit, audit, and lifecycle integration remain unavailable until their own
+implementation lands.
 
 ### Home Manager
 
@@ -100,8 +100,10 @@ Once implemented, enabling the complete integration:
 - installs the user worker service/socket; and
 - installs the Home Manager activation hook that shares the user lock.
 
-Home Manager does not alter system groups, system polkit, linger, login sessions,
-or another account's manager.
+Home Manager currently materialises user Quadlets only; user manifest
+publication is owned by [#307](https://github.com/Patrick-Kappen/graft/issues/307).
+It does not alter system groups, system polkit, linger, login sessions, or
+another account's manager.
 
 ### Canonical host identity
 
@@ -113,8 +115,9 @@ evaluation. It is configured fleet identity, not a
 hostname, raw `/etc/machine-id`, boot ID, network address, or value generated at
 each evaluation.
 
-`services.graft.hostId` is required when the NixOS worker integration is enabled.
-An integrated Home Manager module inherits exactly that value through `osConfig`
+`services.graft.hostId` is required when the NixOS module is enabled because
+system publication is active even before worker installation. An integrated
+Home Manager module inherits exactly that value through `osConfig`
 and fails evaluation if an explicit `programs.graft.hostId` differs. Standalone
 Home Manager has no NixOS source and therefore requires an explicit `hostId` when
 the user worker is enabled. Nix-generated system/user descriptors and manifests
@@ -242,7 +245,7 @@ client input.
 
 ## Runtime directory ownership
 
-NixOS tmpfiles creates:
+The final NixOS worker integration uses this runtime layout:
 
 ```text
 /run/graft                    0755 root root
@@ -250,9 +253,12 @@ NixOS tmpfiles creates:
 /run/graft/system/interlocks  0700 root root
 ```
 
-The lock is created without following symlinks as `0600 root:root`. The system
-socket is `0660 root:graft`. Interlock temporary/final files remain `0600
-root:root` and never inherit socket-group readability.
+In the current publication-only slice, the validated activation publisher
+creates and verifies the first two directories and the lock itself; it does not
+create the future interlock directory. Worker integration will add its tmpfiles
+ownership. The lock is created without following symlinks as `0600 root:root`.
+The future system socket is `0660 root:graft`. Interlock temporary/final files
+remain `0600 root:root` and never inherit socket-group readability.
 
 User tmpfiles creates:
 
@@ -558,6 +564,12 @@ leaves the old pointer; a failure after replacement atomically restores the old
 pointer before releasing the lock and revalidates its pair. Thus endpoint and
 manifest cannot advertise different generations. Merely building a Nix
 generation does not make it current.
+
+The current NixOS publication-only slice applies that transaction to the
+immutable pair and `current`; existing Quadlet publication remains separate
+until worker integration adds the full quiescence/artifact transaction. No
+worker submission can race this interim path because no worker or socket is
+installed yet.
 
 ## Shared activation and submission lock
 

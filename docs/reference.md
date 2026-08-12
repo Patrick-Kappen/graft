@@ -389,6 +389,7 @@ See [Quadlet output](quadlet.md) for the complete output contract and examples.
 
   services.graft = {
     enable = true;
+    hostId = "018f0f77-8c4d-7b2a-8e6a-4b8a7d3a1c20";
     configRoot = ./containers;
     configRoots = [
       ./containers/common
@@ -400,13 +401,17 @@ See [Quadlet output](quadlet.md) for the complete output contract and examples.
 
 | Option | Type | Default | Description |
 | --- | --- | --- | --- |
-| `services.graft.enable` | bool | `false` | Enable system/rootful Graft materialisation. |
-| `services.graft.package` | package or null | `null` | Package providing `graft` and `graft-pause`; the exported flake module supplies a default. |
+| `services.graft.enable` | bool | `false` | Enable system/rootful Graft materialisation and manifest publication. |
+| `services.graft.package` | package or null | `null` | Package providing the resolver, `graft-pause`, and internal publication helpers; the exported flake module supplies a default. |
+| `services.graft.hostId` | canonical UUIDv7 or null | `null` | Required stable, non-secret lowercase RFC 9562 UUIDv7 host identity while enabled. |
 | `services.graft.configRoot` | path or null | `null` | First directory containing `*.toml` workloads. |
 | `services.graft.configRoots` | list of paths | `[]` | Additional workload directories, read in list order. |
 
 The module renders only effective `target = "system"` workloads under
-`/etc/containers/systemd/`.
+`/etc/containers/systemd/`. It also builds a read-only immutable
+`manifest.json`/`endpoint.json` generation from those materialised workloads and
+publishes one validated atomic pointer at `/etc/graft/current` during NixOS
+activation. Publication does not install or start a worker.
 
 ## Home Manager module
 
