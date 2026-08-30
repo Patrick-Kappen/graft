@@ -91,10 +91,6 @@ in
             message = "services.graft.hostId must be set to a canonical lowercase UUIDv7 when services.graft.enable is true.";
           }
           {
-            assertion = cfg.package != null && builtins.pathExists "${cfg.package}/bin/graft-worker";
-            message = "services.graft.package must install graft-worker for worker integration.";
-          }
-          {
             assertion =
               workerApiRange != null
               && workerApiRange.major == 1
