@@ -98,10 +98,6 @@ in
         message = "programs.graft.package must be set when programs.graft.enable is true.";
       }
       {
-        assertion = cfg.package != null && builtins.pathExists "${cfg.package}/bin/graft-worker";
-        message = "programs.graft.package must install graft-worker for worker integration.";
-      }
-      {
         assertion =
           workerApiRange != null
           && workerApiRange.major == 1
