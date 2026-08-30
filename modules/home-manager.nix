@@ -2,11 +2,46 @@
   config,
   lib,
   pkgs,
+  options,
   ...
 }:
 
 let
   cfg = config.programs.graft;
+  osConfig = config._module.args.osConfig or null;
+  inheritedHostId =
+    if osConfig == null then null else lib.attrByPath [ "services" "graft" "hostId" ] null osConfig;
+  effectiveHostId = if inheritedHostId != null then inheritedHostId else cfg.hostId;
+  hasHomeActivation = builtins.hasAttr "home" options;
+  producerBuildId = lib.attrByPath [ "graftBuildId" ] "source" cfg.package;
+  canonicalUuidV7 = lib.types.strMatching "[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
+
+  manifestPublication =
+    if cfg.package == null || effectiveHostId == null then
+      null
+    else
+      import ./lib/render-manifest-generation.nix {
+        inherit lib pkgs materialised;
+        inherit (cfg) package;
+        hostId = effectiveHostId;
+        producer = {
+          name = "graft";
+          version = lib.getVersion cfg.package;
+          buildId = producerBuildId;
+        };
+        target = "user";
+        manager = "user";
+        workerApiRange = {
+          major = 1;
+          min_minor = 0;
+          max_minor = 0;
+        };
+        requiredBackend = {
+          runtime = "podman";
+          minimumVersion = "5.0.0";
+        };
+        name = "graft-user-manifest-generation";
+      };
 
   materialised = import ./lib/materialise-containers.nix {
     inherit lib pkgs cfg;
@@ -36,6 +71,13 @@ in
       default = [ ];
       description = "Additional directories containing .toml container definitions, in order.";
     };
+
+    hostId = lib.mkOption {
+      type = lib.types.nullOr canonicalUuidV7;
+      default = inheritedHostId;
+      example = "018f0f77-8c4d-7b2a-8e6a-4b8a7d3a1c20";
+      description = "Stable non-secret host identity, inherited from NixOS when available.";
+    };
   };
 
   config = lib.mkIf cfg.enable {
@@ -43,6 +85,18 @@ in
       {
         assertion = (cfg.configRoot == null && cfg.configRoots == [ ]) || cfg.package != null;
         message = "programs.graft.package must be set when programs.graft.configRoot or programs.graft.configRoots is set.";
+      }
+      {
+        assertion = inheritedHostId == null || cfg.hostId == null || cfg.hostId == inheritedHostId;
+        message = "programs.graft.hostId must match services.graft.hostId when Home Manager is integrated with NixOS.";
+      }
+      {
+        assertion = cfg.package != null;
+        message = "programs.graft.package must be set when programs.graft.enable is true.";
+      }
+      {
+        assertion = !hasHomeActivation || effectiveHostId != null;
+        message = "programs.graft.hostId must be set to a canonical lowercase UUIDv7 when programs.graft.enable is true.";
       }
     ];
 
@@ -53,5 +107,20 @@ in
       }
     ) materialised.containers;
 
+    home.activation = lib.mkIf (hasHomeActivation && effectiveHostId != null) {
+      graftManifestPublication =
+        if manifestPublication == null then
+          ""
+        else
+          (if builtins.hasAttr "hm" lib then lib.hm.dag.entryAfter [ "writeBoundary" ] else lib.id) ''
+            ${lib.getExe' cfg.package "graft-manifest-publish-user"} \
+              ${manifestPublication.generation} \
+              --config-home ${lib.escapeShellArg config.xdg.configHome} \
+              --state-home ${lib.escapeShellArg config.xdg.stateHome} \
+              --producer-name graft \
+              --producer-version ${lib.escapeShellArg (lib.getVersion cfg.package)} \
+              --producer-build-id ${lib.escapeShellArg producerBuildId}
+          '';
+    };
   };
 }

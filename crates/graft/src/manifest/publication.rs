@@ -31,6 +31,27 @@ const ACTIVATION_LOCK: &str = "activation.lock";
 const LOCK_TIMEOUT: Duration = Duration::from_secs(30);
 const LOCK_RETRY: Duration = Duration::from_millis(25);
 
+/// Publishes one immutable user generation through `$XDG_CONFIG_HOME/graft/current`.
+///
+/// The config and state homes are fixed paths supplied by Home Manager. The
+/// effective UID and primary GID are obtained at activation time, never at
+/// build time.
+///
+/// # Errors
+///
+/// Returns an error when the paths, lock, incoming generation, or existing
+/// publication fail validation.
+pub fn publish_user_generation(
+    config_home: &Path,
+    state_home: &Path,
+    generation: &Path,
+    installed_producer: ProducerIdentity,
+) -> Result<(), PublicationError> {
+    let uid = geteuid().as_raw();
+    let gid = getegid().as_raw();
+    Publisher::new_user(config_home, state_home, uid, gid, installed_producer)?.publish(generation)
+}
+
 /// Publishes one validated immutable generation through `/etc/graft/current`.
 ///
 /// The process must run as root. All mutable paths and their ownership policy
@@ -117,6 +138,7 @@ struct Publisher {
     graft_gid: u32,
     loader: ManifestLoader,
     lock_timeout: Duration,
+    user: bool,
 }
 
 impl Publisher {
@@ -160,6 +182,46 @@ impl Publisher {
             graft_gid,
             loader,
             lock_timeout,
+            user: false,
+        })
+    }
+
+    fn new_user(
+        config_home: &Path,
+        state_home: &Path,
+        uid: u32,
+        gid: u32,
+        installed_producer: ProducerIdentity,
+    ) -> Result<Self, PublicationError> {
+        let parent = config_home.join("graft");
+        let runtime = state_home.join("graft");
+        let paths = PublicationPaths {
+            parent,
+            runtime_root: state_home.to_path_buf(),
+            runtime,
+            store_root: PathBuf::from(STORE_ROOT),
+        };
+        for path in [
+            &paths.parent,
+            &paths.runtime_root,
+            &paths.runtime,
+            &paths.store_root,
+        ] {
+            validate_absolute_normal_path(path).map_err(|_| PublicationError::UnsafePath)?;
+        }
+        if uid == u32::MAX || gid == u32::MAX {
+            return Err(PublicationError::UnsafePath);
+        }
+        let loader = ManifestLoader::user(config_home, uid, gid, installed_producer)
+            .map_err(PublicationError::Manifest)?;
+        Ok(Self {
+            paths,
+            uid,
+            gid,
+            graft_gid: gid,
+            loader,
+            lock_timeout: LOCK_TIMEOUT,
+            user: true,
         })
     }
 
@@ -176,9 +238,18 @@ impl Publisher {
         F: FnOnce() -> Result<(), PublicationError>,
     {
         validate_absolute_normal_path(generation).map_err(PublicationError::Manifest)?;
-        let parent = ensure_owned_directory(&self.paths.parent, self.uid, self.graft_gid, 0o750)?;
-        ensure_owned_directory(&self.paths.runtime_root, self.uid, self.gid, 0o755)?;
-        let runtime = ensure_owned_directory(&self.paths.runtime, self.uid, self.graft_gid, 0o750)?;
+        let parent = ensure_owned_directory(
+            &self.paths.parent,
+            self.uid,
+            self.gid,
+            if self.user { 0o700 } else { 0o750 },
+        )?;
+        let runtime = if self.user {
+            ensure_owned_directory(&self.paths.runtime, self.uid, self.gid, 0o700)?
+        } else {
+            ensure_owned_directory(&self.paths.runtime_root, self.uid, self.gid, 0o755)?;
+            ensure_owned_directory(&self.paths.runtime, self.uid, self.graft_gid, 0o750)?
+        };
         let lock = open_activation_lock(&runtime, self.uid, self.gid)?;
         acquire_exclusive(&lock, self.lock_timeout)?;
         validate_lock(&lock, self.uid, self.gid)?;
