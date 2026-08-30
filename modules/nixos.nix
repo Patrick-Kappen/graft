@@ -140,7 +140,7 @@ in
             StartLimitBurst = 5;
           };
           serviceConfig = {
-            ExecStart = "${pkgs.bash}/bin/bash -c 'gid=\$(/usr/bin/getent group graft | ${pkgs.coreutils}/bin/cut -d: -f3); [[ \"\$gid\" =~ ^[0-9]+$ ]]; exec ${worker} --target system --effective-uid 0 --manager system --graft-gid \"\$gid\" --producer-name graft --producer-version ${lib.escapeShellArg (lib.getVersion cfg.package)} --producer-build-id ${lib.escapeShellArg producerBuildId}'";
+            ExecStart = "${pkgs.bash}/bin/bash -c 'gid=\$(${pkgs.getent}/bin/getent group graft | ${pkgs.coreutils}/bin/cut -d: -f3); [[ \"\$gid\" =~ ^[0-9]+$ ]]; exec ${worker} --target system --effective-uid 0 --manager system --graft-gid \"\$gid\" --producer-name graft --producer-version ${lib.escapeShellArg (lib.getVersion cfg.package)} --producer-build-id ${lib.escapeShellArg producerBuildId}'";
             User = "root";
             Group = "root";
             Restart = "on-failure";
