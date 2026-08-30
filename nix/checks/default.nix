@@ -5,8 +5,11 @@
   graftPackage,
   graftVersion,
   graftBuildId,
+  graftWorkerApiRange,
+  rustWorkerApiRange,
   buildIdForRevision,
   requireVersionParity,
+  requireWorkerApiParity,
 }:
 let
   inherit (builtins.seq system pkgs) lib;
@@ -67,11 +70,7 @@ let
     version = graftVersion;
     buildId = "graft-test-build";
   };
-  manifestWorkerApiRange = {
-    major = 1;
-    min_minor = 0;
-    max_minor = 0;
-  };
+  manifestWorkerApiRange = graftWorkerApiRange;
   manifestRequiredBackend = {
     runtime = "podman";
     minimumVersion = "5.0.0";
@@ -899,6 +898,14 @@ in
 {
   version-parity =
     assert !(builtins.tryEval (requireVersionParity graftVersion "deliberate-drift")).success;
+    assert requireWorkerApiParity rustWorkerApiRange graftWorkerApiRange == graftWorkerApiRange;
+    assert graftPackage.graftWorkerApiRange == graftWorkerApiRange;
+    assert
+      !(builtins.tryEval (
+        requireWorkerApiParity rustWorkerApiRange (
+          graftWorkerApiRange // { max_minor = graftWorkerApiRange.max_minor + 1; }
+        )
+      )).success;
     pkgs.runCommand "graft-version-parity" { } ''
       set -euo pipefail
       test ${lib.escapeShellArg graftPackage.version} = ${lib.escapeShellArg graftVersion}
