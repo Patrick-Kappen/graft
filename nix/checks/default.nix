@@ -754,6 +754,51 @@ let
   unsafeSourceStemsHomeManagerFails =
     !(builtins.tryEval (builtins.deepSeq unsafeSourceStemsHomeManagerEval.config.xdg.configFile true))
     .success;
+
+  # Shared mechanical harness for Quadlet checks. Feature checks keep their
+  # source declarations and assertions next to the check that owns them.
+  quadletTestHelper =
+    { sources }:
+    let
+      installSources = lib.concatStringsSep "\n" (
+        lib.mapAttrsToList (name: source: "cp ${source} source-system/${name}.container") sources.system
+        ++ lib.mapAttrsToList (name: source: "cp ${source} source-user/${name}.container") sources.user
+      );
+      generate =
+        scope: expectFailure:
+        let
+          userFlag = lib.optionalString (scope == "user") " -user";
+          generated = "generated-${scope}";
+          error = "${scope}-generator-error";
+          command = "${pkgs.podman}/libexec/podman/quadlet${userFlag} ${generated} ${generated} ${generated}";
+        in
+        if expectFailure then
+          ''
+            if QUADLET_UNIT_DIRS="$PWD/source-${scope}" ${command} 2> ${error}; then
+              echo "unexpectedly accepted malformed Quadlet source" >&2
+              exit 1
+            fi
+          ''
+        else
+          ''
+            QUADLET_UNIT_DIRS="$PWD/source-${scope}" ${command} 2> ${error}
+            test ! -s ${error}
+          '';
+      verify = ''
+        mkdir -p runtime/systemd
+        XDG_RUNTIME_DIR="$PWD/runtime" \
+          SYSTEMD_UNIT_PATH="$PWD/generated-system:$PWD/generated-user:${pkgs.podman}/share/systemd/user:${pkgs.systemd}/example/systemd/user:${pkgs.systemd}/example/systemd/system" \
+          ${lib.getExe' pkgs.systemd "systemd-analyze"} --user verify \
+          generated-system/*.service generated-user/*.service
+      '';
+    in
+    {
+      setup = ''
+        mkdir source-system source-user generated-system generated-user $out
+        ${installSources}
+      '';
+      inherit generate verify;
+    };
 in
 {
   version-parity =
@@ -1515,30 +1560,23 @@ in
   quadlet-base =
     let
       sources = {
-        nix-check-plain-system = pkgs.writeText "nix-check-plain-system.container" nixosPlainRendered;
-        nix-check-plain-user = pkgs.writeText "nix-check-plain-user.container" homeManagerPlainRendered;
-        escape-system = pkgs.writeText "escape-system.container" nixosEscapeRendered;
-        escape-user = pkgs.writeText "escape-user.container" homeManagerEscapeRendered;
+        system = {
+          nix-check-plain-system = pkgs.writeText "nix-check-plain-system.container" nixosPlainRendered;
+          escape-system = pkgs.writeText "escape-system.container" nixosEscapeRendered;
+        };
+        user = {
+          nix-check-plain-user = pkgs.writeText "nix-check-plain-user.container" homeManagerPlainRendered;
+          escape-user = pkgs.writeText "escape-user.container" homeManagerEscapeRendered;
+        };
       };
+      helper = quadletTestHelper { inherit sources; };
     in
     pkgs.runCommand "graft-quadlet-base" { } ''
-      mkdir source-system source-user generated-system generated-user malformed-source malformed-output $out
-      cp ${sources.nix-check-plain-system} source-system/nix-check-plain-system.container
-      cp ${sources.escape-system} source-system/escape-system.container
-      cp ${sources.nix-check-plain-user} source-user/nix-check-plain-user.container
-      cp ${sources.escape-user} source-user/escape-user.container
+      mkdir malformed-source malformed-output
+      ${helper.setup}
 
-      QUADLET_UNIT_DIRS="$PWD/source-system" \
-        ${pkgs.podman}/libexec/podman/quadlet \
-        generated-system generated-system generated-system \
-        2> system-generator-error
-      test ! -s system-generator-error
-
-      QUADLET_UNIT_DIRS="$PWD/source-user" \
-        ${pkgs.podman}/libexec/podman/quadlet -user \
-        generated-user generated-user generated-user \
-        2> user-generator-error
-      test ! -s user-generator-error
+      ${helper.generate "system" false}
+      ${helper.generate "user" false}
 
       for scope in system user; do
         plain="generated-$scope/nix-check-plain-$scope.service"
@@ -1572,11 +1610,7 @@ in
       grep '^ExecStart=' generated-user/escape-user.service \
         | grep -Fq -- '--publish 127.0.0.1:28%%080:80'
 
-      mkdir -p runtime/systemd
-      XDG_RUNTIME_DIR="$PWD/runtime" \
-        SYSTEMD_UNIT_PATH="$PWD/generated-system:$PWD/generated-user:${pkgs.podman}/share/systemd/user:${pkgs.systemd}/example/systemd/user:${pkgs.systemd}/example/systemd/system" \
-        ${lib.getExe' pkgs.systemd "systemd-analyze"} --user verify \
-        generated-system/*.service generated-user/*.service
+      ${helper.verify}
 
       cat > malformed-source/malformed.container <<'EOF'
       [Container]
@@ -1600,29 +1634,23 @@ in
   quadlet-lifecycle =
     let
       sources = {
-        nix-check-system = pkgs.writeText "nix-check-system.container" nixosRendered;
-        nix-check-user = pkgs.writeText "nix-check-user.container" homeManagerRendered;
-        nix-check-timer-job-system = pkgs.writeText "nix-check-timer-job-system.container" nixosTimerJobRendered;
-        nix-check-timer-job-user = pkgs.writeText "nix-check-timer-job-user.container" homeManagerTimerJobRendered;
-        nix-check-setup-system = pkgs.writeText "nix-check-setup-system.container" nixosSetupRendered;
-        nix-check-setup-user = pkgs.writeText "nix-check-setup-user.container" homeManagerSetupRendered;
+        system = {
+          nix-check-system = pkgs.writeText "nix-check-system.container" nixosRendered;
+          nix-check-timer-job-system = pkgs.writeText "nix-check-timer-job-system.container" nixosTimerJobRendered;
+          nix-check-setup-system = pkgs.writeText "nix-check-setup-system.container" nixosSetupRendered;
+        };
+        user = {
+          nix-check-user = pkgs.writeText "nix-check-user.container" homeManagerRendered;
+          nix-check-timer-job-user = pkgs.writeText "nix-check-timer-job-user.container" homeManagerTimerJobRendered;
+          nix-check-setup-user = pkgs.writeText "nix-check-setup-user.container" homeManagerSetupRendered;
+        };
       };
+      helper = quadletTestHelper { inherit sources; };
     in
     pkgs.runCommand "graft-quadlet-lifecycle" { } ''
-      mkdir source-system source-user generated-system generated-user $out
-      cp ${sources.nix-check-system} source-system/nix-check-system.container
-      cp ${sources.nix-check-timer-job-system} source-system/nix-check-timer-job-system.container
-      cp ${sources.nix-check-setup-system} source-system/nix-check-setup-system.container
-      cp ${sources.nix-check-user} source-user/nix-check-user.container
-      cp ${sources.nix-check-timer-job-user} source-user/nix-check-timer-job-user.container
-      cp ${sources.nix-check-setup-user} source-user/nix-check-setup-user.container
-
-      QUADLET_UNIT_DIRS="$PWD/source-system" \
-        ${pkgs.podman}/libexec/podman/quadlet \
-        generated-system generated-system generated-system
-      QUADLET_UNIT_DIRS="$PWD/source-user" \
-        ${pkgs.podman}/libexec/podman/quadlet -user \
-        generated-user generated-user generated-user
+      ${helper.setup}
+      ${helper.generate "system" false}
+      ${helper.generate "user" false}
 
       for scope in system user; do
         generated="generated-$scope"
@@ -1641,49 +1669,37 @@ in
         ! grep -E '^ExecStart=.* -d( |$)' "$generated/nix-check-setup-$scope.service"
       done
 
-      mkdir -p runtime/systemd
-      XDG_RUNTIME_DIR="$PWD/runtime" \
-        SYSTEMD_UNIT_PATH="$PWD/generated-system:$PWD/generated-user:${pkgs.podman}/share/systemd/user:${pkgs.systemd}/example/systemd/user:${pkgs.systemd}/example/systemd/system" \
-        ${lib.getExe' pkgs.systemd "systemd-analyze"} --user verify \
-        generated-system/*.service generated-user/*.service
+      ${helper.verify}
       cp generated-system/*.service generated-user/*.service $out/
     '';
 
   quadlet-activation =
     let
       sources = {
-        nix-check-system = pkgs.writeText "nix-check-system.container" nixosRendered;
-        nix-check-startup-job-system = pkgs.writeText "nix-check-startup-job-system.container" nixosStartupJobRendered;
-        nix-check-setup-system = pkgs.writeText "nix-check-setup-system.container" nixosSetupRendered;
-        nix-check-timer-job-system = pkgs.writeText "nix-check-timer-job-system.container" nixosTimerJobRendered;
-        nix-check-plain-system = pkgs.writeText "nix-check-plain-system.container" nixosPlainRendered;
-        nix-check-network-owner-system = pkgs.writeText "nix-check-network-owner-system.container" nixosNetworkOwnerRendered;
-        nix-check-network-client-system = pkgs.writeText "nix-check-network-client-system.container" nixosNetworkClientRendered;
-        nix-check-user = pkgs.writeText "nix-check-user.container" homeManagerRendered;
-        nix-check-startup-job-user = pkgs.writeText "nix-check-startup-job-user.container" homeManagerStartupJobRendered;
-        nix-check-setup-user = pkgs.writeText "nix-check-setup-user.container" homeManagerSetupRendered;
-        nix-check-timer-job-user = pkgs.writeText "nix-check-timer-job-user.container" homeManagerTimerJobRendered;
-        nix-check-plain-user = pkgs.writeText "nix-check-plain-user.container" homeManagerPlainRendered;
-        nix-check-network-owner-user = pkgs.writeText "nix-check-network-owner-user.container" homeManagerNetworkOwnerRendered;
-        nix-check-network-client-user = pkgs.writeText "nix-check-network-client-user.container" homeManagerNetworkClientRendered;
+        system = {
+          nix-check-system = pkgs.writeText "nix-check-system.container" nixosRendered;
+          nix-check-startup-job-system = pkgs.writeText "nix-check-startup-job-system.container" nixosStartupJobRendered;
+          nix-check-setup-system = pkgs.writeText "nix-check-setup-system.container" nixosSetupRendered;
+          nix-check-timer-job-system = pkgs.writeText "nix-check-timer-job-system.container" nixosTimerJobRendered;
+          nix-check-plain-system = pkgs.writeText "nix-check-plain-system.container" nixosPlainRendered;
+          nix-check-network-owner-system = pkgs.writeText "nix-check-network-owner-system.container" nixosNetworkOwnerRendered;
+          nix-check-network-client-system = pkgs.writeText "nix-check-network-client-system.container" nixosNetworkClientRendered;
+        };
+        user = {
+          nix-check-user = pkgs.writeText "nix-check-user.container" homeManagerRendered;
+          nix-check-startup-job-user = pkgs.writeText "nix-check-startup-job-user.container" homeManagerStartupJobRendered;
+          nix-check-setup-user = pkgs.writeText "nix-check-setup-user.container" homeManagerSetupRendered;
+          nix-check-timer-job-user = pkgs.writeText "nix-check-timer-job-user.container" homeManagerTimerJobRendered;
+          nix-check-plain-user = pkgs.writeText "nix-check-plain-user.container" homeManagerPlainRendered;
+          nix-check-network-owner-user = pkgs.writeText "nix-check-network-owner-user.container" homeManagerNetworkOwnerRendered;
+          nix-check-network-client-user = pkgs.writeText "nix-check-network-client-user.container" homeManagerNetworkClientRendered;
+        };
       };
+      helper = quadletTestHelper { inherit sources; };
     in
     pkgs.runCommand "graft-quadlet-activation" { } ''
-      mkdir source-system source-user generated-system generated-user persistent foreign $out
-      cp ${sources.nix-check-system} source-system/nix-check-system.container
-      cp ${sources.nix-check-startup-job-system} source-system/nix-check-startup-job-system.container
-      cp ${sources.nix-check-setup-system} source-system/nix-check-setup-system.container
-      cp ${sources.nix-check-timer-job-system} source-system/nix-check-timer-job-system.container
-      cp ${sources.nix-check-plain-system} source-system/nix-check-plain-system.container
-      cp ${sources.nix-check-network-owner-system} source-system/nix-check-network-owner-system.container
-      cp ${sources.nix-check-network-client-system} source-system/nix-check-network-client-system.container
-      cp ${sources.nix-check-user} source-user/nix-check-user.container
-      cp ${sources.nix-check-startup-job-user} source-user/nix-check-startup-job-user.container
-      cp ${sources.nix-check-setup-user} source-user/nix-check-setup-user.container
-      cp ${sources.nix-check-timer-job-user} source-user/nix-check-timer-job-user.container
-      cp ${sources.nix-check-plain-user} source-user/nix-check-plain-user.container
-      cp ${sources.nix-check-network-owner-user} source-user/nix-check-network-owner-user.container
-      cp ${sources.nix-check-network-client-user} source-user/nix-check-network-client-user.container
+      mkdir persistent foreign
+      ${helper.setup}
 
       for source in source-system/nix-check-plain-system.container source-user/nix-check-plain-user.container; do
         rootfs="$(sed -n 's|^Rootfs=\(.*\):O$|\1|p' "$source")"
@@ -1692,12 +1708,8 @@ in
         test -d "$rootfs/var/tmp"
       done
 
-      QUADLET_UNIT_DIRS="$PWD/source-system" \
-        ${pkgs.podman}/libexec/podman/quadlet \
-        generated-system generated-system generated-system
-      QUADLET_UNIT_DIRS="$PWD/source-user" \
-        ${pkgs.podman}/libexec/podman/quadlet -user \
-        generated-user generated-user generated-user
+      ${helper.generate "system" false}
+      ${helper.generate "user" false}
 
       grep -F -- '--tmpfs /run/graft-system:rw,noexec,nosuid,nodev,mode=0750,size=64M --tmpfs /tmp/graft-system:rw,noexec,nosuid,nodev' \
         generated-system/nix-check-system.service
@@ -1733,29 +1745,21 @@ in
       grep -Fx "Requires=nix-check-network-owner-user.service" \
         generated-user/nix-check-network-client-user.service
 
-      mkdir -p runtime/systemd
-      XDG_RUNTIME_DIR="$PWD/runtime" \
-        SYSTEMD_UNIT_PATH="$PWD/generated-system:$PWD/generated-user:${pkgs.podman}/share/systemd/user:${pkgs.systemd}/example/systemd/user:${pkgs.systemd}/example/systemd/system" \
-        ${lib.getExe' pkgs.systemd "systemd-analyze"} --user verify \
-        generated-system/*.service generated-user/*.service
+      ${helper.verify}
 
       touch persistent/workload-state foreign/foreign.service
       rm source-system/nix-check-startup-job-system.container source-user/nix-check-startup-job-user.container
       sed '/^\[Install\]$/,$d' \
-        ${sources.nix-check-startup-job-system} \
+        ${sources.system.nix-check-startup-job-system} \
         > source-system/nix-check-startup-job-system.container
       sed '/^\[Install\]$/,$d' \
-        ${sources.nix-check-startup-job-user} \
+        ${sources.user.nix-check-startup-job-user} \
         > source-user/nix-check-startup-job-user.container
       rm -rf generated-system generated-user
       mkdir generated-system generated-user
 
-      QUADLET_UNIT_DIRS="$PWD/source-system" \
-        ${pkgs.podman}/libexec/podman/quadlet \
-        generated-system generated-system generated-system
-      QUADLET_UNIT_DIRS="$PWD/source-user" \
-        ${pkgs.podman}/libexec/podman/quadlet -user \
-        generated-user generated-user generated-user
+      ${helper.generate "system" false}
+      ${helper.generate "user" false}
 
       test ! -e generated-system/multi-user.target.wants/nix-check-startup-job-system.service
       test ! -e generated-user/default.target.wants/nix-check-startup-job-user.service
@@ -1763,17 +1767,13 @@ in
       test -e foreign/foreign.service
 
       rm source-system/nix-check-startup-job-system.container source-user/nix-check-startup-job-user.container
-      cp ${sources.nix-check-startup-job-system} source-system/nix-check-startup-job-system.container
-      cp ${sources.nix-check-startup-job-user} source-user/nix-check-startup-job-user.container
+      cp ${sources.system.nix-check-startup-job-system} source-system/nix-check-startup-job-system.container
+      cp ${sources.user.nix-check-startup-job-user} source-user/nix-check-startup-job-user.container
       rm -rf generated-system generated-user
       mkdir generated-system generated-user
 
-      QUADLET_UNIT_DIRS="$PWD/source-system" \
-        ${pkgs.podman}/libexec/podman/quadlet \
-        generated-system generated-system generated-system
-      QUADLET_UNIT_DIRS="$PWD/source-user" \
-        ${pkgs.podman}/libexec/podman/quadlet -user \
-        generated-user generated-user generated-user
+      ${helper.generate "system" false}
+      ${helper.generate "user" false}
 
       test -L generated-system/multi-user.target.wants/nix-check-startup-job-system.service
       test -L generated-user/default.target.wants/nix-check-startup-job-user.service
@@ -1786,29 +1786,23 @@ in
   quadlet-network =
     let
       sources = {
-        owner-system = pkgs.writeText "nix-check-network-owner-system.container" nixosNetworkOwnerRendered;
-        client-system = pkgs.writeText "nix-check-network-client-system.container" nixosNetworkClientRendered;
-        none-system = pkgs.writeText "nix-check-network-none-system.container" nixosNetworkNoneRendered;
-        owner-user = pkgs.writeText "nix-check-network-owner-user.container" homeManagerNetworkOwnerRendered;
-        client-user = pkgs.writeText "nix-check-network-client-user.container" homeManagerNetworkClientRendered;
-        none-user = pkgs.writeText "nix-check-network-none-user.container" homeManagerNetworkNoneRendered;
+        system = {
+          nix-check-network-owner-system = pkgs.writeText "nix-check-network-owner-system.container" nixosNetworkOwnerRendered;
+          nix-check-network-client-system = pkgs.writeText "nix-check-network-client-system.container" nixosNetworkClientRendered;
+          nix-check-network-none-system = pkgs.writeText "nix-check-network-none-system.container" nixosNetworkNoneRendered;
+        };
+        user = {
+          nix-check-network-owner-user = pkgs.writeText "nix-check-network-owner-user.container" homeManagerNetworkOwnerRendered;
+          nix-check-network-client-user = pkgs.writeText "nix-check-network-client-user.container" homeManagerNetworkClientRendered;
+          nix-check-network-none-user = pkgs.writeText "nix-check-network-none-user.container" homeManagerNetworkNoneRendered;
+        };
       };
+      helper = quadletTestHelper { inherit sources; };
     in
     pkgs.runCommand "graft-quadlet-network" { } ''
-      mkdir source-system source-user generated-system generated-user $out
-      cp ${sources.owner-system} source-system/nix-check-network-owner-system.container
-      cp ${sources.client-system} source-system/nix-check-network-client-system.container
-      cp ${sources.none-system} source-system/nix-check-network-none-system.container
-      cp ${sources.owner-user} source-user/nix-check-network-owner-user.container
-      cp ${sources.client-user} source-user/nix-check-network-client-user.container
-      cp ${sources.none-user} source-user/nix-check-network-none-user.container
-
-      QUADLET_UNIT_DIRS="$PWD/source-system" \
-        ${pkgs.podman}/libexec/podman/quadlet \
-        generated-system generated-system generated-system
-      QUADLET_UNIT_DIRS="$PWD/source-user" \
-        ${pkgs.podman}/libexec/podman/quadlet -user \
-        generated-user generated-user generated-user
+      ${helper.setup}
+      ${helper.generate "system" false}
+      ${helper.generate "user" false}
 
       for scope in system user; do
         generated="generated-$scope"
@@ -1821,25 +1815,24 @@ in
         grep -E "^ExecStart=.* --network none( |$)" "$generated/nix-check-network-none-$scope.service"
       done
 
-      mkdir -p runtime/systemd
-      XDG_RUNTIME_DIR="$PWD/runtime" \
-        SYSTEMD_UNIT_PATH="$PWD/generated-system:$PWD/generated-user:${pkgs.podman}/share/systemd/user:${pkgs.systemd}/example/systemd/user:${pkgs.systemd}/example/systemd/system" \
-        ${lib.getExe' pkgs.systemd "systemd-analyze"} --user verify \
-        generated-system/*.service generated-user/*.service
+      ${helper.verify}
       cp generated-system/*.service generated-user/*.service $out/
     '';
 
   quadlet-cdi =
     let
       sources = {
-        system = pkgs.writeText "nix-check-cdi-system.container" nixosCdiRendered;
-        user = pkgs.writeText "nix-check-cdi-user.container" homeManagerCdiRendered;
+        system = {
+          nix-check-cdi-system = pkgs.writeText "nix-check-cdi-system.container" nixosCdiRendered;
+        };
+        user = {
+          nix-check-cdi-user = pkgs.writeText "nix-check-cdi-user.container" homeManagerCdiRendered;
+        };
       };
+      helper = quadletTestHelper { inherit sources; };
     in
     pkgs.runCommand "graft-quadlet-cdi" { } ''
-      mkdir source-system source-user generated-system generated-user $out
-      cp ${sources.system} source-system/nix-check-cdi-system.container
-      cp ${sources.user} source-user/nix-check-cdi-user.container
+      ${helper.setup}
 
       for source in source-system/nix-check-cdi-system.container source-user/nix-check-cdi-user.container; do
         test "$(grep -c '^AddDevice=' "$source")" = 2
@@ -1856,12 +1849,8 @@ in
       grep -Fx "ReadOnly=false" source-user/nix-check-cdi-user.container
       grep -Fx "NoNewPrivileges=false" source-user/nix-check-cdi-user.container
 
-      QUADLET_UNIT_DIRS="$PWD/source-system" \
-        ${pkgs.podman}/libexec/podman/quadlet \
-        generated-system generated-system generated-system
-      QUADLET_UNIT_DIRS="$PWD/source-user" \
-        ${pkgs.podman}/libexec/podman/quadlet -user \
-        generated-user generated-user generated-user
+      ${helper.generate "system" false}
+      ${helper.generate "user" false}
 
       for scope in system user; do
         service="generated-$scope/nix-check-cdi-$scope.service"
@@ -1879,36 +1868,28 @@ in
       ! grep -F -- "--security-opt=no-new-privileges" generated-user/nix-check-cdi-user.service
       ! grep -E -- "^ExecStart=.* --read-only( |$)" generated-user/nix-check-cdi-user.service
 
-      mkdir -p runtime/systemd
-      XDG_RUNTIME_DIR="$PWD/runtime" \
-        SYSTEMD_UNIT_PATH="$PWD/generated-system:$PWD/generated-user:${pkgs.podman}/share/systemd/user:${pkgs.systemd}/example/systemd/user:${pkgs.systemd}/example/systemd/system" \
-        ${lib.getExe' pkgs.systemd "systemd-analyze"} --user verify \
-        generated-system/*.service generated-user/*.service
+      ${helper.verify}
       cp generated-system/*.service generated-user/*.service $out/
     '';
 
   quadlet-dependencies =
     let
       sources = {
-        owner-system = pkgs.writeText "dependency-owner-system.container" nixosDependencyOwnerRendered;
-        client-system = pkgs.writeText "dependency-client-system.container" nixosDependencyClientRendered;
-        owner-user = pkgs.writeText "dependency-owner-user.container" homeManagerDependencyOwnerRendered;
-        client-user = pkgs.writeText "dependency-client-user.container" homeManagerDependencyClientRendered;
+        system = {
+          dependency-owner-system = pkgs.writeText "dependency-owner-system.container" nixosDependencyOwnerRendered;
+          dependency-client-system = pkgs.writeText "dependency-client-system.container" nixosDependencyClientRendered;
+        };
+        user = {
+          dependency-owner-user = pkgs.writeText "dependency-owner-user.container" homeManagerDependencyOwnerRendered;
+          dependency-client-user = pkgs.writeText "dependency-client-user.container" homeManagerDependencyClientRendered;
+        };
       };
+      helper = quadletTestHelper { inherit sources; };
     in
     pkgs.runCommand "graft-quadlet-dependencies" { } ''
-      mkdir source-system source-user generated-system generated-user $out
-      cp ${sources.owner-system} source-system/dependency-owner-system.container
-      cp ${sources.client-system} source-system/dependency-client-system.container
-      cp ${sources.owner-user} source-user/dependency-owner-user.container
-      cp ${sources.client-user} source-user/dependency-client-user.container
-
-      QUADLET_UNIT_DIRS="$PWD/source-system" \
-        ${pkgs.podman}/libexec/podman/quadlet \
-        generated-system generated-system generated-system
-      QUADLET_UNIT_DIRS="$PWD/source-user" \
-        ${pkgs.podman}/libexec/podman/quadlet -user \
-        generated-user generated-user generated-user
+      ${helper.setup}
+      ${helper.generate "system" false}
+      ${helper.generate "user" false}
 
       cat > generated-system/graft-foreign-system.service <<'EOF'
       [Service]
@@ -1946,11 +1927,7 @@ in
       test -L generated-system/multi-user.target.wants/dependency-client-system.service
       test -L generated-user/default.target.wants/dependency-client-user.service
 
-      mkdir -p runtime/systemd
-      XDG_RUNTIME_DIR="$PWD/runtime" \
-        SYSTEMD_UNIT_PATH="$PWD/generated-system:$PWD/generated-user:${pkgs.podman}/share/systemd/user:${pkgs.systemd}/example/systemd/user:${pkgs.systemd}/example/systemd/system" \
-        ${lib.getExe' pkgs.systemd "systemd-analyze"} --user verify \
-        generated-system/*.service generated-user/*.service
+      ${helper.verify}
       cp generated-system/*.service generated-user/*.service $out/
     '';
 }
