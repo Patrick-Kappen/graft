@@ -186,14 +186,7 @@ let
   );
 
   moduleTestOptions = { lib, ... }: {
-    imports = [
-      {
-        options = removeAttrs (import ../../tests/nixos/lib/hm-test-options.nix { inherit lib; }).options [
-          "systemd"
-          "xdg"
-        ];
-      }
-    ];
+    imports = [ ../../tests/nixos/lib/hm-test-options.nix ];
 
     options = {
       virtualisation.podman.enable = lib.mkOption {
@@ -270,120 +263,6 @@ let
           type = lib.types.listOf lib.types.str;
           default = [ ];
         };
-        user = {
-          services = lib.mkOption {
-            type = lib.types.attrsOf (
-              lib.types.submodule {
-                options = {
-                  Unit = lib.mkOption {
-                    type = lib.types.submodule {
-                      options = {
-                        Description = lib.mkOption { type = lib.types.str; };
-                        StartLimitIntervalSec = lib.mkOption { type = lib.types.str; };
-                        StartLimitBurst = lib.mkOption { type = lib.types.int; };
-                      };
-                    };
-                    default = { };
-                  };
-                  Service = lib.mkOption {
-                    type = lib.types.submodule {
-                      options = {
-                        ExecStart = lib.mkOption { type = lib.types.str; };
-                        Restart = lib.mkOption { type = lib.types.str; };
-                        RestartSec = lib.mkOption { type = lib.types.str; };
-                        NoNewPrivileges = lib.mkOption { type = lib.types.bool; };
-                        PrivateTmp = lib.mkOption { type = lib.types.bool; };
-                        ProtectSystem = lib.mkOption { type = lib.types.str; };
-                        ProtectHome = lib.mkOption { type = lib.types.str; };
-                        ProtectKernelTunables = lib.mkOption { type = lib.types.bool; };
-                        ProtectKernelModules = lib.mkOption { type = lib.types.bool; };
-                        ProtectKernelLogs = lib.mkOption { type = lib.types.bool; };
-                        ProtectControlGroups = lib.mkOption { type = lib.types.bool; };
-                        ProtectClock = lib.mkOption { type = lib.types.bool; };
-                        ProtectHostname = lib.mkOption { type = lib.types.bool; };
-                        RestrictSUIDSGID = lib.mkOption { type = lib.types.bool; };
-                        LockPersonality = lib.mkOption { type = lib.types.bool; };
-                        MemoryDenyWriteExecute = lib.mkOption { type = lib.types.bool; };
-                        RestrictRealtime = lib.mkOption { type = lib.types.bool; };
-                        RestrictNamespaces = lib.mkOption { type = lib.types.bool; };
-                        SystemCallArchitectures = lib.mkOption { type = lib.types.str; };
-                        RestrictAddressFamilies = lib.mkOption { type = lib.types.listOf lib.types.str; };
-                        UMask = lib.mkOption { type = lib.types.str; };
-                      };
-                    };
-                    default = { };
-                  };
-                  Install.WantedBy = lib.mkOption {
-                    type = lib.types.listOf lib.types.str;
-                    default = [ ];
-                  };
-                };
-              }
-            );
-            default = { };
-          };
-          sockets = lib.mkOption {
-            type = lib.types.attrsOf (
-              lib.types.submodule {
-                options = {
-                  Unit = lib.mkOption {
-                    type = lib.types.submodule { options = { }; };
-                    default = { };
-                  };
-                  Socket = lib.mkOption {
-                    type = lib.types.submodule {
-                      options = {
-                        ListenStream = lib.mkOption { type = lib.types.str; };
-                        SocketMode = lib.mkOption { type = lib.types.str; };
-                        RemoveOnStop = lib.mkOption { type = lib.types.bool; };
-                      };
-                    };
-                    default = { };
-                  };
-                  Install.WantedBy = lib.mkOption {
-                    type = lib.types.listOf lib.types.str;
-                    default = [ ];
-                  };
-                };
-              }
-            );
-            default = { };
-          };
-          tmpfiles.rules = lib.mkOption {
-            type = lib.types.listOf lib.types.str;
-            default = [ ];
-          };
-        };
-      };
-
-      xdg = {
-        configHome = lib.mkOption {
-          type = lib.types.path;
-          default = "/home/test/.config";
-        };
-
-        stateHome = lib.mkOption {
-          type = lib.types.path;
-          default = "/home/test/.local/state";
-        };
-
-        configFile = lib.mkOption {
-          type = lib.types.attrsOf (
-            lib.types.submodule (
-              { config, ... }:
-              {
-                options = {
-                  source = lib.mkOption { type = lib.types.path; };
-                  text = lib.mkOption {
-                    type = lib.types.str;
-                    default = builtins.readFile config.source;
-                  };
-                };
-              }
-            )
-          );
-          default = { };
-        };
       };
     };
   };
@@ -404,27 +283,16 @@ let
     ];
   };
 
-  homeManagerEval = lib.evalModules {
-    specialArgs = { inherit pkgs; };
-    modules = [
-      moduleTestOptions
-      self.homeManagerModules.graft
-      {
-        programs.graft = {
-          enable = true;
-          configRoot = ../../tests/nix/containers;
-          configRoots = [ ../../tests/nix/containers-extra ];
-        };
-      }
-    ];
-  };
-  evalHomeManagerWithOsConfig =
-    hostId:
+  evalHomeManager =
+    {
+      osConfig ? null,
+      hostId ? null,
+    }:
     lib.evalModules {
       specialArgs = {
         inherit pkgs;
-        osConfig.services.graft.hostId = manifestHostId;
-      };
+      }
+      // lib.optionalAttrs (osConfig != null) { inherit osConfig; };
       modules = [
         moduleTestOptions
         self.homeManagerModules.graft
@@ -438,8 +306,14 @@ let
         }
       ];
     };
-  homeManagerInheritedEval = evalHomeManagerWithOsConfig null;
-  homeManagerMismatchEval = evalHomeManagerWithOsConfig "018f0f77-8c4d-7b2a-8e6a-4b8a7d3a1c21";
+  homeManagerEval = evalHomeManager { };
+  homeManagerInheritedEval = evalHomeManager {
+    osConfig.services.graft.hostId = manifestHostId;
+  };
+  homeManagerMismatchEval = evalHomeManager {
+    osConfig.services.graft.hostId = manifestHostId;
+    hostId = "018f0f77-8c4d-7b2a-8e6a-4b8a7d3a1c21";
+  };
   homeManagerHostIdInherited = homeManagerInheritedEval.config.programs.graft.hostId;
   homeManagerHostIdMismatchRejected = lib.any (
     assertion: !assertion.assertion
