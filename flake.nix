@@ -13,7 +13,7 @@
       forAllSystems = nixpkgs.lib.genAttrs systems;
       graftCargoMetadata = builtins.fromTOML (builtins.readFile ./crates/graft/Cargo.toml);
       graftVersion = graftCargoMetadata.package.version;
-      graftWorkerApiRange = builtins.fromJSON (builtins.readFile ./crates/graft/worker-api-range.json);
+      graftWorkerApiRange = (import ./nix/worker-api.nix).range;
       # Flake revision metadata is deterministic and does not invoke VCS tools.
       # Archives and dirty trees intentionally use the stable provenance marker.
       buildIdForRevision = revision: if revision == null then "source" else revision;
