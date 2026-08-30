@@ -9,6 +9,7 @@ let
   cfg = config.services.graft;
 
   producerBuildId = lib.attrByPath [ "graftBuildId" ] "source" cfg.package;
+  requiredWorkerApiRange = import ../nix/worker-api-range.nix;
 
   canonicalUuidV7 = lib.types.strMatching "[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
 
@@ -32,11 +33,7 @@ let
         };
         target = "system";
         manager = "system";
-        workerApiRange = {
-          major = 1;
-          min_minor = 0;
-          max_minor = 0;
-        };
+        workerApiRange = requiredWorkerApiRange;
         requiredBackend = {
           runtime = "podman";
           minimumVersion = "5.0.0";
@@ -93,9 +90,9 @@ in
           {
             assertion =
               workerApiRange != null
-              && workerApiRange.major == 1
-              && workerApiRange.min_minor <= 0
-              && workerApiRange.max_minor >= 0;
+              && workerApiRange.major == requiredWorkerApiRange.major
+              && workerApiRange.min_minor <= requiredWorkerApiRange.min_minor
+              && workerApiRange.max_minor >= requiredWorkerApiRange.max_minor;
             message = "services.graft.package has no compatible worker API range.";
           }
         ];
