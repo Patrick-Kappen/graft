@@ -241,7 +241,7 @@ impl Publisher {
         let parent = ensure_owned_directory(
             &self.paths.parent,
             self.uid,
-            self.gid,
+            if self.user { self.gid } else { self.graft_gid },
             if self.user { 0o700 } else { 0o750 },
         )?;
         let runtime = if self.user {
