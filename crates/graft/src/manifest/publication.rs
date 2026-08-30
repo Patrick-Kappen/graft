@@ -243,6 +243,7 @@ impl Publisher {
             if self.user { 0o700 } else { 0o750 },
         )?;
         let runtime = if self.user {
+            create_owned_directory_if_missing(&self.paths.runtime_root, self.uid, self.gid, 0o700)?;
             ensure_owned_directory(&self.paths.runtime, self.uid, self.gid, 0o700)?
         } else {
             ensure_owned_directory(&self.paths.runtime_root, self.uid, self.gid, 0o755)?;
@@ -331,6 +332,40 @@ fn open_or_create_directory_child(
         }
         Err(error) => Err(PublicationError::Manifest(error)),
     }
+}
+
+fn create_owned_directory_if_missing(
+    path: &Path,
+    uid: u32,
+    gid: u32,
+    mode: u32,
+) -> Result<File, PublicationError> {
+    validate_absolute_normal_path(path).map_err(|_| PublicationError::UnsafePath)?;
+    let parent_path = path.parent().ok_or(PublicationError::UnsafePath)?;
+    let name = path.file_name().ok_or(PublicationError::UnsafePath)?;
+    let mut parent = File::open("/").map_err(PublicationError::Filesystem)?;
+    for component in parent_path.components() {
+        if let std::path::Component::Normal(name) = component {
+            parent = open_or_create_directory_child(&parent, name)?;
+        }
+    }
+    let created = match rustix::fs::mkdirat(&parent, name, Mode::from_raw_mode(mode)) {
+        Ok(()) => true,
+        Err(error) if error == rustix::io::Errno::EXIST => false,
+        Err(error) => return Err(errno_to_publication(error)),
+    };
+    let directory = open_directory_child(&parent, name).map_err(PublicationError::Manifest)?;
+    if created {
+        rustix::fs::fchown(
+            &directory,
+            Some(Uid::from_raw(uid)),
+            Some(Gid::from_raw(gid)),
+        )
+        .map_err(errno_to_publication)?;
+        rustix::fs::fchmod(&directory, Mode::from_raw_mode(mode)).map_err(errno_to_publication)?;
+        rustix::fs::fsync(&parent).map_err(errno_to_publication)?;
+    }
+    Ok(directory)
 }
 
 fn ensure_owned_directory(
@@ -615,7 +650,10 @@ mod tests {
 
         fixture.publisher.publish(&fixture.first).unwrap();
 
-        assert!(fixture.state_home.is_dir());
+        assert_eq!(
+            fixture.state_home.metadata().unwrap().mode() & 0o7777,
+            0o700
+        );
         assert_eq!(
             fixture.state_home.join("graft").metadata().unwrap().mode() & 0o7777,
             0o700
@@ -653,7 +691,10 @@ mod tests {
 
         fixture.publisher.publish(&fixture.first).unwrap();
 
-        assert!(fixture.state_home.is_dir());
+        assert_eq!(
+            fixture.state_home.metadata().unwrap().mode() & 0o7777,
+            0o700
+        );
         assert_eq!(
             fixture.state_home.join("graft").metadata().unwrap().mode() & 0o7777,
             0o700
