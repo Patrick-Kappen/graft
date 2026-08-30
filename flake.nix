@@ -49,6 +49,7 @@
             postInstall = ''
               test -x "$out/bin/graft-manifest-render"
               test -x "$out/bin/graft-manifest-publish-system"
+              test -x "$out/bin/graft-manifest-publish-user"
             '';
 
             meta = {
@@ -341,6 +342,26 @@
                   }
                 );
                 default = { };
+              };
+
+              home.packages = lib.mkOption {
+                type = lib.types.listOf lib.types.package;
+                default = [ ];
+              };
+
+              home.activation = lib.mkOption {
+                type = lib.types.attrsOf lib.types.anything;
+                default = { };
+              };
+
+              xdg.configHome = lib.mkOption {
+                type = lib.types.path;
+                default = "/home/test/.config";
+              };
+
+              xdg.stateHome = lib.mkOption {
+                type = lib.types.path;
+                default = "/home/test/.local/state";
               };
 
               xdg.configFile = lib.mkOption {

@@ -91,7 +91,7 @@ programs.graft = {
 };
 ```
 
-Once implemented, enabling the complete integration:
+Enabling the Home Manager publication integration:
 
 - installs CLI and TUI in `home.packages`;
 - retains existing user workload materialisation;
@@ -100,8 +100,8 @@ Once implemented, enabling the complete integration:
 - installs the user worker service/socket; and
 - installs the Home Manager activation hook that shares the user lock.
 
-Home Manager currently materialises user Quadlets only; user manifest
-publication is owned by [#307](https://github.com/Patrick-Kappen/graft/issues/307).
+Home Manager also publishes the immutable user manifest and endpoint pair
+through `$XDG_CONFIG_HOME/graft/current` under its user-owned activation lock.
 It does not alter system groups, system polkit, linger, login sessions, or
 another account's manager.
 

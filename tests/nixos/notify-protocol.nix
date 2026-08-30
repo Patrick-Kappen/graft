@@ -17,6 +17,11 @@ let
         default = [ ];
       };
 
+      home.activation = lib.mkOption {
+        type = lib.types.attrsOf lib.types.anything;
+        default = { };
+      };
+
       xdg.configFile = lib.mkOption {
         type = lib.types.attrsOf (
           lib.types.submodule {
