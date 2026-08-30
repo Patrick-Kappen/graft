@@ -1178,6 +1178,7 @@ in
     pkgs.writeText "graft-nixos-module-eval" nixosRendered;
 
   home-manager-module-eval =
+    assert homeManagerEval.config.programs.graft.hostId == null;
     assert homeManagerHostIdInherited == manifestHostId;
     assert homeManagerHostIdMismatchRejected;
     assert
