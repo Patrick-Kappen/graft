@@ -354,32 +354,34 @@
                 default = { };
               };
 
-              xdg.configHome = lib.mkOption {
-                type = lib.types.path;
-                default = "/home/test/.config";
-              };
+              xdg = {
+                configHome = lib.mkOption {
+                  type = lib.types.path;
+                  default = "/home/test/.config";
+                };
 
-              xdg.stateHome = lib.mkOption {
-                type = lib.types.path;
-                default = "/home/test/.local/state";
-              };
+                stateHome = lib.mkOption {
+                  type = lib.types.path;
+                  default = "/home/test/.local/state";
+                };
 
-              xdg.configFile = lib.mkOption {
-                type = lib.types.attrsOf (
-                  lib.types.submodule (
-                    { config, ... }:
-                    {
-                      options = {
-                        source = lib.mkOption { type = lib.types.path; };
-                        text = lib.mkOption {
-                          type = lib.types.str;
-                          default = builtins.readFile config.source;
+                configFile = lib.mkOption {
+                  type = lib.types.attrsOf (
+                    lib.types.submodule (
+                      { config, ... }:
+                      {
+                        options = {
+                          source = lib.mkOption { type = lib.types.path; };
+                          text = lib.mkOption {
+                            type = lib.types.str;
+                            default = builtins.readFile config.source;
+                          };
                         };
-                      };
-                    }
-                  )
-                );
-                default = { };
+                      }
+                    )
+                  );
+                  default = { };
+                };
               };
             };
           };
