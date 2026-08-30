@@ -3,17 +3,16 @@
   lib,
   pkgs,
   options,
+  osConfig ? null,
   ...
 }:
 
 let
   cfg = config.programs.graft;
-  osConfig = config._module.args.osConfig or null;
   inheritedHostId =
     if osConfig == null then null else lib.attrByPath [ "services" "graft" "hostId" ] null osConfig;
   effectiveHostId = if inheritedHostId != null then inheritedHostId else cfg.hostId;
   hasHomeActivation = builtins.hasAttr "home" options;
-  configHome = lib.attrByPath [ "xdg" "configHome" ] "/home/test/.config" config;
   producerBuildId = lib.attrByPath [ "graftBuildId" ] "source" cfg.package;
   canonicalUuidV7 = lib.types.strMatching "[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
 
@@ -125,22 +124,23 @@ in
         ];
 
         sockets.graft-user-worker = {
-          wantedBy = [ "sockets.target" ];
-          socketConfig = {
+          Unit = { };
+          Socket = {
             ListenStream = "%t/graft/user/worker.sock";
             SocketMode = "0600";
             RemoveOnStop = true;
           };
+          Install.WantedBy = [ "sockets.target" ];
         };
 
         services.graft-user-worker = {
-          description = "Graft user worker";
-          unitConfig = {
+          Unit = {
+            Description = "Graft user worker";
             StartLimitIntervalSec = "60s";
             StartLimitBurst = 5;
           };
-          serviceConfig = {
-            ExecStart = "${worker} --target user --effective-uid %U --manager user --config-home ${lib.escapeShellArg configHome} --producer-name graft --producer-version ${lib.escapeShellArg (lib.getVersion cfg.package)} --producer-build-id ${lib.escapeShellArg producerBuildId}";
+          Service = {
+            ExecStart = "${worker} --target user --effective-uid %U --manager user --config-home ${lib.escapeShellArg config.xdg.configHome} --producer-name graft --producer-version ${lib.escapeShellArg (lib.getVersion cfg.package)} --producer-build-id ${lib.escapeShellArg producerBuildId}";
             Restart = "on-failure";
             RestartSec = "2s";
             NoNewPrivileges = true;
@@ -162,6 +162,7 @@ in
             RestrictAddressFamilies = [ "AF_UNIX" ];
             UMask = "0077";
           };
+          Install = { };
         };
       };
     };
@@ -179,7 +180,7 @@ in
           ""
         else
           (if builtins.hasAttr "hm" lib then lib.hm.dag.entryAfter [ "writeBoundary" ] else lib.id) ''
-            ${lib.getExe' cfg.package "graft-manifest-publish-user"} \
+            $DRY_RUN_CMD ${lib.getExe' cfg.package "graft-manifest-publish-user"} \
               ${manifestPublication.generation} \
               --config-home ${lib.escapeShellArg config.xdg.configHome} \
               --state-home ${lib.escapeShellArg config.xdg.stateHome} \

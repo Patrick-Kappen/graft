@@ -269,11 +269,81 @@ let
         };
         user = {
           services = lib.mkOption {
-            type = lib.types.attrsOf lib.types.anything;
+            type = lib.types.attrsOf (
+              lib.types.submodule {
+                options = {
+                  Unit = lib.mkOption {
+                    type = lib.types.submodule {
+                      options = {
+                        Description = lib.mkOption { type = lib.types.str; };
+                        StartLimitIntervalSec = lib.mkOption { type = lib.types.str; };
+                        StartLimitBurst = lib.mkOption { type = lib.types.int; };
+                      };
+                    };
+                    default = { };
+                  };
+                  Service = lib.mkOption {
+                    type = lib.types.submodule {
+                      options = {
+                        ExecStart = lib.mkOption { type = lib.types.str; };
+                        Restart = lib.mkOption { type = lib.types.str; };
+                        RestartSec = lib.mkOption { type = lib.types.str; };
+                        NoNewPrivileges = lib.mkOption { type = lib.types.bool; };
+                        PrivateTmp = lib.mkOption { type = lib.types.bool; };
+                        ProtectSystem = lib.mkOption { type = lib.types.str; };
+                        ProtectHome = lib.mkOption { type = lib.types.str; };
+                        ProtectKernelTunables = lib.mkOption { type = lib.types.bool; };
+                        ProtectKernelModules = lib.mkOption { type = lib.types.bool; };
+                        ProtectKernelLogs = lib.mkOption { type = lib.types.bool; };
+                        ProtectControlGroups = lib.mkOption { type = lib.types.bool; };
+                        ProtectClock = lib.mkOption { type = lib.types.bool; };
+                        ProtectHostname = lib.mkOption { type = lib.types.bool; };
+                        RestrictSUIDSGID = lib.mkOption { type = lib.types.bool; };
+                        LockPersonality = lib.mkOption { type = lib.types.bool; };
+                        MemoryDenyWriteExecute = lib.mkOption { type = lib.types.bool; };
+                        RestrictRealtime = lib.mkOption { type = lib.types.bool; };
+                        RestrictNamespaces = lib.mkOption { type = lib.types.bool; };
+                        SystemCallArchitectures = lib.mkOption { type = lib.types.str; };
+                        RestrictAddressFamilies = lib.mkOption { type = lib.types.listOf lib.types.str; };
+                        UMask = lib.mkOption { type = lib.types.str; };
+                      };
+                    };
+                    default = { };
+                  };
+                  Install.WantedBy = lib.mkOption {
+                    type = lib.types.listOf lib.types.str;
+                    default = [ ];
+                  };
+                };
+              }
+            );
             default = { };
           };
           sockets = lib.mkOption {
-            type = lib.types.attrsOf lib.types.anything;
+            type = lib.types.attrsOf (
+              lib.types.submodule {
+                options = {
+                  Unit = lib.mkOption {
+                    type = lib.types.submodule { options = { }; };
+                    default = { };
+                  };
+                  Socket = lib.mkOption {
+                    type = lib.types.submodule {
+                      options = {
+                        ListenStream = lib.mkOption { type = lib.types.str; };
+                        SocketMode = lib.mkOption { type = lib.types.str; };
+                        RemoveOnStop = lib.mkOption { type = lib.types.bool; };
+                      };
+                    };
+                    default = { };
+                  };
+                  Install.WantedBy = lib.mkOption {
+                    type = lib.types.listOf lib.types.str;
+                    default = [ ];
+                  };
+                };
+              }
+            );
             default = { };
           };
           tmpfiles.rules = lib.mkOption {
@@ -350,6 +420,32 @@ let
       }
     ];
   };
+  evalHomeManagerWithOsConfig =
+    hostId:
+    lib.evalModules {
+      specialArgs = {
+        inherit pkgs;
+        osConfig.services.graft.hostId = manifestHostId;
+      };
+      modules = [
+        moduleTestOptions
+        self.homeManagerModules.graft
+        {
+          programs.graft = {
+            enable = true;
+            configRoot = ../../tests/nix/containers;
+            configRoots = [ ../../tests/nix/containers-extra ];
+          }
+          // lib.optionalAttrs (hostId != null) { inherit hostId; };
+        }
+      ];
+    };
+  homeManagerInheritedEval = evalHomeManagerWithOsConfig null;
+  homeManagerMismatchEval = evalHomeManagerWithOsConfig "018f0f77-8c4d-7b2a-8e6a-4b8a7d3a1c21";
+  homeManagerHostIdInherited = homeManagerInheritedEval.config.programs.graft.hostId;
+  homeManagerHostIdMismatchRejected = lib.any (
+    assertion: !assertion.assertion
+  ) homeManagerMismatchEval.config.assertions;
 
   networkNixosEval = lib.evalModules {
     specialArgs = { inherit pkgs; };
@@ -1076,6 +1172,22 @@ in
     pkgs.writeText "graft-nixos-module-eval" nixosRendered;
 
   home-manager-module-eval =
+    assert homeManagerHostIdInherited == manifestHostId;
+    assert homeManagerHostIdMismatchRejected;
+    assert
+      homeManagerEval.config.systemd.user.services.graft-user-worker.Unit.Description
+      == "Graft user worker";
+    assert
+      homeManagerEval.config.systemd.user.services.graft-user-worker.Service.Restart == "on-failure";
+    assert
+      homeManagerEval.config.systemd.user.sockets.graft-user-worker.Socket.ListenStream
+      == "%t/graft/user/worker.sock";
+    assert
+      homeManagerEval.config.systemd.user.sockets.graft-user-worker.Install.WantedBy
+      == [ "sockets.target" ];
+    assert lib.hasInfix "$DRY_RUN_CMD" (
+      builtins.unsafeDiscardStringContext homeManagerInheritedEval.config.home.activation.graftManifestPublication
+    );
     assert renderAssertions {
       rendered = homeManagerRendered;
       plainRendered = homeManagerPlainRendered;
