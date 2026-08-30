@@ -116,49 +116,53 @@ in
       }
     ];
 
-    systemd.user.tmpfiles.rules = lib.mkIf (lib.hasAttrByPath [ "systemd" "user" ] config) [
-      "d %t/graft 0700 %u %g - -"
-      "d %t/graft/user 0700 %u %g - -"
-      "d %t/graft/user/interlocks 0700 %u %g - -"
-    ];
+    systemd = lib.mkIf (lib.hasAttrByPath [ "systemd" "user" ] config) {
+      user = {
+        tmpfiles.rules = [
+          "d %t/graft 0700 %u %g - -"
+          "d %t/graft/user 0700 %u %g - -"
+          "d %t/graft/user/interlocks 0700 %u %g - -"
+        ];
 
-    systemd.user.sockets.graft-user-worker = lib.mkIf (lib.hasAttrByPath [ "systemd" "user" ] config) {
-      wantedBy = [ "sockets.target" ];
-      socketConfig = {
-        ListenStream = "%t/graft/user/worker.sock";
-        SocketMode = "0600";
-        RemoveOnStop = true;
-      };
-    };
+        sockets.graft-user-worker = {
+          wantedBy = [ "sockets.target" ];
+          socketConfig = {
+            ListenStream = "%t/graft/user/worker.sock";
+            SocketMode = "0600";
+            RemoveOnStop = true;
+          };
+        };
 
-    systemd.user.services.graft-user-worker = lib.mkIf (lib.hasAttrByPath [ "systemd" "user" ] config) {
-      description = "Graft user worker";
-      unitConfig = {
-        StartLimitIntervalSec = "60s";
-        StartLimitBurst = 5;
-      };
-      serviceConfig = {
-        ExecStart = "${worker} --target user --effective-uid %U --manager user --config-home ${lib.escapeShellArg configHome} --producer-name graft --producer-version ${lib.escapeShellArg (lib.getVersion cfg.package)} --producer-build-id ${lib.escapeShellArg producerBuildId}";
-        Restart = "on-failure";
-        RestartSec = "2s";
-        NoNewPrivileges = true;
-        PrivateTmp = true;
-        ProtectSystem = "strict";
-        ProtectHome = "read-only";
-        ProtectKernelTunables = true;
-        ProtectKernelModules = true;
-        ProtectKernelLogs = true;
-        ProtectControlGroups = true;
-        ProtectClock = true;
-        ProtectHostname = true;
-        RestrictSUIDSGID = true;
-        LockPersonality = true;
-        MemoryDenyWriteExecute = true;
-        RestrictRealtime = true;
-        RestrictNamespaces = true;
-        SystemCallArchitectures = "native";
-        RestrictAddressFamilies = [ "AF_UNIX" ];
-        UMask = "0077";
+        services.graft-user-worker = {
+          description = "Graft user worker";
+          unitConfig = {
+            StartLimitIntervalSec = "60s";
+            StartLimitBurst = 5;
+          };
+          serviceConfig = {
+            ExecStart = "${worker} --target user --effective-uid %U --manager user --config-home ${lib.escapeShellArg configHome} --producer-name graft --producer-version ${lib.escapeShellArg (lib.getVersion cfg.package)} --producer-build-id ${lib.escapeShellArg producerBuildId}";
+            Restart = "on-failure";
+            RestartSec = "2s";
+            NoNewPrivileges = true;
+            PrivateTmp = true;
+            ProtectSystem = "strict";
+            ProtectHome = "read-only";
+            ProtectKernelTunables = true;
+            ProtectKernelModules = true;
+            ProtectKernelLogs = true;
+            ProtectControlGroups = true;
+            ProtectClock = true;
+            ProtectHostname = true;
+            RestrictSUIDSGID = true;
+            LockPersonality = true;
+            MemoryDenyWriteExecute = true;
+            RestrictRealtime = true;
+            RestrictNamespaces = true;
+            SystemCallArchitectures = "native";
+            RestrictAddressFamilies = [ "AF_UNIX" ];
+            UMask = "0077";
+          };
+        };
       };
     };
 
