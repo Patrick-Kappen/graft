@@ -216,6 +216,27 @@ fn worker_version_reports_the_packaged_semantic_version() {
 }
 
 #[test]
+fn real_worker_handshake_publishes_version_and_stable_json_relationships() {
+    let worker = spawn_worker();
+    let mut stream = connect(&worker.socket_path);
+    let hello = handshake(&mut stream);
+    let wire = serde_json::to_value(ServerHandshakeFrame::ServerHello(hello.clone()))
+        .expect("server hello can be represented as JSON");
+
+    assert_eq!(wire["type"], "server_hello");
+    assert_eq!(wire["software_version"], env!("CARGO_PKG_VERSION"));
+    assert_eq!(wire["context"]["target"], "user");
+    assert_eq!(wire["context"]["manager"], "user");
+    assert_eq!(
+        wire["context"]["effective_uid"],
+        rustix::process::geteuid().as_raw()
+    );
+    assert_ne!(wire["worker_epoch"], wire["server_connection_id"]);
+    assert!(wire["server_time_ms"].is_number());
+    assert!(wire["effective_limits"].is_object());
+}
+
+#[test]
 fn real_worker_process_handshake_uses_inherited_unix_socket_and_fresh_epoch() {
     let mut first = spawn_worker();
     let mut first_stream = connect(&first.socket_path);

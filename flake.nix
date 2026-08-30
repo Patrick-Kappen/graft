@@ -15,7 +15,8 @@
       graftVersion = graftCargoMetadata.package.version;
       # Flake revision metadata is deterministic and does not invoke VCS tools.
       # Archives and dirty trees intentionally use the stable provenance marker.
-      graftBuildId = self.rev or "source";
+      buildIdForRevision = revision: if revision == null then "source" else revision;
+      graftBuildId = buildIdForRevision (self.rev or null);
       requireVersionParity =
         cargoVersion: nixVersion:
         if cargoVersion == nixVersion then
@@ -799,7 +800,18 @@
           version-parity =
             assert !(builtins.tryEval (requireVersionParity graftVersion "deliberate-drift")).success;
             pkgs.runCommand "graft-version-parity" { } ''
+              set -euo pipefail
               test ${lib.escapeShellArg graftPackage.version} = ${lib.escapeShellArg graftVersion}
+              test "$(${lib.getExe graftPackage} --version)" = ${lib.escapeShellArg "graft ${graftVersion}"}
+              test "$(${lib.getExe' graftPackage "graft-worker"} --version)" = ${lib.escapeShellArg "graft-worker ${graftVersion}"}
+              touch "$out"
+            '';
+
+          build-id-fallback =
+            assert buildIdForRevision null == "source";
+            assert buildIdForRevision "deliberate-revision" == "deliberate-revision";
+            pkgs.runCommand "graft-build-id-fallback" { } ''
+              test ${lib.escapeShellArg manifestBuildId} = ${lib.escapeShellArg graftBuildId}
               touch "$out"
             '';
 
