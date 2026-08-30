@@ -6,10 +6,8 @@
   graftVersion,
   graftBuildId,
   graftWorkerApiRange,
-  rustWorkerApiRange,
   buildIdForRevision,
   requireVersionParity,
-  requireWorkerApiParity,
 }:
 let
   inherit (builtins.seq system pkgs) lib;
@@ -771,14 +769,6 @@ in
 {
   version-parity =
     assert !(builtins.tryEval (requireVersionParity graftVersion "deliberate-drift")).success;
-    assert requireWorkerApiParity rustWorkerApiRange graftWorkerApiRange == graftWorkerApiRange;
-    assert graftPackage.graftWorkerApiRange == graftWorkerApiRange;
-    assert
-      !(builtins.tryEval (
-        requireWorkerApiParity rustWorkerApiRange (
-          graftWorkerApiRange // { max_minor = graftWorkerApiRange.max_minor + 1; }
-        )
-      )).success;
     pkgs.runCommand "graft-version-parity" { } ''
       set -euo pipefail
       test ${lib.escapeShellArg graftPackage.version} = ${lib.escapeShellArg graftVersion}

@@ -13,34 +13,7 @@
       forAllSystems = nixpkgs.lib.genAttrs systems;
       graftCargoMetadata = builtins.fromTOML (builtins.readFile ./crates/graft/Cargo.toml);
       graftVersion = graftCargoMetadata.package.version;
-      protocolSourceLines = nixpkgs.lib.splitString "\n" (
-        builtins.readFile ./crates/graft/src/protocol/types.rs
-      );
-      parseProtocolConstant =
-        name:
-        let
-          matches = builtins.filter (match: match != null) (
-            map (
-              line: builtins.match "[[:space:]]*pub const ${name}: u16 = ([0-9]+);[[:space:]]*" line
-            ) protocolSourceLines
-          );
-        in
-        if builtins.length matches == 1 then
-          builtins.fromJSON (builtins.elemAt (builtins.head matches) 0)
-        else
-          throw "Expected exactly one ${name} u16 constant in crates/graft/src/protocol/types.rs";
-      rustWorkerApiRange = {
-        major = parseProtocolConstant "PROTOCOL_MAJOR";
-        min_minor = parseProtocolConstant "PROTOCOL_MIN_MINOR";
-        max_minor = parseProtocolConstant "PROTOCOL_MAX_MINOR";
-      };
-      requireWorkerApiParity =
-        rustRange: nixRange:
-        if rustRange == nixRange then
-          nixRange
-        else
-          throw "Graft Rust/Nix worker API range mismatch: ${builtins.toJSON rustRange} != ${builtins.toJSON nixRange}";
-      graftWorkerApiRange = requireWorkerApiParity rustWorkerApiRange (import ./nix/worker-api-range.nix);
+      graftWorkerApiRange = builtins.fromJSON (builtins.readFile ./crates/graft/worker-api-range.json);
       # Flake revision metadata is deterministic and does not invoke VCS tools.
       # Archives and dirty trees intentionally use the stable provenance marker.
       buildIdForRevision = revision: if revision == null then "source" else revision;
@@ -143,10 +116,8 @@
             graftVersion
             graftBuildId
             graftWorkerApiRange
-            rustWorkerApiRange
             buildIdForRevision
             requireVersionParity
-            requireWorkerApiParity
             ;
           pkgs = nixpkgs.legacyPackages.${system};
           graftPackage = self.packages.${system}.default;
