@@ -316,6 +316,27 @@ let
   homeManagerHostIdMismatchRejected = lib.any (
     assertion: !assertion.assertion
   ) homeManagerMismatchEval.config.assertions;
+  incompatibleWorkerApiRangeEval = lib.evalModules {
+    specialArgs = { inherit pkgs; };
+    modules = [
+      moduleTestOptions
+      self.nixosModules.graft
+      {
+        services.graft = {
+          enable = true;
+          hostId = manifestHostId;
+          package = graftPackage // {
+            graftWorkerApiRange = graftWorkerApiRange // {
+              major = graftWorkerApiRange.major + 1;
+            };
+          };
+        };
+      }
+    ];
+  };
+  incompatibleWorkerApiRangeRejected = lib.any (
+    assertion: !assertion.assertion
+  ) incompatibleWorkerApiRangeEval.config.assertions;
 
   networkNixosEval = lib.evalModules {
     specialArgs = { inherit pkgs; };
@@ -949,6 +970,7 @@ in
       '';
 
   nixos-module-eval =
+    assert incompatibleWorkerApiRangeRejected;
     assert renderAssertions {
       rendered = nixosRendered;
       plainRendered = nixosPlainRendered;
