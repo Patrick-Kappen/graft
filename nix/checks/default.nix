@@ -284,6 +284,7 @@ let
   evalHomeManager =
     {
       osConfig ? null,
+      moduleArgsOsConfig ? null,
       hostId ? null,
     }:
     lib.evalModules {
@@ -294,6 +295,9 @@ let
       modules = [
         moduleTestOptions
         self.homeManagerModules.graft
+        (lib.optionalAttrs (moduleArgsOsConfig != null) {
+          config._module.args.osConfig = moduleArgsOsConfig;
+        })
         {
           programs.graft = {
             enable = true;
@@ -308,11 +312,16 @@ let
   homeManagerInheritedEval = evalHomeManager {
     osConfig.services.graft.hostId = manifestHostId;
   };
+  homeManagerModuleArgsInheritedEval = evalHomeManager {
+    moduleArgsOsConfig.services.graft.hostId = manifestHostId;
+  };
   homeManagerMismatchEval = evalHomeManager {
     osConfig.services.graft.hostId = manifestHostId;
     hostId = "018f0f77-8c4d-7b2a-8e6a-4b8a7d3a1c21";
   };
   homeManagerHostIdInherited = homeManagerInheritedEval.config.programs.graft.hostId;
+  homeManagerModuleArgsHostIdInherited =
+    homeManagerModuleArgsInheritedEval.config.programs.graft.hostId;
   homeManagerHostIdMismatchRejected = lib.any (
     assertion: !assertion.assertion
   ) homeManagerMismatchEval.config.assertions;
@@ -1044,6 +1053,7 @@ in
   home-manager-module-eval =
     assert homeManagerEval.config.programs.graft.hostId == null;
     assert homeManagerHostIdInherited == manifestHostId;
+    assert homeManagerModuleArgsHostIdInherited == manifestHostId;
     assert homeManagerHostIdMismatchRejected;
     assert
       homeManagerEval.config.systemd.user.services.graft-user-worker.Unit.Description
