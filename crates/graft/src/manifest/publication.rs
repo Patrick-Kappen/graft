@@ -16,7 +16,9 @@ use rustix::{
 use thiserror::Error;
 
 use super::{
-    filesystem::{open_directory_child, validate_absolute_normal_path, validate_no_acl},
+    filesystem::{
+        open_directory_child, open_directory_path, validate_absolute_normal_path, validate_no_acl,
+    },
     ManifestError, ManifestLoader, ProducerIdentity,
 };
 
@@ -243,8 +245,25 @@ impl Publisher {
             if self.user { 0o700 } else { 0o750 },
         )?;
         let runtime = if self.user {
-            create_owned_directory_if_missing(&self.paths.runtime_root, self.uid, self.gid, 0o700)?;
-            ensure_owned_directory(&self.paths.runtime, self.uid, self.gid, 0o700)?
+            let runtime_root = create_owned_directory_if_missing(
+                &self.paths.runtime_root,
+                self.uid,
+                self.gid,
+                0o700,
+            )?;
+            let runtime_name = self
+                .paths
+                .runtime
+                .file_name()
+                .ok_or(PublicationError::UnsafePath)?;
+            ensure_owned_directory_child(
+                &runtime_root,
+                runtime_name,
+                self.uid,
+                self.gid,
+                0o700,
+                ExistingDirectoryPolicy::Exact,
+            )?
         } else {
             ensure_owned_directory(&self.paths.runtime_root, self.uid, self.gid, 0o755)?;
             ensure_owned_directory(&self.paths.runtime, self.uid, self.graft_gid, 0o750)?
@@ -316,15 +335,36 @@ impl Publisher {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+enum ParentPolicy {
+    RequireExisting,
+    CreateMissing,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ExistingDirectoryPolicy {
+    Exact,
+    Base,
+}
+
 fn open_or_create_directory_child(
     parent: &File,
     name: &std::ffi::OsStr,
+    uid: u32,
+    gid: u32,
+    mode: u32,
 ) -> Result<File, PublicationError> {
     match open_directory_child(parent, name) {
         Ok(directory) => Ok(directory),
         Err(ManifestError::Filesystem(error)) if error.kind() == io::ErrorKind::NotFound => {
-            match rustix::fs::mkdirat(parent, name, Mode::from_raw_mode(0o755)) {
-                Ok(()) | Err(rustix::io::Errno::EXIST) => {
+            match rustix::fs::mkdirat(parent, name, Mode::from_raw_mode(mode)) {
+                Ok(()) => {
+                    let directory =
+                        open_directory_child(parent, name).map_err(PublicationError::Manifest)?;
+                    initialize_created_directory(&directory, parent, uid, gid, mode)?;
+                    Ok(directory)
+                }
+                Err(rustix::io::Errno::EXIST) => {
                     open_directory_child(parent, name).map_err(PublicationError::Manifest)
                 }
                 Err(error) => Err(errno_to_publication(error)),
@@ -334,38 +374,37 @@ fn open_or_create_directory_child(
     }
 }
 
+fn initialize_created_directory(
+    directory: &File,
+    parent: &File,
+    uid: u32,
+    gid: u32,
+    mode: u32,
+) -> Result<(), PublicationError> {
+    rustix::fs::fchown(
+        directory,
+        Some(Uid::from_raw(uid)),
+        Some(Gid::from_raw(gid)),
+    )
+    .map_err(errno_to_publication)?;
+    rustix::fs::fchmod(directory, Mode::from_raw_mode(mode)).map_err(errno_to_publication)?;
+    rustix::fs::fsync(parent).map_err(errno_to_publication)
+}
+
 fn create_owned_directory_if_missing(
     path: &Path,
     uid: u32,
     gid: u32,
     mode: u32,
 ) -> Result<File, PublicationError> {
-    validate_absolute_normal_path(path).map_err(|_| PublicationError::UnsafePath)?;
-    let parent_path = path.parent().ok_or(PublicationError::UnsafePath)?;
-    let name = path.file_name().ok_or(PublicationError::UnsafePath)?;
-    let mut parent = File::open("/").map_err(PublicationError::Filesystem)?;
-    for component in parent_path.components() {
-        if let std::path::Component::Normal(name) = component {
-            parent = open_or_create_directory_child(&parent, name)?;
-        }
-    }
-    let created = match rustix::fs::mkdirat(&parent, name, Mode::from_raw_mode(mode)) {
-        Ok(()) => true,
-        Err(error) if error == rustix::io::Errno::EXIST => false,
-        Err(error) => return Err(errno_to_publication(error)),
-    };
-    let directory = open_directory_child(&parent, name).map_err(PublicationError::Manifest)?;
-    if created {
-        rustix::fs::fchown(
-            &directory,
-            Some(Uid::from_raw(uid)),
-            Some(Gid::from_raw(gid)),
-        )
-        .map_err(errno_to_publication)?;
-        rustix::fs::fchmod(&directory, Mode::from_raw_mode(mode)).map_err(errno_to_publication)?;
-        rustix::fs::fsync(&parent).map_err(errno_to_publication)?;
-    }
-    Ok(directory)
+    ensure_owned_directory_with(
+        path,
+        uid,
+        gid,
+        mode,
+        ParentPolicy::CreateMissing,
+        ExistingDirectoryPolicy::Base,
+    )
 }
 
 fn ensure_owned_directory(
@@ -374,33 +413,88 @@ fn ensure_owned_directory(
     gid: u32,
     mode: u32,
 ) -> Result<File, PublicationError> {
+    ensure_owned_directory_with(
+        path,
+        uid,
+        gid,
+        mode,
+        ParentPolicy::RequireExisting,
+        ExistingDirectoryPolicy::Exact,
+    )
+}
+
+fn ensure_owned_directory_with(
+    path: &Path,
+    uid: u32,
+    gid: u32,
+    mode: u32,
+    parent_policy: ParentPolicy,
+    existing_policy: ExistingDirectoryPolicy,
+) -> Result<File, PublicationError> {
     validate_absolute_normal_path(path).map_err(|_| PublicationError::UnsafePath)?;
     let parent_path = path.parent().ok_or(PublicationError::UnsafePath)?;
     let name = path.file_name().ok_or(PublicationError::UnsafePath)?;
-    let mut parent = File::open("/").map_err(PublicationError::Filesystem)?;
-    for component in parent_path.components() {
+    let parent = match parent_policy {
+        ParentPolicy::RequireExisting => {
+            open_directory_path(parent_path).map_err(PublicationError::Manifest)?
+        }
+        ParentPolicy::CreateMissing => open_or_create_directory_path(parent_path, uid, gid, mode)?,
+    };
+    ensure_owned_directory_child(&parent, name, uid, gid, mode, existing_policy)
+}
+
+fn open_or_create_directory_path(
+    path: &Path,
+    uid: u32,
+    gid: u32,
+    mode: u32,
+) -> Result<File, PublicationError> {
+    let descriptor = rustix::fs::openat(
+        rustix::fs::ABS,
+        "/",
+        OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW | OFlags::DIRECTORY,
+        Mode::empty(),
+    )
+    .map_err(errno_to_publication)?;
+    let mut directory = File::from(descriptor);
+    for component in path.components() {
         if let std::path::Component::Normal(name) = component {
-            parent = open_or_create_directory_child(&parent, name)?;
+            directory = open_or_create_directory_child(&directory, name, uid, gid, mode)?;
         }
     }
-    let created = match rustix::fs::mkdirat(&parent, name, Mode::from_raw_mode(mode)) {
+    Ok(directory)
+}
+
+fn ensure_owned_directory_child(
+    parent: &File,
+    name: &std::ffi::OsStr,
+    uid: u32,
+    gid: u32,
+    mode: u32,
+    existing_policy: ExistingDirectoryPolicy,
+) -> Result<File, PublicationError> {
+    let created = match rustix::fs::mkdirat(parent, name, Mode::from_raw_mode(mode)) {
         Ok(()) => true,
         Err(error) if error == rustix::io::Errno::EXIST => false,
         Err(error) => return Err(errno_to_publication(error)),
     };
-    let directory = open_directory_child(&parent, name).map_err(PublicationError::Manifest)?;
+    let directory = open_directory_child(parent, name).map_err(PublicationError::Manifest)?;
     if created {
-        rustix::fs::fchown(
-            &directory,
-            Some(Uid::from_raw(uid)),
-            Some(Gid::from_raw(gid)),
-        )
-        .map_err(errno_to_publication)?;
-        rustix::fs::fchmod(&directory, Mode::from_raw_mode(mode)).map_err(errno_to_publication)?;
-        rustix::fs::fsync(&parent).map_err(errno_to_publication)?;
+        initialize_created_directory(&directory, parent, uid, gid, mode)?;
     }
-    validate_directory(&directory, uid, gid, mode)?;
+    match existing_policy {
+        ExistingDirectoryPolicy::Exact => validate_directory(&directory, uid, gid, mode)?,
+        ExistingDirectoryPolicy::Base => validate_base_directory(&directory, uid)?,
+    }
     Ok(directory)
+}
+
+fn validate_base_directory(directory: &File, uid: u32) -> Result<(), PublicationError> {
+    let metadata = directory.metadata().map_err(PublicationError::Filesystem)?;
+    if (metadata.uid() != uid && metadata.uid() != 0) || metadata.mode() & 0o0002 != 0 {
+        return Err(PublicationError::UnsafeObject);
+    }
+    validate_no_acl(directory).map_err(PublicationError::Manifest)
 }
 
 fn validate_directory(
@@ -547,7 +641,7 @@ mod tests {
     const HOST_TWO: &str = "018f0f77-8c4d-7b2a-8e6a-4b8a7d3a1c21";
 
     struct Fixture {
-        _temporary: TempDir,
+        temporary: TempDir,
         publisher: Publisher,
         parent: PathBuf,
         runtime: PathBuf,
@@ -595,7 +689,7 @@ mod tests {
             )
             .unwrap();
             Self {
-                _temporary: temporary,
+                temporary,
                 publisher,
                 parent,
                 runtime,
@@ -683,22 +777,96 @@ mod tests {
     }
 
     #[test]
+    fn user_publisher_rejects_foreign_owned_existing_state_home() {
+        let fixture = UserFixture::new();
+        fs::create_dir(&fixture.state_home).unwrap();
+        let caller_uid = fixture.publisher.uid;
+        let foreign_uid = if caller_uid == 0 {
+            rustix::fs::chownat(
+                rustix::fs::CWD,
+                &fixture.state_home,
+                Some(Uid::from_raw(65_534)),
+                None,
+                AtFlags::empty(),
+            )
+            .unwrap();
+            caller_uid
+        } else {
+            0
+        };
+
+        assert!(matches!(
+            create_owned_directory_if_missing(
+                &fixture.state_home,
+                foreign_uid,
+                fixture.publisher.gid,
+                0o700,
+            ),
+            Err(PublicationError::UnsafeObject)
+        ));
+        assert!(!fixture.state_home.join("graft").exists());
+    }
+
+    #[test]
+    fn user_publisher_rejects_world_writable_existing_state_home() {
+        let fixture = UserFixture::new();
+        fs::create_dir(&fixture.state_home).unwrap();
+        fs::set_permissions(&fixture.state_home, fs::Permissions::from_mode(0o702)).unwrap();
+
+        assert!(matches!(
+            fixture.publisher.publish(&fixture.first),
+            Err(PublicationError::UnsafeObject)
+        ));
+        assert!(!fixture.state_home.join("graft").exists());
+    }
+
+    #[test]
     fn user_publisher_creates_missing_state_home_parents() {
         let mut fixture = UserFixture::new();
-        fixture.state_home = fixture.config_home.join("missing").join("state");
+        fixture.state_home = fixture
+            .config_home
+            .join("missing")
+            .join("deeper")
+            .join("state");
         fixture.publisher.paths.runtime_root = fixture.state_home.clone();
         fixture.publisher.paths.runtime = fixture.state_home.join("graft");
 
         fixture.publisher.publish(&fixture.first).unwrap();
 
-        assert_eq!(
-            fixture.state_home.metadata().unwrap().mode() & 0o7777,
-            0o700
-        );
+        for directory in [
+            fixture.config_home.join("missing"),
+            fixture.config_home.join("missing/deeper"),
+            fixture.state_home.clone(),
+        ] {
+            let metadata = directory.metadata().unwrap();
+            assert_eq!(
+                (metadata.uid(), metadata.gid()),
+                (fixture.publisher.uid, fixture.publisher.gid)
+            );
+            assert_eq!(metadata.mode() & 0o7777, 0o700);
+        }
         assert_eq!(
             fixture.state_home.join("graft").metadata().unwrap().mode() & 0o7777,
             0o700
         );
+    }
+
+    #[test]
+    fn system_publisher_rejects_missing_runtime_parent_without_creating_it() {
+        let mut fixture = Fixture::new();
+        let runtime_root = fixture.temporary.path().join("run/missing/graft");
+        fixture.publisher.paths.runtime_root = runtime_root.clone();
+        fixture.publisher.paths.runtime = runtime_root.join("system");
+
+        let result = fixture.publisher.publish(&fixture.first);
+
+        assert!(matches!(
+            result,
+            Err(PublicationError::Manifest(ManifestError::Filesystem(error)))
+                if error.kind() == io::ErrorKind::NotFound
+        ));
+        assert!(!runtime_root.parent().unwrap().exists());
+        assert!(!runtime_root.exists());
     }
 
     #[test]
