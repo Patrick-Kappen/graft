@@ -7,7 +7,7 @@ args@{
 }:
 
 let
-  osConfig = args.osConfig or null;
+  osConfig = args.osConfig or (config._module.args.osConfig or null);
   cfg = config.programs.graft;
   inheritedHostId =
     if osConfig == null then null else lib.attrByPath [ "services" "graft" "hostId" ] null osConfig;
