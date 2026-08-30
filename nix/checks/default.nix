@@ -2,6 +2,7 @@
   self,
   system,
   pkgs,
+  homeManager,
   graftPackage,
   graftVersion,
   graftBuildId,
@@ -309,6 +310,25 @@ let
       ];
     };
   homeManagerEval = evalHomeManager { };
+  realHomeManagerEval = homeManager.lib.homeManagerConfiguration {
+    inherit pkgs;
+    modules = [
+      self.homeManagerModules.graft
+      {
+        home = {
+          username = "graft";
+          homeDirectory = "/home/graft";
+          stateVersion = "26.05";
+        };
+        programs.graft = {
+          enable = true;
+          hostId = manifestHostId;
+          configRoot = ../../tests/nix/containers;
+          configRoots = [ ../../tests/nix/containers-extra ];
+        };
+      }
+    ];
+  };
   homeManagerInheritedEval = evalHomeManager {
     osConfig.services.graft.hostId = manifestHostId;
   };
@@ -1071,6 +1091,19 @@ in
     );
     assert !(lib.hasInfix "WorkingDir=" quickstartNixosRendered);
     pkgs.writeText "graft-nixos-module-eval" nixosRendered;
+
+  home-manager-real-module-eval =
+    assert realHomeManagerEval.config.programs.graft.enable;
+    assert realHomeManagerEval.config.programs.graft.hostId == manifestHostId;
+    assert
+      realHomeManagerEval.config.systemd.user.services.graft-user-worker.Service.ProtectHome
+      == "read-only";
+    assert
+      realHomeManagerEval.config.systemd.user.sockets.graft-user-worker.Install.WantedBy
+      == [ "sockets.target" ];
+    assert realHomeManagerEval.config.home.activation ? graftManifestPublication;
+    assert realHomeManagerEval.config.xdg.configFile ? "containers/systemd/nix-check-user.container";
+    pkgs.writeText "graft-home-manager-real-module-eval" "real Home Manager evaluation succeeded";
 
   home-manager-module-eval =
     assert homeManagerEval.config.programs.graft.hostId == null;
