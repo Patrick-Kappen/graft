@@ -360,34 +360,33 @@
                 default = [ ];
               };
 
-              systemd.services = lib.mkOption {
-                type = lib.types.attrsOf lib.types.anything;
-                default = { };
-              };
-
-              systemd.sockets = lib.mkOption {
-                type = lib.types.attrsOf lib.types.anything;
-                default = { };
-              };
-
-              systemd.tmpfiles.rules = lib.mkOption {
-                type = lib.types.listOf lib.types.str;
-                default = [ ];
-              };
-
-              systemd.user.services = lib.mkOption {
-                type = lib.types.attrsOf lib.types.anything;
-                default = { };
-              };
-
-              systemd.user.sockets = lib.mkOption {
-                type = lib.types.attrsOf lib.types.anything;
-                default = { };
-              };
-
-              systemd.user.tmpfiles.rules = lib.mkOption {
-                type = lib.types.listOf lib.types.str;
-                default = [ ];
+              systemd = {
+                services = lib.mkOption {
+                  type = lib.types.attrsOf lib.types.anything;
+                  default = { };
+                };
+                sockets = lib.mkOption {
+                  type = lib.types.attrsOf lib.types.anything;
+                  default = { };
+                };
+                tmpfiles.rules = lib.mkOption {
+                  type = lib.types.listOf lib.types.str;
+                  default = [ ];
+                };
+                user = {
+                  services = lib.mkOption {
+                    type = lib.types.attrsOf lib.types.anything;
+                    default = { };
+                  };
+                  sockets = lib.mkOption {
+                    type = lib.types.attrsOf lib.types.anything;
+                    default = { };
+                  };
+                  tmpfiles.rules = lib.mkOption {
+                    type = lib.types.listOf lib.types.str;
+                    default = [ ];
+                  };
+                };
               };
 
               home.activation = lib.mkOption {
