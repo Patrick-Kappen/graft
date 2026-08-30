@@ -7,7 +7,7 @@ use std::path::PathBuf;
 
 use anyhow::{Context as _, Result};
 use clap::Parser;
-use graft::manifest::{publish_user_generation, ProducerIdentity};
+use graft::manifest::{publish_user_generation, ProducerIdentity, UserDirectoryPolicy};
 
 #[derive(Debug, Parser)]
 #[command(name = "graft-manifest-publish-user")]
@@ -47,7 +47,11 @@ fn main() -> Result<()> {
         &arguments.state_home,
         &arguments.generation,
         producer,
-        arguments.relaxed_base_dirs,
+        if arguments.relaxed_base_dirs {
+            UserDirectoryPolicy::RelaxedBaseDirectories
+        } else {
+            UserDirectoryPolicy::Strict
+        },
     )
     .context("cannot publish user manifest generation")
 }

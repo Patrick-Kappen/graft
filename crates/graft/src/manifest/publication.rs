@@ -20,7 +20,7 @@ use super::{
         open_directory_child, open_directory_path, open_nofollow, validate_absolute_normal_path,
         validate_base_directory_acl, validate_no_acl,
     },
-    ManifestError, ManifestLoader, ProducerIdentity,
+    ManifestError, ManifestLoader, ProducerIdentity, UserDirectoryPolicy,
 };
 
 const SYSTEM_PARENT: &str = "/etc/graft";
@@ -35,6 +35,8 @@ const RELAXED_BASE_DIRECTORY_WARNING: &str =
     "warning: accepting unsafe user base-directory permissions or access ACL in relaxed base-directory mode";
 const RELAXED_GRAFT_DIRECTORY_WARNING: &str =
     "warning: accepting Graft-owned user publication directory mode or ACL in relaxed base-directory mode";
+const RELAXED_CREATED_DIRECTORY_WARNING: &str =
+    "warning: could not fully normalize a newly created Graft-owned user directory in relaxed base-directory mode";
 
 #[cfg(test)]
 thread_local! {
@@ -67,7 +69,7 @@ pub fn publish_user_generation(
     state_home: &Path,
     generation: &Path,
     installed_producer: ProducerIdentity,
-    relaxed_base_directories: bool,
+    user_directory_policy: UserDirectoryPolicy,
 ) -> Result<(), PublicationError> {
     let uid = geteuid().as_raw();
     let gid = getegid().as_raw();
@@ -77,7 +79,7 @@ pub fn publish_user_generation(
         uid,
         gid,
         installed_producer,
-        relaxed_base_directories,
+        user_directory_policy,
     )?
     .publish(generation)
 }
@@ -169,7 +171,7 @@ struct Publisher {
     loader: ManifestLoader,
     lock_timeout: Duration,
     user: bool,
-    relaxed_base_directories: bool,
+    user_directory_policy: UserDirectoryPolicy,
 }
 
 impl Publisher {
@@ -214,7 +216,7 @@ impl Publisher {
             loader,
             lock_timeout,
             user: false,
-            relaxed_base_directories: false,
+            user_directory_policy: UserDirectoryPolicy::Strict,
         })
     }
 
@@ -224,7 +226,7 @@ impl Publisher {
         uid: u32,
         gid: u32,
         installed_producer: ProducerIdentity,
-        relaxed_base_directories: bool,
+        user_directory_policy: UserDirectoryPolicy,
     ) -> Result<Self, PublicationError> {
         let parent = config_home.join("graft");
         let runtime = state_home.join("graft");
@@ -245,12 +247,12 @@ impl Publisher {
         if uid == u32::MAX || gid == u32::MAX {
             return Err(PublicationError::UnsafePath);
         }
-        let loader = ManifestLoader::user_for_publication(
+        let loader = ManifestLoader::user_with_directory_policy(
             config_home,
             uid,
             gid,
             installed_producer,
-            relaxed_base_directories,
+            user_directory_policy,
         )
         .map_err(PublicationError::Manifest)?;
         Ok(Self {
@@ -261,7 +263,7 @@ impl Publisher {
             loader,
             lock_timeout: LOCK_TIMEOUT,
             user: true,
-            relaxed_base_directories,
+            user_directory_policy,
         })
     }
 
@@ -288,7 +290,7 @@ impl Publisher {
                 config_home,
                 self.uid,
                 self.gid,
-                self.relaxed_base_directories,
+                self.user_directory_policy == UserDirectoryPolicy::RelaxedBaseDirectories,
             )?;
             let parent = ensure_graft_directory_child(
                 &config_home,
@@ -299,13 +301,13 @@ impl Publisher {
                 self.uid,
                 self.gid,
                 0o700,
-                self.relaxed_base_directories,
+                self.user_directory_policy,
             )?;
             let runtime_root = ensure_user_base_directory(
                 &self.paths.runtime_root,
                 self.uid,
                 self.gid,
-                self.relaxed_base_directories,
+                self.user_directory_policy == UserDirectoryPolicy::RelaxedBaseDirectories,
             )?;
             let runtime = ensure_graft_directory_child(
                 &runtime_root,
@@ -316,7 +318,7 @@ impl Publisher {
                 self.uid,
                 self.gid,
                 0o700,
-                self.relaxed_base_directories,
+                self.user_directory_policy,
             )?;
             (parent, runtime)
         } else {
@@ -406,17 +408,12 @@ impl Publisher {
 fn open_or_create_directory_child(
     parent: &File,
     name: &std::ffi::OsStr,
-    uid: u32,
-    gid: u32,
     mode: u32,
 ) -> Result<(File, bool), PublicationError> {
     match rustix::fs::mkdirat(parent, name, Mode::from_raw_mode(mode)) {
-        Ok(()) => {
-            let directory =
-                open_directory_child(parent, name).map_err(PublicationError::Manifest)?;
-            initialize_created_directory(&directory, parent, uid, gid, mode)?;
-            Ok((directory, true))
-        }
+        Ok(()) => open_directory_child(parent, name)
+            .map(|directory| (directory, true))
+            .map_err(PublicationError::Manifest),
         Err(error) if error == rustix::io::Errno::EXIST => open_directory_child(parent, name)
             .map(|directory| (directory, false))
             .map_err(PublicationError::Manifest),
@@ -441,6 +438,35 @@ fn initialize_created_directory(
     rustix::fs::fsync(parent).map_err(errno_to_publication)
 }
 
+fn normalize_created_graft_directory(
+    directory: &File,
+    parent: &File,
+    uid: u32,
+    gid: u32,
+    mode: u32,
+    policy: UserDirectoryPolicy,
+) -> Result<(), PublicationError> {
+    let relaxed = policy == UserDirectoryPolicy::RelaxedBaseDirectories;
+    for result in [
+        rustix::fs::fchown(
+            directory,
+            Some(Uid::from_raw(uid)),
+            Some(Gid::from_raw(gid)),
+        ),
+        rustix::fs::fremovexattr(directory, "system.posix_acl_access"),
+        rustix::fs::fremovexattr(directory, "system.posix_acl_default"),
+        rustix::fs::fchmod(directory, Mode::from_raw_mode(mode)),
+    ] {
+        match result {
+            Ok(()) | Err(rustix::io::Errno::NODATA) => {}
+            Err(_) if relaxed => warn_relaxed(RELAXED_CREATED_DIRECTORY_WARNING),
+            Err(error) => return Err(errno_to_publication(error)),
+        }
+    }
+    validate_directory(directory, uid, gid, mode, relaxed)?;
+    rustix::fs::fsync(parent).map_err(errno_to_publication)
+}
+
 fn ensure_user_base_directory(
     path: &Path,
     uid: u32,
@@ -452,8 +478,10 @@ fn ensure_user_base_directory(
     let mut user_path = false;
     for component in path.components() {
         if let Component::Normal(name) = component {
-            let (child, created) =
-                open_or_create_directory_child(&directory, name, uid, gid, 0o700)?;
+            let (child, created) = open_or_create_directory_child(&directory, name, 0o700)?;
+            if created {
+                initialize_created_directory(&child, &directory, uid, gid, 0o700)?;
+            }
             let metadata = child.metadata().map_err(PublicationError::Filesystem)?;
             user_path |= created || metadata.uid() == uid;
             if user_path {
@@ -491,7 +519,10 @@ fn ensure_strict_owned_directory_child(
     gid: u32,
     mode: u32,
 ) -> Result<File, PublicationError> {
-    let (directory, _) = open_or_create_directory_child(parent, name, uid, gid, mode)?;
+    let (directory, created) = open_or_create_directory_child(parent, name, mode)?;
+    if created {
+        initialize_created_directory(&directory, parent, uid, gid, mode)?;
+    }
     validate_directory(&directory, uid, gid, mode, false)?;
     Ok(directory)
 }
@@ -502,10 +533,20 @@ fn ensure_graft_directory_child(
     uid: u32,
     gid: u32,
     mode: u32,
-    relaxed: bool,
+    policy: UserDirectoryPolicy,
 ) -> Result<File, PublicationError> {
-    let (directory, _) = open_or_create_directory_child(parent, name, uid, gid, mode)?;
-    validate_directory(&directory, uid, gid, mode, relaxed)?;
+    let (directory, created) = open_or_create_directory_child(parent, name, mode)?;
+    if created {
+        normalize_created_graft_directory(&directory, parent, uid, gid, mode, policy)?;
+    } else {
+        validate_directory(
+            &directory,
+            uid,
+            gid,
+            mode,
+            policy == UserDirectoryPolicy::RelaxedBaseDirectories,
+        )?;
+    }
     Ok(directory)
 }
 
@@ -766,9 +807,15 @@ mod tests {
             let first = write_user_generation(&store, "generation-one", HOST_ONE);
             let uid = geteuid().as_raw();
             let gid = getegid().as_raw();
-            let mut publisher =
-                Publisher::new_user(&config_home, &state_home, uid, gid, producer(), false)
-                    .unwrap();
+            let mut publisher = Publisher::new_user(
+                &config_home,
+                &state_home,
+                uid,
+                gid,
+                producer(),
+                UserDirectoryPolicy::Strict,
+            )
+            .unwrap();
             publisher.paths.store_root = store;
             Self {
                 _temporary: temporary,
@@ -778,6 +825,46 @@ mod tests {
                 first,
             }
         }
+    }
+
+    #[test]
+    fn relaxed_publication_and_worker_policy_load_the_same_generation() {
+        let mut fixture = UserFixture::new();
+        fs::create_dir(fixture.config_home.join("graft")).unwrap();
+        fs::set_permissions(
+            fixture.config_home.join("graft"),
+            fs::Permissions::from_mode(0o755),
+        )
+        .unwrap();
+        fixture.publisher.user_directory_policy = UserDirectoryPolicy::RelaxedBaseDirectories;
+        fixture.publisher.loader = ManifestLoader::user_with_directory_policy(
+            &fixture.config_home,
+            fixture.publisher.uid,
+            fixture.publisher.gid,
+            producer(),
+            UserDirectoryPolicy::RelaxedBaseDirectories,
+        )
+        .unwrap();
+
+        fixture.publisher.publish(&fixture.first).unwrap();
+
+        let strict = ManifestLoader::user(
+            &fixture.config_home,
+            fixture.publisher.uid,
+            fixture.publisher.gid,
+            producer(),
+        )
+        .unwrap();
+        assert!(matches!(
+            strict.load_with_store_root(&fixture.publisher.paths.store_root),
+            Err(ManifestError::Permissions)
+        ));
+        let loaded = fixture
+            .publisher
+            .loader
+            .load_with_store_root(&fixture.publisher.paths.store_root)
+            .unwrap();
+        assert_eq!(loaded.generation_path(), fixture.first);
     }
 
     #[test]
@@ -833,6 +920,59 @@ mod tests {
             fixture.state_home.join("graft").metadata().unwrap().mode() & 0o7777,
             0o700
         );
+    }
+
+    #[test]
+    fn inherited_default_acls_are_removed_only_from_new_graft_directories() {
+        let fixture = UserFixture::new();
+        fs::create_dir(&fixture.state_home).unwrap();
+        let config_home = File::open(&fixture.config_home).unwrap();
+        let state_home = File::open(&fixture.state_home).unwrap();
+        if !set_default_acl(&config_home) || !set_default_acl(&state_home) {
+            return;
+        }
+        let config_acl = get_acl(&config_home, "system.posix_acl_default");
+        let state_acl = get_acl(&state_home, "system.posix_acl_default");
+
+        fixture.publisher.publish(&fixture.first).unwrap();
+
+        assert_eq!(
+            get_acl(
+                &File::open(&fixture.config_home).unwrap(),
+                "system.posix_acl_default"
+            ),
+            config_acl
+        );
+        assert_eq!(
+            get_acl(
+                &File::open(&fixture.state_home).unwrap(),
+                "system.posix_acl_default"
+            ),
+            state_acl
+        );
+        for directory in [
+            fixture.config_home.join("graft"),
+            fixture.state_home.join("graft"),
+        ] {
+            let directory = File::open(directory).unwrap();
+            assert_acl_absent(&directory, "system.posix_acl_access");
+            assert_acl_absent(&directory, "system.posix_acl_default");
+        }
+    }
+
+    #[test]
+    fn user_publisher_rejects_unsafe_access_acl_on_existing_state_home() {
+        let fixture = UserFixture::new();
+        fs::create_dir(&fixture.state_home).unwrap();
+        if !set_access_acl(&File::open(&fixture.state_home).unwrap()) {
+            return;
+        }
+
+        assert!(matches!(
+            fixture.publisher.publish(&fixture.first),
+            Err(PublicationError::UnsafeObject)
+        ));
+        assert!(!fixture.state_home.join("graft").exists());
     }
 
     #[test]
@@ -932,13 +1072,13 @@ mod tests {
     fn relaxed_user_publisher_warns_and_accepts_an_unsafe_state_home() {
         let mut fixture = UserFixture::new();
         let _ = take_relaxed_warnings();
-        fixture.publisher.relaxed_base_directories = true;
-        fixture.publisher.loader = ManifestLoader::user_for_publication(
+        fixture.publisher.user_directory_policy = UserDirectoryPolicy::RelaxedBaseDirectories;
+        fixture.publisher.loader = ManifestLoader::user_with_directory_policy(
             &fixture.config_home,
             fixture.publisher.uid,
             fixture.publisher.gid,
             producer(),
-            true,
+            UserDirectoryPolicy::RelaxedBaseDirectories,
         )
         .unwrap();
         fs::create_dir(&fixture.state_home).unwrap();
@@ -965,7 +1105,7 @@ mod tests {
             fixture.publisher.uid,
             fixture.publisher.gid,
             producer(),
-            true,
+            UserDirectoryPolicy::RelaxedBaseDirectories,
         )
         .unwrap();
         publisher.paths.store_root = fixture.publisher.paths.store_root.clone();
@@ -1341,6 +1481,66 @@ mod tests {
         )
         .unwrap();
         generation
+    }
+
+    fn default_acl() -> Vec<u8> {
+        acl(&[
+            (0x0001, 0o7, u32::MAX),
+            (0x0002, 0o7, 65_534),
+            (0x0004, 0o7, u32::MAX),
+            (0x0010, 0o7, u32::MAX),
+            (0x0020, 0, u32::MAX),
+        ])
+    }
+
+    fn access_acl() -> Vec<u8> {
+        default_acl()
+    }
+
+    fn acl(entries: &[(u16, u16, u32)]) -> Vec<u8> {
+        let mut bytes = 0x0002_u32.to_le_bytes().to_vec();
+        for (tag, permissions, identifier) in entries {
+            bytes.extend_from_slice(&tag.to_le_bytes());
+            bytes.extend_from_slice(&permissions.to_le_bytes());
+            bytes.extend_from_slice(&identifier.to_le_bytes());
+        }
+        bytes
+    }
+
+    fn set_default_acl(directory: &File) -> bool {
+        set_acl(directory, "system.posix_acl_default", &default_acl())
+    }
+
+    fn set_access_acl(directory: &File) -> bool {
+        set_acl(directory, "system.posix_acl_access", &access_acl())
+    }
+
+    fn set_acl(directory: &File, name: &str, acl: &[u8]) -> bool {
+        match rustix::fs::fsetxattr(directory, name, acl, rustix::fs::XattrFlags::empty()) {
+            Ok(()) => true,
+            Err(rustix::io::Errno::OPNOTSUPP) if std::env::var_os("NIX_BUILD_TOP").is_some() => {
+                eprintln!(
+                    "skipping real POSIX ACL regression: Nix build sandbox does not support ACL xattrs"
+                );
+                false
+            }
+            Err(error) => panic!("cannot create POSIX ACL fixture: {error}"),
+        }
+    }
+
+    fn get_acl(directory: &File, name: &str) -> Vec<u8> {
+        let mut acl = vec![0_u8; 64 * 1_024];
+        let length = rustix::fs::fgetxattr(directory, name, &mut acl).unwrap();
+        acl.truncate(length);
+        acl
+    }
+
+    fn assert_acl_absent(directory: &File, name: &str) {
+        let mut acl = [0_u8; 1];
+        assert_eq!(
+            rustix::fs::fgetxattr(directory, name, &mut acl),
+            Err(rustix::io::Errno::NODATA)
+        );
     }
 
     fn producer() -> ProducerIdentity {

@@ -141,7 +141,7 @@ in
             StartLimitBurst = 5;
           };
           Service = {
-            ExecStart = "${worker} --target user --effective-uid %U --manager user --config-home ${lib.escapeShellArg config.xdg.configHome} --producer-name graft --producer-version ${lib.escapeShellArg (lib.getVersion cfg.package)} --producer-build-id ${lib.escapeShellArg producerBuildId}";
+            ExecStart = "${worker} --target user --effective-uid %U --manager user --config-home ${lib.escapeShellArg config.xdg.configHome} --producer-name graft --producer-version ${lib.escapeShellArg (lib.getVersion cfg.package)} --producer-build-id ${lib.escapeShellArg producerBuildId}${lib.optionalString cfg.relaxedBaseDirectories " --relaxed-base-dirs"}";
             Restart = "on-failure";
             RestartSec = "2s";
             NoNewPrivileges = true;

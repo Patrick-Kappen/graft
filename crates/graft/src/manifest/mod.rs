@@ -8,7 +8,7 @@ mod schema;
 
 use thiserror::Error;
 
-pub use filesystem::{GenerationOwner, GenerationSnapshot, ManifestLoader};
+pub use filesystem::{GenerationOwner, GenerationSnapshot, ManifestLoader, UserDirectoryPolicy};
 pub use publication::{publish_system_generation, publish_user_generation, PublicationError};
 pub use render::{render, RenderInput, RenderedDocuments};
 pub use schema::{

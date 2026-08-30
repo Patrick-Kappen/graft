@@ -41,6 +41,15 @@ impl GenerationOwner {
     }
 }
 
+/// Parent-directory validation policy for user manifest publication and loading.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UserDirectoryPolicy {
+    /// Require the fixed Graft-owned directory mode and no POSIX ACLs.
+    Strict,
+    /// Warn about unsafe Graft-owned base-directory modes and POSIX ACLs.
+    RelaxedBaseDirectories,
+}
+
 /// One parsed manifest/endpoint pair retained with its opened generation.
 #[derive(Debug)]
 pub struct GenerationSnapshot {
@@ -112,7 +121,7 @@ pub struct ManifestLoader {
     parent: PathBuf,
     context: LoaderContext,
     installed_producer: ProducerIdentity,
-    relaxed_user_parent: bool,
+    user_directory_policy: UserDirectoryPolicy,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -141,7 +150,7 @@ impl ManifestLoader {
                 graft_gid,
             },
             installed_producer,
-            relaxed_user_parent: false,
+            user_directory_policy: UserDirectoryPolicy::Strict,
         }
     }
 
@@ -159,25 +168,34 @@ impl ManifestLoader {
         gid: u32,
         installed_producer: ProducerIdentity,
     ) -> Result<Self, ManifestError> {
+        Self::user_with_directory_policy(
+            config_home,
+            uid,
+            gid,
+            installed_producer,
+            UserDirectoryPolicy::Strict,
+        )
+    }
+
+    /// Creates a user loader with an explicit parent-directory policy.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for a relative or non-normalized config-home path.
+    pub fn user_with_directory_policy(
+        config_home: &Path,
+        uid: u32,
+        gid: u32,
+        installed_producer: ProducerIdentity,
+        user_directory_policy: UserDirectoryPolicy,
+    ) -> Result<Self, ManifestError> {
         validate_absolute_normal_path(config_home)?;
         Ok(Self {
             parent: config_home.join("graft"),
             context: LoaderContext::User { uid, gid },
             installed_producer,
-            relaxed_user_parent: false,
+            user_directory_policy,
         })
-    }
-
-    pub(super) fn user_for_publication(
-        config_home: &Path,
-        uid: u32,
-        gid: u32,
-        installed_producer: ProducerIdentity,
-        relaxed_user_parent: bool,
-    ) -> Result<Self, ManifestError> {
-        let mut loader = Self::user(config_home, uid, gid, installed_producer)?;
-        loader.relaxed_user_parent = relaxed_user_parent;
-        Ok(loader)
     }
 
     /// Opens and validates one coherent current generation.
@@ -205,7 +223,7 @@ impl ManifestLoader {
                 graft_gid,
             },
             installed_producer,
-            relaxed_user_parent: false,
+            user_directory_policy: UserDirectoryPolicy::Strict,
         }
     }
 
@@ -230,7 +248,7 @@ impl ManifestLoader {
     ) -> Result<GenerationSnapshot, ManifestError> {
         let parent_file = open_directory_path(&self.parent)?;
         self.validate_parent(&parent_file)?;
-        if self.relaxed_user_parent {
+        if self.user_directory_policy == UserDirectoryPolicy::RelaxedBaseDirectories {
             if let Err(error) = validate_no_acl(&parent_file) {
                 eprintln!(
                     "warning: accepting ACLs on Graft-owned user publication directory in relaxed base-directory mode: {error}"
@@ -353,7 +371,7 @@ impl ManifestLoader {
             LoaderContext::System { .. } => 0o750,
             LoaderContext::User { .. } => 0o700,
         };
-        if self.relaxed_user_parent {
+        if self.user_directory_policy == UserDirectoryPolicy::RelaxedBaseDirectories {
             if let Err(error) = validate_mode(&metadata, expected_mode) {
                 eprintln!(
                     "warning: accepting mode on Graft-owned user publication directory in relaxed base-directory mode: {error}"
