@@ -187,12 +187,16 @@ let
   );
 
   moduleTestOptions = { lib, ... }: {
-    options = {
-      assertions = lib.mkOption {
-        type = lib.types.listOf lib.types.anything;
-        default = [ ];
-      };
+    imports = [
+      {
+        options = removeAttrs (import ../../tests/nixos/lib/hm-test-options.nix { inherit lib; }).options [
+          "systemd"
+          "xdg"
+        ];
+      }
+    ];
 
+    options = {
       virtualisation.podman.enable = lib.mkOption {
         type = lib.types.bool;
         default = false;
@@ -351,11 +355,6 @@ let
             default = [ ];
           };
         };
-      };
-
-      home.activation = lib.mkOption {
-        type = lib.types.attrsOf lib.types.anything;
-        default = { };
       };
 
       xdg = {

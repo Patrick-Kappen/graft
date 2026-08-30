@@ -7,50 +7,10 @@ let
   enabledRoot = ../nix/runtime-activation/enabled;
   disabledRoot = ../nix/runtime-activation/disabled;
 
-  moduleTestOptions = { lib, ... }: {
-    options = {
-      assertions = lib.mkOption {
-        type = lib.types.listOf lib.types.anything;
-        default = [ ];
-      };
-
-      home.activation = lib.mkOption {
-        type = lib.types.attrsOf lib.types.anything;
-        default = { };
-      };
-
-      systemd = {
-        user = {
-          services = lib.mkOption {
-            type = lib.types.attrsOf lib.types.anything;
-            default = { };
-          };
-          sockets = lib.mkOption {
-            type = lib.types.attrsOf lib.types.anything;
-            default = { };
-          };
-          tmpfiles.rules = lib.mkOption {
-            type = lib.types.listOf lib.types.str;
-            default = [ ];
-          };
-        };
-      };
-
-      xdg.configFile = lib.mkOption {
-        type = lib.types.attrsOf (
-          lib.types.submodule {
-            options.source = lib.mkOption { type = lib.types.path; };
-          }
-        );
-        default = { };
-      };
-    };
-  };
-
   enabledUserEval = lib.evalModules {
     specialArgs = { inherit pkgs; };
     modules = [
-      moduleTestOptions
+      ./lib/hm-test-options.nix
       ../../modules/home-manager.nix
       {
         programs.graft = {
@@ -66,7 +26,7 @@ let
   disabledUserEval = lib.evalModules {
     specialArgs = { inherit pkgs; };
     modules = [
-      moduleTestOptions
+      ./lib/hm-test-options.nix
       ../../modules/home-manager.nix
       {
         programs.graft = {

@@ -5,49 +5,10 @@ let
   unrelatedStorePath = pkgs.writeText "graft-closure-unrelated" "must-not-be-visible\n";
   configRoot = ../nix/runtime-closure;
 
-  moduleTestOptions = { lib, ... }: {
-    options = {
-      assertions = lib.mkOption {
-        type = lib.types.listOf lib.types.anything;
-        default = [ ];
-      };
-      home.activation = lib.mkOption {
-        type = lib.types.attrsOf lib.types.anything;
-        default = { };
-      };
-
-      systemd = {
-        user = {
-          services = lib.mkOption {
-            type = lib.types.attrsOf lib.types.anything;
-            default = { };
-          };
-          sockets = lib.mkOption {
-            type = lib.types.attrsOf lib.types.anything;
-            default = { };
-          };
-          tmpfiles.rules = lib.mkOption {
-            type = lib.types.listOf lib.types.str;
-            default = [ ];
-          };
-        };
-      };
-
-      xdg.configFile = lib.mkOption {
-        type = lib.types.attrsOf (
-          lib.types.submodule {
-            options.source = lib.mkOption { type = lib.types.path; };
-          }
-        );
-        default = { };
-      };
-    };
-  };
-
   userEval = lib.evalModules {
     specialArgs = { inherit pkgs; };
     modules = [
-      moduleTestOptions
+      ./lib/hm-test-options.nix
       ../../modules/home-manager.nix
       {
         programs.graft = {
