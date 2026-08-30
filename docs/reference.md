@@ -446,10 +446,15 @@ activation. Publication does not install or start a worker.
 | `programs.graft.package` | package or null | `null` | Package providing `graft` and `graft-pause`; the exported flake module supplies a default. |
 | `programs.graft.configRoot` | path or null | `null` | First directory containing `*.toml` workloads. |
 | `programs.graft.configRoots` | list of paths | `[]` | Additional workload directories, read in list order. |
+| `programs.graft.relaxedBaseDirectories` | bool | `false` | Permit user manifest publication on filesystems without honest POSIX permissions by warning instead of rejecting unsafe base-directory modes and ACLs; ownership remains mandatory. |
 
 The module renders only effective `target = "user"` workloads under
 `~/.config/containers/systemd/`. Podman is rootless only when Home Manager runs
-for a non-root account; the module does not reject UID 0.
+for a non-root account; the module does not reject UID 0. Set
+`relaxedBaseDirectories = true` only for SMB/CIFS, vfat/exFAT, or another
+filesystem that cannot report POSIX modes or ACLs reliably. It weakens user
+publication directory checks to warnings (while retaining ownership checks), so
+it trades local directory integrity guarantees for NAS compatibility.
 
 Both modules read `configRoot` first and then `configRoots` in order. Every
 configured root must exist. New files must be tracked before Git flakes can see

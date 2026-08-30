@@ -4,7 +4,7 @@ use std::{
     fs::File,
     io,
     os::unix::fs::MetadataExt as _,
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
     thread,
     time::{Duration, Instant},
 };
@@ -17,7 +17,8 @@ use thiserror::Error;
 
 use super::{
     filesystem::{
-        open_directory_child, open_directory_path, validate_absolute_normal_path, validate_no_acl,
+        open_directory_child, open_directory_path, open_nofollow, validate_absolute_normal_path,
+        validate_base_directory_acl, validate_no_acl,
     },
     ManifestError, ManifestLoader, ProducerIdentity,
 };
@@ -30,6 +31,26 @@ const CURRENT: &str = "current";
 const ACTIVATION_LOCK: &str = "activation.lock";
 const LOCK_TIMEOUT: Duration = Duration::from_secs(30);
 const LOCK_RETRY: Duration = Duration::from_millis(25);
+const RELAXED_BASE_DIRECTORY_WARNING: &str =
+    "warning: accepting unsafe user base-directory permissions or access ACL in relaxed base-directory mode";
+const RELAXED_GRAFT_DIRECTORY_WARNING: &str =
+    "warning: accepting Graft-owned user publication directory mode or ACL in relaxed base-directory mode";
+
+#[cfg(test)]
+thread_local! {
+    static RELAXED_WARNINGS: std::cell::RefCell<Vec<&'static str>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+fn warn_relaxed(message: &'static str) {
+    eprintln!("{message}");
+    #[cfg(test)]
+    RELAXED_WARNINGS.with(|warnings| warnings.borrow_mut().push(message));
+}
+
+#[cfg(test)]
+fn take_relaxed_warnings() -> Vec<&'static str> {
+    RELAXED_WARNINGS.with(|warnings| std::mem::take(&mut *warnings.borrow_mut()))
+}
 
 /// Publishes one immutable user generation through `$XDG_CONFIG_HOME/graft/current`.
 ///
@@ -46,10 +67,19 @@ pub fn publish_user_generation(
     state_home: &Path,
     generation: &Path,
     installed_producer: ProducerIdentity,
+    relaxed_base_directories: bool,
 ) -> Result<(), PublicationError> {
     let uid = geteuid().as_raw();
     let gid = getegid().as_raw();
-    Publisher::new_user(config_home, state_home, uid, gid, installed_producer)?.publish(generation)
+    Publisher::new_user(
+        config_home,
+        state_home,
+        uid,
+        gid,
+        installed_producer,
+        relaxed_base_directories,
+    )?
+    .publish(generation)
 }
 
 /// Publishes one validated immutable generation through `/etc/graft/current`.
@@ -139,6 +169,7 @@ struct Publisher {
     loader: ManifestLoader,
     lock_timeout: Duration,
     user: bool,
+    relaxed_base_directories: bool,
 }
 
 impl Publisher {
@@ -183,6 +214,7 @@ impl Publisher {
             loader,
             lock_timeout,
             user: false,
+            relaxed_base_directories: false,
         })
     }
 
@@ -192,6 +224,7 @@ impl Publisher {
         uid: u32,
         gid: u32,
         installed_producer: ProducerIdentity,
+        relaxed_base_directories: bool,
     ) -> Result<Self, PublicationError> {
         let parent = config_home.join("graft");
         let runtime = state_home.join("graft");
@@ -212,8 +245,14 @@ impl Publisher {
         if uid == u32::MAX || gid == u32::MAX {
             return Err(PublicationError::UnsafePath);
         }
-        let loader = ManifestLoader::user(config_home, uid, gid, installed_producer)
-            .map_err(PublicationError::Manifest)?;
+        let loader = ManifestLoader::user_for_publication(
+            config_home,
+            uid,
+            gid,
+            installed_producer,
+            relaxed_base_directories,
+        )
+        .map_err(PublicationError::Manifest)?;
         Ok(Self {
             paths,
             uid,
@@ -222,6 +261,7 @@ impl Publisher {
             loader,
             lock_timeout: LOCK_TIMEOUT,
             user: true,
+            relaxed_base_directories,
         })
     }
 
@@ -238,35 +278,63 @@ impl Publisher {
         F: FnOnce() -> Result<(), PublicationError>,
     {
         validate_absolute_normal_path(generation).map_err(PublicationError::Manifest)?;
-        let parent = ensure_owned_directory(
-            &self.paths.parent,
-            self.uid,
-            if self.user { self.gid } else { self.graft_gid },
-            if self.user { 0o700 } else { 0o750 },
-        )?;
-        let runtime = if self.user {
-            let runtime_root = create_owned_directory_if_missing(
+        let (parent, runtime) = if self.user {
+            let config_home = self
+                .paths
+                .parent
+                .parent()
+                .ok_or(PublicationError::UnsafePath)?;
+            let config_home = ensure_user_base_directory(
+                config_home,
+                self.uid,
+                self.gid,
+                self.relaxed_base_directories,
+            )?;
+            let parent = ensure_graft_directory_child(
+                &config_home,
+                self.paths
+                    .parent
+                    .file_name()
+                    .ok_or(PublicationError::UnsafePath)?,
+                self.uid,
+                self.gid,
+                0o700,
+                self.relaxed_base_directories,
+            )?;
+            let runtime_root = ensure_user_base_directory(
                 &self.paths.runtime_root,
                 self.uid,
                 self.gid,
-                0o700,
+                self.relaxed_base_directories,
             )?;
-            let runtime_name = self
-                .paths
-                .runtime
-                .file_name()
-                .ok_or(PublicationError::UnsafePath)?;
-            ensure_owned_directory_child(
+            let runtime = ensure_graft_directory_child(
                 &runtime_root,
-                runtime_name,
+                self.paths
+                    .runtime
+                    .file_name()
+                    .ok_or(PublicationError::UnsafePath)?,
                 self.uid,
                 self.gid,
                 0o700,
-                ExistingDirectoryPolicy::Exact,
-            )?
+                self.relaxed_base_directories,
+            )?;
+            (parent, runtime)
         } else {
-            ensure_owned_directory(&self.paths.runtime_root, self.uid, self.gid, 0o755)?;
-            ensure_owned_directory(&self.paths.runtime, self.uid, self.graft_gid, 0o750)?
+            let parent =
+                ensure_strict_owned_directory(&self.paths.parent, self.uid, self.graft_gid, 0o750)?;
+            let runtime_root =
+                ensure_strict_owned_directory(&self.paths.runtime_root, self.uid, self.gid, 0o755)?;
+            let runtime = ensure_strict_owned_directory_child(
+                &runtime_root,
+                self.paths
+                    .runtime
+                    .file_name()
+                    .ok_or(PublicationError::UnsafePath)?,
+                self.uid,
+                self.graft_gid,
+                0o750,
+            )?;
+            (parent, runtime)
         };
         let lock = open_activation_lock(&runtime, self.uid, self.gid)?;
         acquire_exclusive(&lock, self.lock_timeout)?;
@@ -335,42 +403,24 @@ impl Publisher {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-enum ParentPolicy {
-    RequireExisting,
-    CreateMissing,
-}
-
-#[derive(Debug, Clone, Copy)]
-enum ExistingDirectoryPolicy {
-    Exact,
-    Base,
-}
-
 fn open_or_create_directory_child(
     parent: &File,
     name: &std::ffi::OsStr,
     uid: u32,
     gid: u32,
     mode: u32,
-) -> Result<File, PublicationError> {
-    match open_directory_child(parent, name) {
-        Ok(directory) => Ok(directory),
-        Err(ManifestError::Filesystem(error)) if error.kind() == io::ErrorKind::NotFound => {
-            match rustix::fs::mkdirat(parent, name, Mode::from_raw_mode(mode)) {
-                Ok(()) => {
-                    let directory =
-                        open_directory_child(parent, name).map_err(PublicationError::Manifest)?;
-                    initialize_created_directory(&directory, parent, uid, gid, mode)?;
-                    Ok(directory)
-                }
-                Err(rustix::io::Errno::EXIST) => {
-                    open_directory_child(parent, name).map_err(PublicationError::Manifest)
-                }
-                Err(error) => Err(errno_to_publication(error)),
-            }
+) -> Result<(File, bool), PublicationError> {
+    match rustix::fs::mkdirat(parent, name, Mode::from_raw_mode(mode)) {
+        Ok(()) => {
+            let directory =
+                open_directory_child(parent, name).map_err(PublicationError::Manifest)?;
+            initialize_created_directory(&directory, parent, uid, gid, mode)?;
+            Ok((directory, true))
         }
-        Err(error) => Err(PublicationError::Manifest(error)),
+        Err(error) if error == rustix::io::Errno::EXIST => open_directory_child(parent, name)
+            .map(|directory| (directory, false))
+            .map_err(PublicationError::Manifest),
+        Err(error) => Err(errno_to_publication(error)),
     }
 }
 
@@ -391,110 +441,95 @@ fn initialize_created_directory(
     rustix::fs::fsync(parent).map_err(errno_to_publication)
 }
 
-fn create_owned_directory_if_missing(
+fn ensure_user_base_directory(
     path: &Path,
     uid: u32,
     gid: u32,
-    mode: u32,
-) -> Result<File, PublicationError> {
-    ensure_owned_directory_with(
-        path,
-        uid,
-        gid,
-        mode,
-        ParentPolicy::CreateMissing,
-        ExistingDirectoryPolicy::Base,
-    )
-}
-
-fn ensure_owned_directory(
-    path: &Path,
-    uid: u32,
-    gid: u32,
-    mode: u32,
-) -> Result<File, PublicationError> {
-    ensure_owned_directory_with(
-        path,
-        uid,
-        gid,
-        mode,
-        ParentPolicy::RequireExisting,
-        ExistingDirectoryPolicy::Exact,
-    )
-}
-
-fn ensure_owned_directory_with(
-    path: &Path,
-    uid: u32,
-    gid: u32,
-    mode: u32,
-    parent_policy: ParentPolicy,
-    existing_policy: ExistingDirectoryPolicy,
+    relaxed: bool,
 ) -> Result<File, PublicationError> {
     validate_absolute_normal_path(path).map_err(|_| PublicationError::UnsafePath)?;
-    let parent_path = path.parent().ok_or(PublicationError::UnsafePath)?;
-    let name = path.file_name().ok_or(PublicationError::UnsafePath)?;
-    let parent = match parent_policy {
-        ParentPolicy::RequireExisting => {
-            open_directory_path(parent_path).map_err(PublicationError::Manifest)?
-        }
-        ParentPolicy::CreateMissing => open_or_create_directory_path(parent_path, uid, gid, mode)?,
-    };
-    ensure_owned_directory_child(&parent, name, uid, gid, mode, existing_policy)
-}
-
-fn open_or_create_directory_path(
-    path: &Path,
-    uid: u32,
-    gid: u32,
-    mode: u32,
-) -> Result<File, PublicationError> {
-    let descriptor = rustix::fs::openat(
-        rustix::fs::ABS,
-        "/",
-        OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW | OFlags::DIRECTORY,
-        Mode::empty(),
-    )
-    .map_err(errno_to_publication)?;
-    let mut directory = File::from(descriptor);
+    let mut directory = open_nofollow(Path::new("/"), true).map_err(PublicationError::Manifest)?;
+    let mut user_path = false;
     for component in path.components() {
-        if let std::path::Component::Normal(name) = component {
-            directory = open_or_create_directory_child(&directory, name, uid, gid, mode)?;
+        if let Component::Normal(name) = component {
+            let (child, created) =
+                open_or_create_directory_child(&directory, name, uid, gid, 0o700)?;
+            let metadata = child.metadata().map_err(PublicationError::Filesystem)?;
+            user_path |= created || metadata.uid() == uid;
+            if user_path {
+                validate_base_directory(&child, uid, gid, relaxed)?;
+            }
+            directory = child;
         }
     }
+    validate_base_directory(&directory, uid, gid, relaxed)?;
     Ok(directory)
 }
 
-fn ensure_owned_directory_child(
+fn ensure_strict_owned_directory(
+    path: &Path,
+    uid: u32,
+    gid: u32,
+    mode: u32,
+) -> Result<File, PublicationError> {
+    validate_absolute_normal_path(path).map_err(|_| PublicationError::UnsafePath)?;
+    let parent = open_directory_path(path.parent().ok_or(PublicationError::UnsafePath)?)
+        .map_err(PublicationError::Manifest)?;
+    ensure_strict_owned_directory_child(
+        &parent,
+        path.file_name().ok_or(PublicationError::UnsafePath)?,
+        uid,
+        gid,
+        mode,
+    )
+}
+
+fn ensure_strict_owned_directory_child(
     parent: &File,
     name: &std::ffi::OsStr,
     uid: u32,
     gid: u32,
     mode: u32,
-    existing_policy: ExistingDirectoryPolicy,
 ) -> Result<File, PublicationError> {
-    let created = match rustix::fs::mkdirat(parent, name, Mode::from_raw_mode(mode)) {
-        Ok(()) => true,
-        Err(error) if error == rustix::io::Errno::EXIST => false,
-        Err(error) => return Err(errno_to_publication(error)),
-    };
-    let directory = open_directory_child(parent, name).map_err(PublicationError::Manifest)?;
-    if created {
-        initialize_created_directory(&directory, parent, uid, gid, mode)?;
-    }
-    match existing_policy {
-        ExistingDirectoryPolicy::Exact => validate_directory(&directory, uid, gid, mode)?,
-        ExistingDirectoryPolicy::Base => validate_base_directory(&directory, uid)?,
-    }
+    let (directory, _) = open_or_create_directory_child(parent, name, uid, gid, mode)?;
+    validate_directory(&directory, uid, gid, mode, false)?;
     Ok(directory)
 }
 
-fn validate_base_directory(directory: &File, uid: u32) -> Result<(), PublicationError> {
+fn ensure_graft_directory_child(
+    parent: &File,
+    name: &std::ffi::OsStr,
+    uid: u32,
+    gid: u32,
+    mode: u32,
+    relaxed: bool,
+) -> Result<File, PublicationError> {
+    let (directory, _) = open_or_create_directory_child(parent, name, uid, gid, mode)?;
+    validate_directory(&directory, uid, gid, mode, relaxed)?;
+    Ok(directory)
+}
+
+fn validate_base_directory(
+    directory: &File,
+    uid: u32,
+    gid: u32,
+    relaxed: bool,
+) -> Result<(), PublicationError> {
     let metadata = directory.metadata().map_err(PublicationError::Filesystem)?;
-    if (metadata.uid() != uid && metadata.uid() != 0) || metadata.mode() & 0o0002 != 0 {
+    if !metadata.is_dir() || (metadata.uid() != uid && metadata.uid() != 0) {
         return Err(PublicationError::UnsafeObject);
     }
-    validate_no_acl(directory).map_err(PublicationError::Manifest)
+    let unsafe_mode =
+        metadata.mode() & 0o0002 != 0 || (metadata.mode() & 0o0020 != 0 && metadata.gid() != gid);
+    let unsafe_acl = validate_base_directory_acl(directory, uid).is_err();
+    if unsafe_mode || unsafe_acl {
+        if relaxed {
+            warn_relaxed(RELAXED_BASE_DIRECTORY_WARNING);
+        } else {
+            return Err(PublicationError::UnsafeObject);
+        }
+    }
+    Ok(())
 }
 
 fn validate_directory(
@@ -502,15 +537,21 @@ fn validate_directory(
     uid: u32,
     gid: u32,
     mode: u32,
+    relaxed: bool,
 ) -> Result<(), PublicationError> {
     let metadata = directory.metadata().map_err(PublicationError::Filesystem)?;
-    if !metadata.is_dir()
-        || (metadata.uid(), metadata.gid()) != (uid, gid)
-        || metadata.mode() & 0o7777 != mode
-    {
+    if !metadata.is_dir() || (metadata.uid(), metadata.gid()) != (uid, gid) {
         return Err(PublicationError::UnsafeObject);
     }
-    validate_no_acl(directory).map_err(PublicationError::Manifest)
+    let strict_error = metadata.mode() & 0o7777 != mode || validate_no_acl(directory).is_err();
+    if strict_error {
+        if relaxed {
+            warn_relaxed(RELAXED_GRAFT_DIRECTORY_WARNING);
+        } else {
+            return Err(PublicationError::UnsafeObject);
+        }
+    }
+    Ok(())
 }
 
 fn open_activation_lock(runtime: &File, uid: u32, gid: u32) -> Result<File, PublicationError> {
@@ -726,7 +767,8 @@ mod tests {
             let uid = geteuid().as_raw();
             let gid = getegid().as_raw();
             let mut publisher =
-                Publisher::new_user(&config_home, &state_home, uid, gid, producer()).unwrap();
+                Publisher::new_user(&config_home, &state_home, uid, gid, producer(), false)
+                    .unwrap();
             publisher.paths.store_root = store;
             Self {
                 _temporary: temporary,
@@ -736,6 +778,23 @@ mod tests {
                 first,
             }
         }
+    }
+
+    #[test]
+    fn user_publisher_creates_missing_config_home_before_publication_directory() {
+        let fixture = UserFixture::new();
+        fs::remove_dir(&fixture.config_home).unwrap();
+
+        fixture.publisher.publish(&fixture.first).unwrap();
+
+        assert_eq!(
+            fixture.config_home.metadata().unwrap().mode() & 0o7777,
+            0o700
+        );
+        assert_eq!(
+            fs::read_link(fixture.config_home.join("graft/current")).unwrap(),
+            fixture.first
+        );
     }
 
     #[test]
@@ -796,15 +855,64 @@ mod tests {
         };
 
         assert!(matches!(
-            create_owned_directory_if_missing(
+            ensure_user_base_directory(
                 &fixture.state_home,
                 foreign_uid,
                 fixture.publisher.gid,
-                0o700,
+                false,
             ),
             Err(PublicationError::UnsafeObject)
         ));
         assert!(!fixture.state_home.join("graft").exists());
+    }
+
+    #[test]
+    fn user_base_directory_allows_group_write_for_the_effective_group() {
+        let fixture = UserFixture::new();
+        fs::create_dir(&fixture.state_home).unwrap();
+        fs::set_permissions(&fixture.state_home, fs::Permissions::from_mode(0o720)).unwrap();
+
+        validate_base_directory(
+            &File::open(&fixture.state_home).unwrap(),
+            fixture.publisher.uid,
+            fixture.publisher.gid,
+            false,
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn user_base_directory_rejects_group_write_for_a_foreign_group() {
+        let fixture = UserFixture::new();
+        fs::create_dir(&fixture.state_home).unwrap();
+        fs::set_permissions(&fixture.state_home, fs::Permissions::from_mode(0o720)).unwrap();
+
+        assert!(matches!(
+            validate_base_directory(
+                &File::open(&fixture.state_home).unwrap(),
+                fixture.publisher.uid,
+                fixture.publisher.gid.saturating_add(1),
+                false,
+            ),
+            Err(PublicationError::UnsafeObject)
+        ));
+    }
+
+    #[test]
+    fn relaxed_user_base_directory_still_rejects_foreign_owner() {
+        let fixture = UserFixture::new();
+        fs::create_dir(&fixture.state_home).unwrap();
+
+        let foreign_uid = u32::from(fixture.publisher.uid == 0);
+        assert!(matches!(
+            validate_base_directory(
+                &File::open(&fixture.state_home).unwrap(),
+                foreign_uid,
+                fixture.publisher.gid,
+                true,
+            ),
+            Err(PublicationError::UnsafeObject)
+        ));
     }
 
     #[test]
@@ -818,6 +926,59 @@ mod tests {
             Err(PublicationError::UnsafeObject)
         ));
         assert!(!fixture.state_home.join("graft").exists());
+    }
+
+    #[test]
+    fn relaxed_user_publisher_warns_and_accepts_an_unsafe_state_home() {
+        let mut fixture = UserFixture::new();
+        let _ = take_relaxed_warnings();
+        fixture.publisher.relaxed_base_directories = true;
+        fixture.publisher.loader = ManifestLoader::user_for_publication(
+            &fixture.config_home,
+            fixture.publisher.uid,
+            fixture.publisher.gid,
+            producer(),
+            true,
+        )
+        .unwrap();
+        fs::create_dir(&fixture.state_home).unwrap();
+        fs::set_permissions(&fixture.state_home, fs::Permissions::from_mode(0o702)).unwrap();
+
+        fixture.publisher.publish(&fixture.first).unwrap();
+
+        assert!(fixture.state_home.join("graft").is_dir());
+        assert!(take_relaxed_warnings().contains(&RELAXED_BASE_DIRECTORY_WARNING));
+    }
+
+    #[test]
+    fn relaxed_user_publisher_warns_and_accepts_an_unsafe_graft_directory() {
+        let mut fixture = UserFixture::new();
+        fixture.publisher.publish(&fixture.first).unwrap();
+        fs::set_permissions(
+            fixture.config_home.join("graft"),
+            fs::Permissions::from_mode(0o755),
+        )
+        .unwrap();
+        let mut publisher = Publisher::new_user(
+            &fixture.config_home,
+            &fixture.state_home,
+            fixture.publisher.uid,
+            fixture.publisher.gid,
+            producer(),
+            true,
+        )
+        .unwrap();
+        publisher.paths.store_root = fixture.publisher.paths.store_root.clone();
+        fixture.publisher = publisher;
+        let _ = take_relaxed_warnings();
+
+        fixture.publisher.publish(&fixture.first).unwrap();
+
+        assert_eq!(
+            fs::read_link(fixture.config_home.join("graft/current")).unwrap(),
+            fixture.first
+        );
+        assert!(take_relaxed_warnings().contains(&RELAXED_GRAFT_DIRECTORY_WARNING));
     }
 
     #[test]
@@ -852,6 +1013,23 @@ mod tests {
     }
 
     #[test]
+    fn user_publisher_rejects_unsafe_existing_intermediate_state_directory() {
+        let mut fixture = UserFixture::new();
+        let intermediate = fixture.config_home.join("state-parent");
+        fs::create_dir(&intermediate).unwrap();
+        fs::set_permissions(&intermediate, fs::Permissions::from_mode(0o702)).unwrap();
+        fixture.state_home = intermediate.join("state");
+        fixture.publisher.paths.runtime_root = fixture.state_home.clone();
+        fixture.publisher.paths.runtime = fixture.state_home.join("graft");
+
+        assert!(matches!(
+            fixture.publisher.publish(&fixture.first),
+            Err(PublicationError::UnsafeObject)
+        ));
+        assert!(!fixture.state_home.exists());
+    }
+
+    #[test]
     fn system_publisher_rejects_missing_runtime_parent_without_creating_it() {
         let mut fixture = Fixture::new();
         let runtime_root = fixture.temporary.path().join("run/missing/graft");
@@ -867,6 +1045,22 @@ mod tests {
         ));
         assert!(!runtime_root.parent().unwrap().exists());
         assert!(!runtime_root.exists());
+    }
+
+    #[test]
+    fn system_publisher_keeps_strict_runtime_directory_validation() {
+        let fixture = Fixture::new();
+        fs::create_dir_all(&fixture.publisher.paths.runtime_root).unwrap();
+        fs::set_permissions(
+            &fixture.publisher.paths.runtime_root,
+            fs::Permissions::from_mode(0o777),
+        )
+        .unwrap();
+
+        assert!(matches!(
+            fixture.publisher.publish(&fixture.first),
+            Err(PublicationError::UnsafeObject)
+        ));
     }
 
     #[test]
@@ -1032,7 +1226,7 @@ mod tests {
     #[test]
     fn malformed_existing_pointer_is_not_overwritten() {
         let fixture = Fixture::new();
-        ensure_owned_directory(
+        ensure_strict_owned_directory(
             &fixture.parent,
             geteuid().as_raw(),
             getegid().as_raw(),

@@ -29,6 +29,9 @@ struct Arguments {
     /// Installed producer source/build identity.
     #[arg(long)]
     producer_build_id: String,
+    /// Warn instead of rejecting permission and ACL checks on user base directories.
+    #[arg(long)]
+    relaxed_base_dirs: bool,
 }
 
 fn main() -> Result<()> {
@@ -44,6 +47,7 @@ fn main() -> Result<()> {
         &arguments.state_home,
         &arguments.generation,
         producer,
+        arguments.relaxed_base_dirs,
     )
     .context("cannot publish user manifest generation")
 }
