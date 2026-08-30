@@ -2,9 +2,18 @@
   description = "Graft — NixOS Podman Quadlet containers from TOML";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
+  inputs.home-manager = {
+    url = "github:nix-community/home-manager/release-26.05";
+    inputs.nixpkgs.follows = "nixpkgs";
+  };
 
   outputs =
-    { self, nixpkgs, ... }:
+    {
+      self,
+      nixpkgs,
+      home-manager,
+      ...
+    }:
     let
       systems = [
         "x86_64-linux"
@@ -110,6 +119,7 @@
       checks = forAllSystems (
         system:
         import ./nix/checks {
+          homeManager = home-manager;
           inherit
             self
             system
