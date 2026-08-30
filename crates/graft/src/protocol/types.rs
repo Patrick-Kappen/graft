@@ -7,12 +7,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use thiserror::Error;
 use uuid::{Uuid, Variant};
 
-/// Protocol major version implemented by this package.
-pub const PROTOCOL_MAJOR: u16 = 1;
-/// Lowest contiguous protocol minor version implemented by this package.
-pub const PROTOCOL_MIN_MINOR: u16 = 0;
-/// Highest contiguous protocol minor version implemented by this package.
-pub const PROTOCOL_MAX_MINOR: u16 = 0;
+include!(concat!(env!("OUT_DIR"), "/worker_api_range.rs"));
 /// Largest integer that is interoperable in a JSON number.
 pub const MAX_JSON_INTEGER: u64 = 9_007_199_254_740_991;
 /// Maximum diagnostic software-version length in bytes.
