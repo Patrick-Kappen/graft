@@ -20,6 +20,20 @@ fn system_publisher_exposes_only_generation_and_fixed_context_metadata() {
 }
 
 #[test]
+fn user_publisher_exposes_only_the_relaxed_base_directory_escape_hatch() {
+    let output = Command::new(env!("CARGO_BIN_EXE_graft-manifest-publish-user"))
+        .arg("--help")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("--relaxed-base-dirs"));
+    assert!(!stdout.contains("--parent"));
+    assert!(!stdout.contains("--runtime"));
+}
+
+#[test]
 fn system_publisher_rejects_invalid_producer_before_publication() {
     let output = Command::new(env!("CARGO_BIN_EXE_graft-manifest-publish-system"))
         .args([

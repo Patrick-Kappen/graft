@@ -287,6 +287,7 @@ let
       osConfig ? null,
       moduleArgsOsConfig ? null,
       hostId ? null,
+      relaxedBaseDirectories ? false,
     }:
     lib.evalModules {
       specialArgs = {
@@ -305,11 +306,16 @@ let
             configRoot = ../../tests/nix/containers;
             configRoots = [ ../../tests/nix/containers-extra ];
           }
-          // lib.optionalAttrs (hostId != null) { inherit hostId; };
+          // lib.optionalAttrs (hostId != null) { inherit hostId; }
+          // lib.optionalAttrs relaxedBaseDirectories { inherit relaxedBaseDirectories; };
         }
       ];
     };
   homeManagerEval = evalHomeManager { };
+  homeManagerRelaxedEval = evalHomeManager {
+    hostId = manifestHostId;
+    relaxedBaseDirectories = true;
+  };
   realHomeManagerEval = homeManager.lib.homeManagerConfiguration {
     inherit pkgs;
     modules = [
@@ -1142,6 +1148,11 @@ in
 
   home-manager-module-eval =
     assert homeManagerEval.config.programs.graft.hostId == null;
+    assert !homeManagerEval.config.programs.graft.relaxedBaseDirectories;
+    assert homeManagerRelaxedEval.config.programs.graft.relaxedBaseDirectories;
+    assert lib.hasInfix "--relaxed-base-dirs" (
+      builtins.unsafeDiscardStringContext homeManagerRelaxedEval.config.home.activation.graftManifestPublication
+    );
     assert homeManagerHostIdInherited == manifestHostId;
     assert homeManagerModuleArgsHostIdInherited == manifestHostId;
     assert homeManagerHostIdMismatchRejected;

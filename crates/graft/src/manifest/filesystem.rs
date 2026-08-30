@@ -112,6 +112,7 @@ pub struct ManifestLoader {
     parent: PathBuf,
     context: LoaderContext,
     installed_producer: ProducerIdentity,
+    relaxed_user_parent: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -140,6 +141,7 @@ impl ManifestLoader {
                 graft_gid,
             },
             installed_producer,
+            relaxed_user_parent: false,
         }
     }
 
@@ -162,7 +164,20 @@ impl ManifestLoader {
             parent: config_home.join("graft"),
             context: LoaderContext::User { uid, gid },
             installed_producer,
+            relaxed_user_parent: false,
         })
+    }
+
+    pub(super) fn user_for_publication(
+        config_home: &Path,
+        uid: u32,
+        gid: u32,
+        installed_producer: ProducerIdentity,
+        relaxed_user_parent: bool,
+    ) -> Result<Self, ManifestError> {
+        let mut loader = Self::user(config_home, uid, gid, installed_producer)?;
+        loader.relaxed_user_parent = relaxed_user_parent;
+        Ok(loader)
     }
 
     /// Opens and validates one coherent current generation.
@@ -190,6 +205,7 @@ impl ManifestLoader {
                 graft_gid,
             },
             installed_producer,
+            relaxed_user_parent: false,
         }
     }
 
@@ -214,7 +230,15 @@ impl ManifestLoader {
     ) -> Result<GenerationSnapshot, ManifestError> {
         let parent_file = open_directory_path(&self.parent)?;
         self.validate_parent(&parent_file)?;
-        validate_no_acl(&parent_file)?;
+        if self.relaxed_user_parent {
+            if let Err(error) = validate_no_acl(&parent_file) {
+                eprintln!(
+                    "warning: accepting ACLs on Graft-owned user publication directory in relaxed base-directory mode: {error}"
+                );
+            }
+        } else {
+            validate_no_acl(&parent_file)?;
+        }
         let pointer = rustix::fs::statat(
             &parent_file,
             "current",
@@ -329,7 +353,16 @@ impl ManifestLoader {
             LoaderContext::System { .. } => 0o750,
             LoaderContext::User { .. } => 0o700,
         };
-        validate_mode(&metadata, expected_mode)
+        if self.relaxed_user_parent {
+            if let Err(error) = validate_mode(&metadata, expected_mode) {
+                eprintln!(
+                    "warning: accepting mode on Graft-owned user publication directory in relaxed base-directory mode: {error}"
+                );
+            }
+            Ok(())
+        } else {
+            validate_mode(&metadata, expected_mode)
+        }
     }
 
     fn validate_generation_owner(
@@ -479,7 +512,7 @@ pub(super) fn open_directory_child(
     Ok(File::from(descriptor))
 }
 
-fn open_nofollow(path: &Path, directory: bool) -> Result<File, ManifestError> {
+pub(super) fn open_nofollow(path: &Path, directory: bool) -> Result<File, ManifestError> {
     let mut options = OpenOptions::new();
     options
         .read(true)
@@ -539,15 +572,37 @@ fn validate_mode(metadata: &Metadata, expected: u32) -> Result<(), ManifestError
 }
 
 pub(super) fn validate_no_acl(file: &File) -> Result<(), ManifestError> {
+    let attributes = list_attributes(file)?;
+    if contains_posix_acl(&attributes) {
+        return Err(ManifestError::Permissions);
+    }
+    Ok(())
+}
+
+pub(super) fn validate_base_directory_acl(file: &File, uid: u32) -> Result<(), ManifestError> {
+    let attributes = list_attributes(file)?;
+    if !contains_access_acl(&attributes) {
+        return Ok(());
+    }
+    let mut acl = vec![0_u8; 64 * 1_024];
+    let length =
+        rustix::fs::fgetxattr(file, "system.posix_acl_access", &mut acl).map_err(|error| {
+            ManifestError::Filesystem(io::Error::from_raw_os_error(error.raw_os_error()))
+        })?;
+    acl.truncate(length);
+    if access_acl_grants_foreign_write(&acl, uid) {
+        return Err(ManifestError::Permissions);
+    }
+    Ok(())
+}
+
+fn list_attributes(file: &File) -> Result<Vec<u8>, ManifestError> {
     let mut buffer = vec![0_u8; 64 * 1_024];
     let length = rustix::fs::flistxattr(file, &mut buffer).map_err(|error| {
         ManifestError::Filesystem(io::Error::from_raw_os_error(error.raw_os_error()))
     })?;
     buffer.truncate(length);
-    if contains_posix_acl(&buffer) {
-        return Err(ManifestError::Permissions);
-    }
-    Ok(())
+    Ok(buffer)
 }
 
 fn contains_posix_acl(attributes: &[u8]) -> bool {
@@ -556,6 +611,42 @@ fn contains_posix_acl(attributes: &[u8]) -> bool {
             name,
             b"system.posix_acl_access" | b"system.posix_acl_default"
         )
+    })
+}
+
+fn contains_access_acl(attributes: &[u8]) -> bool {
+    attributes
+        .split(|byte| *byte == 0)
+        .any(|name| name == b"system.posix_acl_access")
+}
+
+fn access_acl_grants_foreign_write(acl: &[u8], uid: u32) -> bool {
+    const VERSION: u32 = 0x0002;
+    const ENTRY_SIZE: usize = 8;
+    const USER: u16 = 0x0002;
+    const GROUP: u16 = 0x0008;
+    const MASK: u16 = 0x0010;
+    const WRITE: u16 = 0x0002;
+
+    if acl.len() < 4 || u32::from_le_bytes(acl[..4].try_into().unwrap()) != VERSION {
+        return true;
+    }
+    let entries = &acl[4..];
+    if entries.len() % ENTRY_SIZE != 0 {
+        return true;
+    }
+    let mask = entries
+        .chunks_exact(ENTRY_SIZE)
+        .find_map(|entry| {
+            (u16::from_le_bytes(entry[..2].try_into().unwrap()) == MASK)
+                .then(|| u16::from_le_bytes(entry[2..4].try_into().unwrap()))
+        })
+        .unwrap_or(0o7);
+    entries.chunks_exact(ENTRY_SIZE).any(|entry| {
+        let tag = u16::from_le_bytes(entry[..2].try_into().unwrap());
+        let permissions = u16::from_le_bytes(entry[2..4].try_into().unwrap());
+        let identifier = u32::from_le_bytes(entry[4..].try_into().unwrap());
+        permissions & mask & WRITE != 0 && ((tag == USER && identifier != uid) || tag == GROUP)
     })
 }
 
@@ -886,6 +977,38 @@ mod tests {
         assert!(!contains_posix_acl(b"user.example\0security.selinux\0"));
         assert!(contains_posix_acl(b"system.posix_acl_access\0"));
         assert!(contains_posix_acl(b"system.posix_acl_default\0"));
+        assert!(!contains_access_acl(b"system.posix_acl_default\0"));
+    }
+
+    #[test]
+    fn access_acl_policy_rejects_only_foreign_write_entries() {
+        let acl = |entries: &[(u16, u16, u32)]| {
+            let mut bytes = 0x0002_u32.to_le_bytes().to_vec();
+            for (tag, permissions, identifier) in entries {
+                bytes.extend_from_slice(&tag.to_le_bytes());
+                bytes.extend_from_slice(&permissions.to_le_bytes());
+                bytes.extend_from_slice(&identifier.to_le_bytes());
+            }
+            bytes
+        };
+
+        assert!(!access_acl_grants_foreign_write(
+            &acl(&[(0x0001, 0o7, 0)]),
+            1000
+        ));
+        assert!(!access_acl_grants_foreign_write(
+            &acl(&[(0x0002, 0o2, 1000)]),
+            1000
+        ));
+        assert!(access_acl_grants_foreign_write(
+            &acl(&[(0x0002, 0o2, 1001)]),
+            1000
+        ));
+        assert!(access_acl_grants_foreign_write(
+            &acl(&[(0x0008, 0o2, 100)]),
+            1000
+        ));
+        assert!(access_acl_grants_foreign_write(b"malformed", 1000));
     }
 
     #[test]

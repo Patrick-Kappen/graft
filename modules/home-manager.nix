@@ -79,6 +79,17 @@ in
       example = "018f0f77-8c4d-7b2a-8e6a-4b8a7d3a1c20";
       description = "Stable non-secret host identity, inherited from NixOS when available.";
     };
+
+    relaxedBaseDirectories = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = ''
+        Allow manifest publication on user config and state filesystems without
+        honest POSIX permissions, such as SMB/CIFS or vfat/exFAT. This warns
+        instead of rejecting unsafe modes and ACLs, so enable it only when the
+        mount's ownership presentation is trusted; foreign ownership still fails.
+      '';
+    };
   };
 
   config = lib.mkIf cfg.enable {
@@ -176,7 +187,7 @@ in
               --state-home ${lib.escapeShellArg config.xdg.stateHome} \
               --producer-name graft \
               --producer-version ${lib.escapeShellArg (lib.getVersion cfg.package)} \
-              --producer-build-id ${lib.escapeShellArg producerBuildId}
+              --producer-build-id ${lib.escapeShellArg producerBuildId}${lib.optionalString cfg.relaxedBaseDirectories " --relaxed-base-dirs"}
           '';
     };
   };
