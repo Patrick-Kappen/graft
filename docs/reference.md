@@ -73,10 +73,19 @@ After applying the new configuration, stop and remove the old systemd unit and
 old Podman container that are no longer canonical. Check both the selected
 manager (`systemctl` or `systemctl --user`) and Podman scope before cleanup;
 Graft does not choose a migration or delete old identities automatically.
+
 Repository Nix fixtures that had this mismatch were renamed to their existing
 `name` values. They therefore preserve their prior container identities and
 intentionally change their source-unit and service identities. Dedicated unsafe
 stem and identity-mismatch fixtures remain mismatched only as rejection tests.
+
+## Build identity
+
+Nix sets the manifest producer `buildId` and installed worker configuration to
+`self.rev` when flake revision metadata is available. Dirty trees and source
+archives use the stable literal `source`; no VCS command or timestamp runs
+during evaluation or a build. This value is provenance only and does not
+participate in manifest, worker, or protocol compatibility decisions.
 
 ## Deployment
 

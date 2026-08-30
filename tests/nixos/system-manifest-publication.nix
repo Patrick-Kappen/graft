@@ -4,8 +4,9 @@ let
   hostId = "018f0f77-8c4d-7b2a-8e6a-4b8a7d3a1c20";
   publisher = pkgs.lib.getExe' graftPackage "graft-manifest-publish-system";
   producerVersion = graftPackage.version;
-  manifestQuery = pkgs.lib.escapeShellArg ''.hostId == "${hostId}" and .target == "system" and .manager == "system" and .producer.buildId == "source" and .generationId == .manifestDigest and .workloadCount == 0 and .workloads == [] and (has("uid") | not)'';
-  endpointQuery = pkgs.lib.escapeShellArg ''.hostId == "${hostId}" and .target == "system" and .manager == "system" and .producer.buildId == "source" and .generationId == .manifestDigest and (has("uid") | not)'';
+  producerBuildId = graftPackage.graftBuildId or "source";
+  manifestQuery = pkgs.lib.escapeShellArg ''.hostId == "${hostId}" and .target == "system" and .manager == "system" and .producer.buildId == "${producerBuildId}" and .generationId == .manifestDigest and .workloadCount == 0 and .workloads == [] and (has("uid") | not)'';
+  endpointQuery = pkgs.lib.escapeShellArg ''.hostId == "${hostId}" and .target == "system" and .manager == "system" and .producer.buildId == "${producerBuildId}" and .generationId == .manifestDigest and (has("uid") | not)'';
   manifestCommand = "jq -e ${manifestQuery} /etc/graft/current/manifest.json";
   endpointCommand = "jq -e ${endpointQuery} /etc/graft/current/endpoint.json";
 in
@@ -40,7 +41,7 @@ in
     graft_gid = machine.succeed("getent group graft | cut -d: -f3").strip()
 
     def publish_command(target):
-        return f"${publisher} {target} --graft-gid {graft_gid} --producer-name graft --producer-version ${producerVersion} --producer-build-id source"
+        return f"${publisher} {target} --graft-gid {graft_gid} --producer-name graft --producer-version ${producerVersion} --producer-build-id ${producerBuildId}"
 
     assert generation.startswith("/nix/store/")
     machine.succeed(f"test ! -L {generation}")
