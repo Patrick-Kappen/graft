@@ -322,6 +322,7 @@ let
         };
         programs.graft = {
           enable = true;
+          package = graftPackage;
           hostId = manifestHostId;
           configRoot = ../../tests/nix/containers;
           configRoots = [ ../../tests/nix/containers-extra ];
@@ -364,7 +365,9 @@ let
     ];
   };
   incompatibleWorkerApiRangeRejected = lib.any (
-    assertion: !assertion.assertion
+    assertion:
+    assertion.message == "services.graft.package has no compatible worker API range."
+    && !assertion.assertion
   ) incompatibleWorkerApiRangeEval.config.assertions;
 
   networkNixosEval = lib.evalModules {
@@ -1093,7 +1096,26 @@ in
     pkgs.writeText "graft-nixos-module-eval" nixosRendered;
 
   home-manager-real-module-eval =
+    let
+      assertions = realHomeManagerEval.config.assertions;
+      workerExecStart = lib.attrByPath [
+        "systemd"
+        "user"
+        "services"
+        "graft-user-worker"
+        "Service"
+        "ExecStart"
+      ] null realHomeManagerEval.config;
+      manifestPublication = lib.attrByPath [
+        "home"
+        "activation"
+        "graftManifestPublication"
+      ] null realHomeManagerEval.config;
+      manifestPublicationText = lib.attrByPath [ "data" ] null manifestPublication;
+    in
+    assert builtins.deepSeq assertions (lib.all (assertion: assertion.assertion) assertions);
     assert realHomeManagerEval.config.programs.graft.enable;
+    assert realHomeManagerEval.config.programs.graft.package == graftPackage;
     assert realHomeManagerEval.config.programs.graft.hostId == manifestHostId;
     assert
       realHomeManagerEval.config.systemd.user.services.graft-user-worker.Service.ProtectHome
@@ -1101,7 +1123,20 @@ in
     assert
       realHomeManagerEval.config.systemd.user.sockets.graft-user-worker.Install.WantedBy
       == [ "sockets.target" ];
-    assert realHomeManagerEval.config.home.activation ? graftManifestPublication;
+    assert builtins.isList workerExecStart;
+    assert builtins.length workerExecStart == 1;
+    assert builtins.isString (builtins.elemAt workerExecStart 0);
+    assert builtins.elemAt workerExecStart 0 != "";
+    assert lib.hasInfix "graft-worker --target user --effective-uid %U --manager user" (
+      builtins.elemAt workerExecStart 0
+    );
+    assert builtins.isAttrs manifestPublication;
+    assert builtins.isString manifestPublicationText;
+    assert manifestPublicationText != "";
+    assert lib.hasInfix "graft-manifest-publish-user" manifestPublicationText;
+    assert lib.hasInfix "--config-home /home/graft/.config" manifestPublicationText;
+    assert lib.hasInfix "--state-home /home/graft/.local/state" manifestPublicationText;
+    assert lib.hasInfix "--producer-name graft" manifestPublicationText;
     assert realHomeManagerEval.config.xdg.configFile ? "containers/systemd/nix-check-user.container";
     pkgs.writeText "graft-home-manager-real-module-eval" "real Home Manager evaluation succeeded";
 
