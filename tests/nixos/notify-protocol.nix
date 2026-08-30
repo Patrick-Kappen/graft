@@ -22,6 +22,19 @@ let
         default = { };
       };
 
+      systemd.user.services = lib.mkOption {
+        type = lib.types.attrsOf lib.types.anything;
+        default = { };
+      };
+      systemd.user.sockets = lib.mkOption {
+        type = lib.types.attrsOf lib.types.anything;
+        default = { };
+      };
+      systemd.user.tmpfiles.rules = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [ ];
+      };
+
       xdg.configFile = lib.mkOption {
         type = lib.types.attrsOf (
           lib.types.submodule {
