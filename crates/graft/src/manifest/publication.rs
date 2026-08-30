@@ -245,6 +245,7 @@ impl Publisher {
             if self.user { 0o700 } else { 0o750 },
         )?;
         let runtime = if self.user {
+            ensure_owned_directory(&self.paths.runtime_root, self.uid, self.gid, 0o700)?;
             ensure_owned_directory(&self.paths.runtime, self.uid, self.gid, 0o700)?
         } else {
             ensure_owned_directory(&self.paths.runtime_root, self.uid, self.gid, 0o755)?;
@@ -498,6 +499,14 @@ mod tests {
         second: PathBuf,
     }
 
+    struct UserFixture {
+        _temporary: TempDir,
+        publisher: Publisher,
+        config_home: PathBuf,
+        state_home: PathBuf,
+        first: PathBuf,
+    }
+
     impl Fixture {
         fn new() -> Self {
             let temporary = TempDir::new().unwrap();
@@ -552,6 +561,68 @@ mod tests {
             assert_eq!(snapshot.generation_path(), expected);
             assert_eq!(self.current(), expected);
         }
+    }
+
+    impl UserFixture {
+        fn new() -> Self {
+            let temporary = TempDir::new().unwrap();
+            let root = temporary.path();
+            let config_home = root.join("config");
+            let state_home = root.join("state");
+            let store = root.join("store");
+            fs::create_dir(&config_home).unwrap();
+            fs::create_dir(&store).unwrap();
+            let first = write_user_generation(&store, "generation-one", HOST_ONE);
+            let uid = geteuid().as_raw();
+            let gid = getegid().as_raw();
+            let mut publisher =
+                Publisher::new_user(&config_home, &state_home, uid, gid, producer()).unwrap();
+            publisher.paths.store_root = store;
+            Self {
+                _temporary: temporary,
+                publisher,
+                config_home,
+                state_home,
+                first,
+            }
+        }
+    }
+
+    #[test]
+    fn user_publisher_creates_missing_state_home_before_runtime_directory() {
+        let fixture = UserFixture::new();
+
+        fixture.publisher.publish(&fixture.first).unwrap();
+
+        assert_eq!(
+            fixture.state_home.metadata().unwrap().mode() & 0o7777,
+            0o700
+        );
+        assert_eq!(
+            fixture.state_home.join("graft").metadata().unwrap().mode() & 0o7777,
+            0o700
+        );
+        assert_eq!(
+            fs::read_link(fixture.config_home.join("graft/current")).unwrap(),
+            fixture.first
+        );
+    }
+
+    #[test]
+    fn user_publisher_rejects_existing_state_home_with_wrong_mode_without_rewriting_it() {
+        let fixture = UserFixture::new();
+        fs::create_dir(&fixture.state_home).unwrap();
+        fs::set_permissions(&fixture.state_home, fs::Permissions::from_mode(0o755)).unwrap();
+
+        assert!(matches!(
+            fixture.publisher.publish(&fixture.first),
+            Err(PublicationError::UnsafeObject)
+        ));
+        assert_eq!(
+            fixture.state_home.metadata().unwrap().mode() & 0o7777,
+            0o755
+        );
+        assert!(!fixture.state_home.join("graft").exists());
     }
 
     #[test]
@@ -752,7 +823,27 @@ mod tests {
     }
 
     fn write_generation(store: &Path, name: &str, host_id: &str) -> PathBuf {
-        write_generation_for(store, name, host_id, env!("CARGO_PKG_VERSION"), "source")
+        write_generation_for_context(
+            store,
+            name,
+            host_id,
+            env!("CARGO_PKG_VERSION"),
+            "source",
+            "system",
+            "system",
+        )
+    }
+
+    fn write_user_generation(store: &Path, name: &str, host_id: &str) -> PathBuf {
+        write_generation_for_context(
+            store,
+            name,
+            host_id,
+            env!("CARGO_PKG_VERSION"),
+            "source",
+            "user",
+            "user",
+        )
     }
 
     fn write_generation_for(
@@ -762,6 +853,26 @@ mod tests {
         producer_version: &str,
         producer_build_id: &str,
     ) -> PathBuf {
+        write_generation_for_context(
+            store,
+            name,
+            host_id,
+            producer_version,
+            producer_build_id,
+            "system",
+            "system",
+        )
+    }
+
+    fn write_generation_for_context(
+        store: &Path,
+        name: &str,
+        host_id: &str,
+        producer_version: &str,
+        producer_build_id: &str,
+        target: &str,
+        manager: &str,
+    ) -> PathBuf {
         let input: RenderInput = serde_json::from_value(json!({
             "producer": {
                 "name": "graft",
@@ -769,8 +880,8 @@ mod tests {
                 "buildId": producer_build_id
             },
             "hostId": host_id,
-            "target": "system",
-            "manager": "system",
+            "target": target,
+            "manager": manager,
             "workerApiRange": { "major": 1, "min_minor": 0, "max_minor": 0 },
             "workloads": []
         }))
