@@ -1,13 +1,13 @@
-{
+args@{
   config,
   lib,
   pkgs,
   options,
-  osConfig ? null,
   ...
 }:
 
 let
+  osConfig = args.osConfig or null;
   cfg = config.programs.graft;
   inheritedHostId =
     if osConfig == null then null else lib.attrByPath [ "services" "graft" "hostId" ] null osConfig;
