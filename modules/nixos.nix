@@ -8,6 +8,8 @@
 let
   cfg = config.services.graft;
 
+  producerBuildId = lib.attrByPath [ "graftBuildId" ] "source" cfg.package;
+
   canonicalUuidV7 = lib.types.strMatching "[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
 
   materialised = import ./lib/materialise-containers.nix {
@@ -26,9 +28,7 @@ let
         producer = {
           name = "graft";
           version = lib.getVersion cfg.package;
-          # #300 replaces this approved archive/dirty-tree fallback with
-          # self.rev when revision metadata is available.
-          buildId = "source";
+          buildId = producerBuildId;
         };
         target = "system";
         manager = "system";
@@ -124,7 +124,7 @@ in
               --graft-gid "$graft_group_gid" \
               --producer-name graft \
               --producer-version ${lib.escapeShellArg (lib.getVersion cfg.package)} \
-              --producer-build-id source
+              --producer-build-id ${lib.escapeShellArg producerBuildId}
           '';
         };
       })

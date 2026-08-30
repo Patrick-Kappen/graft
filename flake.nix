@@ -13,6 +13,9 @@
       forAllSystems = nixpkgs.lib.genAttrs systems;
       graftCargoMetadata = builtins.fromTOML (builtins.readFile ./crates/graft/Cargo.toml);
       graftVersion = graftCargoMetadata.package.version;
+      # Flake revision metadata is deterministic and does not invoke VCS tools.
+      # Archives and dirty trees intentionally use the stable provenance marker.
+      graftBuildId = self.rev or "source";
       requireVersionParity =
         cargoVersion: nixVersion:
         if cargoVersion == nixVersion then
@@ -39,6 +42,8 @@
             version = requireVersionParity graftVersion graftVersion;
             src = ./crates/graft;
             cargoLock.lockFile = ./crates/graft/Cargo.lock;
+
+            passthru.graftBuildId = graftBuildId;
 
             postInstall = ''
               test -x "$out/bin/graft-manifest-render"
@@ -154,6 +159,7 @@
               optionName = if target == "system" then "services.graft" else "programs.graft";
             };
           manifestHostId = "018f0f77-8c4d-7b2a-8e6a-4b8a7d3a1c20";
+          manifestBuildId = graftPackage.graftBuildId or "source";
           manifestProducer = {
             name = "graft";
             version = graftVersion;
@@ -911,27 +917,27 @@
                 test "$(stat -c '%a:%F' "$generation/endpoint.json")" = "444:regular file"
                 test "$(find "$generation" -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort)" = $'endpoint.json\nmanifest.json'
 
-                jq -e --arg host ${lib.escapeShellArg manifestHostId} --arg version ${lib.escapeShellArg graftVersion} '
+                jq -e --arg host ${lib.escapeShellArg manifestHostId} --arg version ${lib.escapeShellArg graftVersion} --arg buildId ${lib.escapeShellArg manifestBuildId} '
                   .hostId == $host
                   and .target == "system"
                   and .manager == "system"
                   and .producer == {
                     name: "graft",
                     version: $version,
-                    buildId: "source"
+                    buildId: $buildId
                   }
                   and .generationId == .manifestDigest
                   and (.workloads | length) == .workloadCount
                   and (has("uid") | not)
                 ' "$generation/manifest.json"
-                jq -e --arg host ${lib.escapeShellArg manifestHostId} --arg version ${lib.escapeShellArg graftVersion} '
+                jq -e --arg host ${lib.escapeShellArg manifestHostId} --arg version ${lib.escapeShellArg graftVersion} --arg buildId ${lib.escapeShellArg manifestBuildId} '
                   .hostId == $host
                   and .target == "system"
                   and .manager == "system"
                   and .producer == {
                     name: "graft",
                     version: $version,
-                    buildId: "source"
+                    buildId: $buildId
                   }
                   and .generationId == .manifestDigest
                   and (has("uid") | not)
