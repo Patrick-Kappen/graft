@@ -195,6 +195,37 @@ fn malformed_and_oversized_initial_frames_receive_typed_protocol_errors() {
 }
 
 #[test]
+fn system_worker_rejects_relaxed_base_directories() {
+    let uid = rustix::process::geteuid().as_raw().to_string();
+    let gid = rustix::process::getegid().as_raw().to_string();
+    let output = Command::new(env!("CARGO_BIN_EXE_graft-worker"))
+        .args([
+            "--target",
+            "system",
+            "--effective-uid",
+            &uid,
+            "--manager",
+            "system",
+            "--graft-gid",
+            &gid,
+            "--producer-name",
+            "graft",
+            "--producer-version",
+            env!("CARGO_PKG_VERSION"),
+            "--producer-build-id",
+            "worker-test",
+            "--relaxed-base-dirs",
+        ])
+        .output()
+        .expect("system worker process can be started");
+
+    assert!(!output.status.success());
+    assert!(String::from_utf8(output.stderr)
+        .unwrap()
+        .contains("system worker does not accept --relaxed-base-dirs"));
+}
+
+#[test]
 fn worker_version_reports_the_packaged_semantic_version() {
     let output = Command::new(env!("CARGO_BIN_EXE_graft-worker"))
         .arg("--version")

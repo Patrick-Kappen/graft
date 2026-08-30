@@ -316,26 +316,31 @@ let
     hostId = manifestHostId;
     relaxedBaseDirectories = true;
   };
-  realHomeManagerEval = homeManager.lib.homeManagerConfiguration {
-    inherit pkgs;
-    modules = [
-      self.homeManagerModules.graft
-      {
-        home = {
-          username = "graft";
-          homeDirectory = "/home/graft";
-          stateVersion = "26.05";
-        };
-        programs.graft = {
-          enable = true;
-          package = graftPackage;
-          hostId = manifestHostId;
-          configRoot = ../../tests/nix/containers;
-          configRoots = [ ../../tests/nix/containers-extra ];
-        };
-      }
-    ];
-  };
+  evalRealHomeManager =
+    relaxedBaseDirectories:
+    homeManager.lib.homeManagerConfiguration {
+      inherit pkgs;
+      modules = [
+        self.homeManagerModules.graft
+        {
+          home = {
+            username = "graft";
+            homeDirectory = "/home/graft";
+            stateVersion = "26.05";
+          };
+          programs.graft = {
+            enable = true;
+            package = graftPackage;
+            hostId = manifestHostId;
+            configRoot = ../../tests/nix/containers;
+            configRoots = [ ../../tests/nix/containers-extra ];
+          }
+          // lib.optionalAttrs relaxedBaseDirectories { inherit relaxedBaseDirectories; };
+        }
+      ];
+    };
+  realHomeManagerEval = evalRealHomeManager false;
+  realHomeManagerRelaxedEval = evalRealHomeManager true;
   homeManagerInheritedEval = evalHomeManager {
     osConfig.services.graft.hostId = manifestHostId;
   };
@@ -1118,6 +1123,20 @@ in
         "graftManifestPublication"
       ] null realHomeManagerEval.config;
       manifestPublicationText = lib.attrByPath [ "data" ] null manifestPublication;
+      relaxedWorkerExecStart = lib.attrByPath [
+        "systemd"
+        "user"
+        "services"
+        "graft-user-worker"
+        "Service"
+        "ExecStart"
+      ] null realHomeManagerRelaxedEval.config;
+      relaxedManifestPublication = lib.attrByPath [
+        "home"
+        "activation"
+        "graftManifestPublication"
+      ] null realHomeManagerRelaxedEval.config;
+      relaxedManifestPublicationText = lib.attrByPath [ "data" ] null relaxedManifestPublication;
     in
     assert builtins.deepSeq assertions (lib.all (assertion: assertion.assertion) assertions);
     assert realHomeManagerEval.config.programs.graft.enable;
@@ -1136,6 +1155,10 @@ in
     assert lib.hasInfix "graft-worker --target user --effective-uid %U --manager user" (
       builtins.elemAt workerExecStart 0
     );
+    assert !lib.hasInfix "--relaxed-base-dirs" (builtins.elemAt workerExecStart 0);
+    assert builtins.isList relaxedWorkerExecStart;
+    assert builtins.length relaxedWorkerExecStart == 1;
+    assert lib.hasInfix "--relaxed-base-dirs" (builtins.elemAt relaxedWorkerExecStart 0);
     assert builtins.isAttrs manifestPublication;
     assert builtins.isString manifestPublicationText;
     assert manifestPublicationText != "";
@@ -1143,6 +1166,9 @@ in
     assert lib.hasInfix "--config-home /home/graft/.config" manifestPublicationText;
     assert lib.hasInfix "--state-home /home/graft/.local/state" manifestPublicationText;
     assert lib.hasInfix "--producer-name graft" manifestPublicationText;
+    assert !lib.hasInfix "--relaxed-base-dirs" manifestPublicationText;
+    assert builtins.isString relaxedManifestPublicationText;
+    assert lib.hasInfix "--relaxed-base-dirs" relaxedManifestPublicationText;
     assert realHomeManagerEval.config.xdg.configFile ? "containers/systemd/nix-check-user.container";
     pkgs.writeText "graft-home-manager-real-module-eval" "real Home Manager evaluation succeeded";
 

@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use anyhow::{bail, Context as _, Result};
 use clap::{Parser, ValueEnum};
-use graft::manifest::{ManifestError, ManifestLoader, ProducerIdentity};
+use graft::manifest::{ManifestError, ManifestLoader, ProducerIdentity, UserDirectoryPolicy};
 use graft::protocol::{
     CapabilitySet, EffectiveLimits, ManagerKind, ManifestGeneration, ManifestState,
     ManifestUnavailableReason, ProtocolVersionRange, SoftwareVersion, WorkerContext, WorkerTarget,
@@ -28,6 +28,9 @@ struct Arguments {
     config_home: Option<PathBuf>,
     #[arg(long)]
     graft_gid: Option<u32>,
+    /// Warn instead of rejecting unsafe Graft-owned user base-directory modes and ACLs.
+    #[arg(long)]
+    relaxed_base_dirs: bool,
     #[arg(long)]
     producer_name: String,
     #[arg(long)]
@@ -55,6 +58,9 @@ pub(crate) struct Prepared {
 
 pub(crate) fn prepare() -> Result<Prepared> {
     let arguments = Arguments::parse();
+    if matches!(arguments.target, TargetArgument::System) && arguments.relaxed_base_dirs {
+        bail!("system worker does not accept --relaxed-base-dirs");
+    }
     let listener = activation::take_listener().context("socket activation validation failed")?;
     Ok(Prepared {
         arguments,
@@ -111,13 +117,18 @@ pub(crate) async fn run(
             if arguments.graft_gid.is_some() {
                 bail!("user worker does not accept --graft-gid");
             }
-            ManifestLoader::user(
+            ManifestLoader::user_with_directory_policy(
                 &arguments
                     .config_home
                     .context("user worker requires --config-home")?,
                 arguments.effective_uid,
                 rustix::process::getgid().as_raw(),
                 producer,
+                if arguments.relaxed_base_dirs {
+                    UserDirectoryPolicy::RelaxedBaseDirectories
+                } else {
+                    UserDirectoryPolicy::Strict
+                },
             )?
         }
     };
