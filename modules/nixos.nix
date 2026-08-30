@@ -44,6 +44,9 @@ let
         name = "graft-system-manifest-generation";
       };
 
+  worker = lib.getExe' cfg.package "graft-worker";
+  workerApiRange = lib.attrByPath [ "graftWorkerApiRange" ] null cfg.package;
+
 in
 {
   options.services.graft = {
@@ -87,6 +90,18 @@ in
             assertion = cfg.hostId != null;
             message = "services.graft.hostId must be set to a canonical lowercase UUIDv7 when services.graft.enable is true.";
           }
+          {
+            assertion = cfg.package != null && builtins.pathExists "${cfg.package}/bin/graft-worker";
+            message = "services.graft.package must install graft-worker for worker integration.";
+          }
+          {
+            assertion =
+              workerApiRange != null
+              && workerApiRange.major == 1
+              && workerApiRange.min_minor <= 0
+              && workerApiRange.max_minor >= 0;
+            message = "services.graft.package has no compatible worker API range.";
+          }
         ];
 
         environment.etc = lib.mapAttrs' (
@@ -97,10 +112,61 @@ in
         ) materialised.containers;
 
         users.groups.graft = { };
+
+        systemd.tmpfiles.rules = [
+          "d /run/graft 0755 root root - -"
+          "d /run/graft/system 0750 root graft - -"
+        ];
+
+        systemd.sockets.graft-system-worker = {
+          wantedBy = [ "sockets.target" ];
+          socketConfig = {
+            ListenStream = "/run/graft/system/worker.sock";
+            SocketMode = "0660";
+            SocketUser = "root";
+            SocketGroup = "graft";
+            RemoveOnStop = true;
+          };
+        };
       }
 
       (lib.mkIf (cfg.package != null && cfg.hostId != null) {
         system.build.graftManifestGeneration = manifestPublication.generation;
+
+        systemd.services.graft-system-worker = {
+          description = "Graft system worker";
+          unitConfig = {
+            StartLimitIntervalSec = "60s";
+            StartLimitBurst = 5;
+          };
+          serviceConfig = {
+            ExecStart = "${pkgs.bash}/bin/bash -c 'gid=\$(/usr/bin/getent group graft | ${pkgs.coreutils}/bin/cut -d: -f3); [[ \"\$gid\" =~ ^[0-9]+$ ]]; exec ${worker} --target system --effective-uid 0 --manager system --graft-gid \"\$gid\" --producer-name graft --producer-version ${lib.escapeShellArg (lib.getVersion cfg.package)} --producer-build-id ${lib.escapeShellArg producerBuildId}'";
+            User = "root";
+            Group = "root";
+            Restart = "on-failure";
+            RestartSec = "2s";
+            NoNewPrivileges = true;
+            PrivateTmp = true;
+            ProtectSystem = "strict";
+            ProtectHome = "read-only";
+            ProtectKernelTunables = true;
+            ProtectKernelModules = true;
+            ProtectKernelLogs = true;
+            ProtectControlGroups = true;
+            ProtectClock = true;
+            ProtectHostname = true;
+            ProtectProc = "invisible";
+            ProcSubset = "pid";
+            RestrictSUIDSGID = true;
+            LockPersonality = true;
+            MemoryDenyWriteExecute = true;
+            RestrictRealtime = true;
+            RestrictNamespaces = true;
+            SystemCallArchitectures = "native";
+            RestrictAddressFamilies = [ "AF_UNIX" ];
+            UMask = "0077";
+          };
+        };
 
         system.activationScripts.graftManifestPublication = {
           deps = [

@@ -1,9 +1,9 @@
 # Nix worker integration
 
-> **Status:** approved design under incremental implementation. NixOS now
-> publishes the system manifest generation and atomic pointer described here;
-> Home Manager publication, worker/socket installation, runtime integration, and
-> the TUI remain future work. Worker implementation remains in [#241].
+> **Status:** approved design under incremental implementation. NixOS and Home
+> Manager publish their manifest generations and install the fixed local worker
+> socket/service boundary described here. Runtime backend, activation locking,
+> polkit, and the TUI remain future work. Worker implementation remains in [#241].
 
 This contract supplies the concrete host-policy boundary required by the
 [control-plane](control-plane.md), [worker API](worker-api.md),
@@ -73,11 +73,13 @@ Once [#241] provides the binaries, enabling the complete integration:
 - installs the system worker service/socket and polkit actions; and
 - installs the activation hook that shares the lifecycle lock.
 
-The current NixOS module materialises workloads and publishes the immutable
-system manifest/endpoint pair through `/etc/graft/current`. It still must not
-install a unit referencing a nonexistent worker. Worker/socket, backend,
-polkit, audit, and lifecycle integration remain unavailable until their own
-implementation lands.
+The NixOS module materialises workloads, publishes the immutable system
+manifest/endpoint pair through `/etc/graft/current`, and installs the fixed
+system worker socket/service. The installed service passes the system target,
+manager, UID, socket group, and producer identity as immutable unit policy;
+manifest compatibility is checked before activation. Backend, polkit, audit,
+and lifecycle integration remain unavailable until their own implementation
+lands.
 
 ### Home Manager
 
@@ -565,11 +567,11 @@ pointer before releasing the lock and revalidates its pair. Thus endpoint and
 manifest cannot advertise different generations. Merely building a Nix
 generation does not make it current.
 
-The current NixOS publication-only slice applies that transaction to the
-immutable pair and `current`; existing Quadlet publication remains separate
-until worker integration adds the full quiescence/artifact transaction. No
-worker submission can race this interim path because no worker or socket is
-installed yet.
+The current NixOS publication slice applies that transaction to the immutable
+pair and `current`; existing Quadlet publication remains separate until the
+full quiescence/artifact transaction lands. Worker submission and socket
+activation are installed, but backend and activation coordination remain
+unavailable until their dedicated implementation issues land.
 
 ## Shared activation and submission lock
 

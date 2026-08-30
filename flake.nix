@@ -45,8 +45,14 @@
             cargoLock.lockFile = ./crates/graft/Cargo.lock;
 
             passthru.graftBuildId = graftBuildId;
+            passthru.graftWorkerApiRange = {
+              major = 1;
+              min_minor = 0;
+              max_minor = 0;
+            };
 
             postInstall = ''
+              test -x "$out/bin/graft-worker"
               test -x "$out/bin/graft-manifest-render"
               test -x "$out/bin/graft-manifest-publish-system"
               test -x "$out/bin/graft-manifest-publish-user"
@@ -298,6 +304,11 @@
                 default = false;
               };
 
+              environment.systemPackages = lib.mkOption {
+                type = lib.types.listOf lib.types.package;
+                default = [ ];
+              };
+
               environment.etc = lib.mkOption {
                 type = lib.types.attrsOf (
                   lib.types.submodule (
@@ -346,6 +357,36 @@
 
               home.packages = lib.mkOption {
                 type = lib.types.listOf lib.types.package;
+                default = [ ];
+              };
+
+              systemd.services = lib.mkOption {
+                type = lib.types.attrsOf lib.types.anything;
+                default = { };
+              };
+
+              systemd.sockets = lib.mkOption {
+                type = lib.types.attrsOf lib.types.anything;
+                default = { };
+              };
+
+              systemd.tmpfiles.rules = lib.mkOption {
+                type = lib.types.listOf lib.types.str;
+                default = [ ];
+              };
+
+              systemd.user.services = lib.mkOption {
+                type = lib.types.attrsOf lib.types.anything;
+                default = { };
+              };
+
+              systemd.user.sockets = lib.mkOption {
+                type = lib.types.attrsOf lib.types.anything;
+                default = { };
+              };
+
+              systemd.user.tmpfiles.rules = lib.mkOption {
+                type = lib.types.listOf lib.types.str;
                 default = [ ];
               };
 
@@ -778,6 +819,8 @@
           ) invalidSystemHostIds;
           systemPublicationGeneration = nixosEval.config.system.build.graftManifestGeneration;
           systemPublicationActivation = nixosEval.config.system.activationScripts.graftManifestPublication;
+          systemWorkerService = nixosEval.config.systemd.services.graft-system-worker;
+          systemWorkerSocket = nixosEval.config.systemd.sockets.graft-system-worker;
           expectedSystemPublicationSources = pkgs.writeText "graft-system-publication-sources.json" (
             builtins.toJSON (
               map (path: "${lib.removeSuffix ".container" (builtins.baseNameOf path)}.toml") (
@@ -939,6 +982,14 @@
             )) (builtins.unsafeDiscardStringContext systemPublicationActivation.text);
             assert !lib.hasInfix "XDG_" systemPublicationActivation.text;
             assert !lib.hasInfix "/home/" systemPublicationActivation.text;
+            assert systemWorkerSocket.socketConfig.ListenStream == "/run/graft/system/worker.sock";
+            assert systemWorkerSocket.socketConfig.SocketMode == "0660";
+            assert systemWorkerSocket.socketConfig.SocketGroup == "graft";
+            assert systemWorkerService.serviceConfig.User == "root";
+            assert systemWorkerService.serviceConfig.Restart == "on-failure";
+            assert lib.hasInfix "--target system --effective-uid 0 --manager system"
+              systemWorkerService.serviceConfig.ExecStart;
+            assert lib.hasInfix "--graft-gid" systemWorkerService.serviceConfig.ExecStart;
             pkgs.runCommand "graft-system-manifest-publication"
               {
                 nativeBuildInputs = [ pkgs.jq ];
