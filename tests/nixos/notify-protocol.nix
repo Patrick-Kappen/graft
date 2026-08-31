@@ -103,29 +103,28 @@ in
       "containers/systemd/users/1000/linger-user.container".source = lingerUser;
       "containers/systemd/users/1001/login-user.container".source = loginUser;
       "graft-exit-type-protocol-parent".source = protocolParent;
-      "systemd/user/graft-exit-type-main.service".text = ''
-        [Service]
-        Type=notify
-        NotifyAccess=all
-        ExecStart=/etc/graft-exit-type-protocol-parent /run/user/%U/graft-exit-type-main
-      '';
-      "systemd/user/graft-exit-type-cgroup.service".text = ''
-        [Service]
-        Type=notify
-        NotifyAccess=all
-        ExitType=cgroup
-        ExecStart=/etc/graft-exit-type-protocol-parent /run/user/%U/graft-exit-type-cgroup
-      '';
-      "systemd/user/graft-exit-type-cgroup-no-notify.service".text = ''
-        [Service]
-        Type=notify
-        NotifyAccess=all
-        ExitType=cgroup
-        ExecStart=/etc/graft-exit-type-protocol-parent /run/user/%U/graft-exit-type-cgroup-no-notify
-      '';
     };
 
     systemd = {
+      user.services = {
+        graft-exit-type-main.serviceConfig = {
+          Type = "notify";
+          NotifyAccess = "all";
+          ExecStart = "/etc/graft-exit-type-protocol-parent /run/user/%U/graft-exit-type-main";
+        };
+        graft-exit-type-cgroup.serviceConfig = {
+          Type = "notify";
+          NotifyAccess = "all";
+          ExitType = "cgroup";
+          ExecStart = "/etc/graft-exit-type-protocol-parent /run/user/%U/graft-exit-type-cgroup";
+        };
+        graft-exit-type-cgroup-no-notify.serviceConfig = {
+          Type = "notify";
+          NotifyAccess = "all";
+          ExitType = "cgroup";
+          ExecStart = "/etc/graft-exit-type-protocol-parent /run/user/%U/graft-exit-type-cgroup-no-notify";
+        };
+      };
       tmpfiles.rules = [
         "d /var/lib/graft-activation 0755 root root -"
         "d /var/lib/graft-workspace 0755 root root -"
@@ -239,11 +238,12 @@ in
             problems.append(f"{label}: unexpected control group {control_group}")
         elif main_pid != "0":
             cgroup_status, cgroup_output = machine.execute(
-                f"grep -Fx {main_pid} /sys/fs/cgroup{control_group}/cgroup.procs"
+                f"find /sys/fs/cgroup{control_group} -name cgroup.procs "
+                f"-exec grep -Fx {main_pid} {{}} +"
             )
             if cgroup_status != 0:
                 problems.append(
-                    f"{label}: main PID {main_pid} is absent from {control_group}: {cgroup_output}"
+                    f"{label}: main PID {main_pid} is absent from {control_group} or its descendants: {cgroup_output}"
                 )
 
         if problems:
