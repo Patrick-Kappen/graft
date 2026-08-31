@@ -84,10 +84,13 @@ in
       type = lib.types.bool;
       default = false;
       description = ''
-        Allow manifest publication on user config and state filesystems without
-        honest POSIX permissions, such as SMB/CIFS or vfat/exFAT. This warns
-        instead of rejecting unsafe modes and ACLs, so enable it only when the
-        mount's ownership presentation is trusted; foreign ownership still fails.
+        Allow manifest publication when the user publication base directories
+        cannot report honest POSIX modes or ACLs. This warns instead of rejecting
+        those base-directory checks, but ownership, generation and document
+        validation, the symlink pointer, activation lock, and worker loading
+        requirements remain mandatory. Enable it only on a mount whose complete
+        filesystem contract is verified; CIFS suitability depends on the
+        mount, server, and configuration.
       '';
     };
   };
