@@ -117,11 +117,12 @@ let
       publishLines = lib.concatMapStrings (port: "PublishPort=${escapeSystemdExecArg port}\n") publish;
       service = ctr.service or { };
       serviceType = service.type or null;
-      exitType =
-        if ctr.deploy.target == "user" && (service.type or "notify") == "notify" then
-          "cgroup"
-        else
-          null;
+      exitType = if
+        ctr.deploy.target == "user" && (service.type or "notify") == "notify"
+      then
+        "cgroup"
+      else
+        null;
       remainAfterExit = service.remainAfterExit or null;
       restart = service.restart or null;
       restartSec = service.restartSec or null;
