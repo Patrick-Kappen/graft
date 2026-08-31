@@ -245,6 +245,16 @@ the backing filesystem, validation is unavailable and fails closed. Activation r
 and the worker independently revalidates it; it never chooses a model from
 client input.
 
+The `programs.graft.relaxedBaseDirectories` option changes only the user
+publication base-directory mode and ACL checks. It does not relax ownership,
+generation or document validation, the Unix symlink pointer, the activation
+lock, or worker loading. A relaxed base directory is therefore usable only when
+the mounted filesystem still provides the complete contract above and the
+bounded lock, atomic same-directory replacement, and file/directory durability
+operations described below. CIFS is conditional on verified mount, server, and
+configuration semantics; `mfsymlinks` or successful `chmod`/`chown` calls alone
+are not evidence of compliance.
+
 ## Runtime directory ownership
 
 The final NixOS worker integration uses this runtime layout:

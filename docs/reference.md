@@ -446,15 +446,21 @@ activation. Publication does not install or start a worker.
 | `programs.graft.package` | package or null | `null` | Package providing `graft` and `graft-pause`; the exported flake module supplies a default. |
 | `programs.graft.configRoot` | path or null | `null` | First directory containing `*.toml` workloads. |
 | `programs.graft.configRoots` | list of paths | `[]` | Additional workload directories, read in list order. |
-| `programs.graft.relaxedBaseDirectories` | bool | `false` | Permit user manifest publication on filesystems without honest POSIX permissions by warning instead of rejecting unsafe base-directory modes and ACLs; ownership remains mandatory. |
+| `programs.graft.relaxedBaseDirectories` | bool | `false` | Relax only the user publication base-directory mode and ACL checks when those checks cannot report honest POSIX metadata; ownership, generation/document validation, the symlink pointer, activation lock, and worker loading remain mandatory. |
 
 The module renders only effective `target = "user"` workloads under
 `~/.config/containers/systemd/`. Podman is rootless only when Home Manager runs
 for a non-root account; the module does not reject UID 0. Set
-`relaxedBaseDirectories = true` only for SMB/CIFS, vfat/exFAT, or another
-filesystem that cannot report POSIX modes or ACLs reliably. It weakens user
-publication directory checks to warnings (while retaining ownership checks), so
-it trades local directory integrity guarantees for NAS compatibility.
+`relaxedBaseDirectories = true` does not make filesystems lacking the complete
+user publication contract supported. The contract requires Unix symlinks,
+trustworthy per-object ownership and permissions, usable ACL inspection, bounded
+activation-lock semantics, atomic same-directory replacement, and meaningful
+file/directory durability operations. CIFS support is mount-, server-, and
+configuration-dependent: verify the complete contract and its observable effects
+rather than relying on the filesystem label, `mfsymlinks`, or successful
+`chmod`/`chown` syscalls. The option changes only the base-directory mode and ACL
+checks; ownership, generation/document validation, the symlink pointer,
+activation lock, and worker loading remain required.
 
 Both modules read `configRoot` first and then `configRoots` in order. Every
 configured root must exist. New files must be tracked before Git flakes can see
