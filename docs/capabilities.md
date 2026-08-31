@@ -100,7 +100,7 @@ intentionally has no output there.
 | `config.security.dropCapabilities` | Optional exact `["all"]`; omission is equivalent; partial legacy lists fail with migration guidance | Concrete `security.dropCapabilities = ["all"]` | Passed to the shared renderer | `DropCapability=all` | Both | Current through [#163] |
 | `config.security.addCapabilities` | Optional non-empty ordered unique canonical `CAP_*` names; `all` is rejected | `security.addCapabilities` when configured | Passed to the shared renderer after drop-all | One ordered `AddCapability=` per entry | Both | Current through [#163] |
 | `config.security.noNewPrivileges` | Optional boolean; defaults to `true`; `false` is an explicit relaxation | Concrete `security.noNewPrivileges` | Passed to the shared renderer | Explicit `NoNewPrivileges=true` or `false` | Both | Current through [#163] |
-| `config.service.lifecycle` | Optional `long-running`, `job`, or `setup`; finite modes require an explicit command and restrict restart policy | Optional `service.type` and `service.remainAfterExit` | Passed to the shared renderer | `Type=` and finite `RemainAfterExit=` | Both | Current |
+| `config.service.lifecycle` | Optional `long-running`, `job`, or `setup`; finite modes require an explicit command and restrict restart policy | Optional `service.type` and `service.remainAfterExit` | Passed to the shared renderer | `Type=`, finite `RemainAfterExit=`, and fixed user-long-running `ExitType=cgroup` | Both | Current; user long-running requires systemd >= 250 |
 | `config.service.restart` | Optional supported systemd restart policy; finite lifecycle restrictions apply | `service.restart` | Passed to the shared renderer | `Restart=` | Both | Current |
 | `config.service.restartSec` | Optional non-empty, control-free literal; requires restart other than `no` | `service.restartSec` | Passed to the shared renderer | `RestartSec=` | Both | Current |
 | `config.service.timeoutStartSec` | Optional non-empty, control-free literal | `service.timeoutStartSec` | Passed to the shared renderer | `TimeoutStartSec=` | Both | Current |
@@ -193,10 +193,11 @@ Graft contract.
 
 Current generator fixtures use **Podman/Quadlet 5.8.2**, its Container Device
 Interface library **1.0.1**, and **systemd 260** from the project's pinned Nix
-environment. These are tested versions, not yet a
-formal minimum-version promise. The maintained compatibility contract, upgrade
-diffs, cgroup v2 prerequisites, and unsupported-version diagnostics remain in
-[#129](https://github.com/Patrick-Kappen/graft/issues/129).
+environment. Effective user-target long-running workloads require **systemd >=
+250** for Graft's fixed `ExitType=cgroup` directive; this is a runtime
+requirement, not a package-pin change. The maintained compatibility contract,
+upgrade diffs, cgroup v2 prerequisites, and unsupported-version diagnostics
+remain in [#129](https://github.com/Patrick-Kappen/graft/issues/129).
 
 Authoritative references used by the current implementation:
 

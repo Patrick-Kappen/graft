@@ -117,6 +117,11 @@ let
       publishLines = lib.concatMapStrings (port: "PublishPort=${escapeSystemdExecArg port}\n") publish;
       service = ctr.service or { };
       serviceType = service.type or null;
+      exitType =
+        if ctr.deploy.target == "user" && (service.type or "notify") == "notify" then
+          "cgroup"
+        else
+          null;
       remainAfterExit = service.remainAfterExit or null;
       restart = service.restart or null;
       restartSec = service.restartSec or null;
@@ -130,7 +135,8 @@ let
         + lib.optionalString (restart != null) "Restart=${toString restart}\n"
         + lib.optionalString (restartSec != null) "RestartSec=${toString restartSec}\n"
         + lib.optionalString (timeoutStartSec != null) "TimeoutStartSec=${toString timeoutStartSec}\n"
-        + lib.optionalString (timeoutStopSec != null) "TimeoutStopSec=${toString timeoutStopSec}\n";
+        + lib.optionalString (timeoutStopSec != null) "TimeoutStopSec=${toString timeoutStopSec}\n"
+        + lib.optionalString (exitType != null) "ExitType=${exitType}\n";
       serviceSection = lib.optionalString (serviceLines != "") "\n[Service]\n${serviceLines}";
       install = ctr.install or { };
       wantedBy = install.wantedBy or null;

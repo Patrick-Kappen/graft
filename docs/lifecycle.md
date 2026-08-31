@@ -69,8 +69,19 @@ active   → explicit stop → deactivating → inactive
 
 Quadlet uses its normal container-service path: conmon sends the readiness
 notification, `podman run` is detached, and systemd tracks the generated notify
-service. Application-provided or health-based readiness remains deferred to
-[#146](https://github.com/Patrick-Kappen/graft/issues/146).
+service. For an effective user-target long-running workload (including the
+implicit default lifecycle), Graft also renders `ExitType=cgroup`; this requires
+systemd >= 250. The system target and finite user `job`/`setup` workloads do not
+receive that directive. Application-provided or health-based readiness remains
+deferred to [#146](https://github.com/Patrick-Kappen/graft/issues/146).
+
+`podman run -d` returning is not readiness. A user long-running service succeeds
+only when systemd reports `active/running`, `Result=success`, a live conmon
+`MainPID`, and the expected service cgroup. `ExitType=cgroup` keeps that cgroup
+alive through the detached frontend's exit so conmon can deliver its readiness
+notification. Its deliberate trade-off is that a stray process left in the
+service cgroup defers terminal-state and restart handling until the cgroup
+empties.
 
 Normalized Podman 5.8.2 generated-service fixture:
 
