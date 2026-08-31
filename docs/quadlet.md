@@ -143,8 +143,12 @@ TimeoutStartSec=2m
 TimeoutStopSec=30s
 ```
 
-No restart or timing policy is added by default. The exact lifecycle mapping is
-in [Workload lifecycle](lifecycle.md).
+No restart or timing policy is added by default. For effective user-target
+long-running workloads, including the implicit default lifecycle, Graft adds the
+Graft-owned `ExitType=cgroup` service directive. This requires systemd >= 250;
+system-target long-running workloads and user `job`/`setup` workloads omit it.
+It is not TOML configuration or raw service passthrough. The exact lifecycle and
+readiness boundary is in [Workload lifecycle](lifecycle.md).
 
 No `[Install]` section is rendered by default. Explicit
 `deploy.activation = "startup"` resolves to `multi-user.target` for system

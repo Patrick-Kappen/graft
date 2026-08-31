@@ -368,15 +368,19 @@ timeoutStopSec = "30s"
 
 | Field | Accepted values | Default | Validation and effect |
 | --- | --- | --- | --- |
-| `config.service.lifecycle` | `long-running`, `job`, `setup` | effective `long-running` | Maps typed intent to `Type=` and finite `RemainAfterExit=`. `job` and `setup` require an explicit command. |
+| `config.service.lifecycle` | `long-running`, `job`, `setup` | effective `long-running` | Maps typed intent to `Type=` and finite `RemainAfterExit=`. Effective user-target long-running workloads also receive fixed `ExitType=cgroup`; `job` and `setup` require an explicit command. |
 | `config.service.restart` | `no`, `on-success`, `on-failure`, `on-abnormal`, `on-watchdog`, `on-abort`, `always` | absent | Rendered only when set. Finite lifecycles reject `always`, `on-success`, and currently `on-watchdog`. |
 | `config.service.restartSec` | string | absent | Non-empty, no control characters, and requires restart other than `no`. Rendered verbatim. |
 | `config.service.timeoutStartSec` | string | absent | Non-empty and no control characters. Rendered verbatim. |
 | `config.service.timeoutStopSec` | string | absent | Non-empty and no control characters. Rendered verbatim. |
 
-No timespan parser is applied to service timing values. See
-[Workload lifecycle semantics](lifecycle.md) for state transitions, finite jobs,
-restart restrictions, and generator-owned cleanup.
+No timespan parser is applied to service timing values. Effective user-target
+long-running workloads require systemd >= 250 for Graft's fixed
+`ExitType=cgroup`; this directive is derived from target and lifecycle and has
+no TOML or raw-service configuration surface. It is omitted for system-target
+long-running workloads and user finite workloads. See
+[Workload lifecycle semantics](lifecycle.md) for state transitions, readiness,
+finite jobs, restart restrictions, and generator-owned cleanup.
 
 ## Renderer escaping
 

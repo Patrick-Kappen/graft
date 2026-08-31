@@ -644,7 +644,7 @@ let
     "PublishPort="
     "Network="
     "AddCapability="
-    "Type="
+    "\nType="
     "RemainAfterExit="
     "Restart="
     "RestartSec="
@@ -666,11 +666,12 @@ let
       escapeRendered,
       renderedInfixes,
       escapeInfixes,
+      plainInfixes,
       plainMissingInfixes,
     }:
     assertHasInfixes rendered (secureBaselineInfixes ++ commonRenderedInfixes ++ renderedInfixes)
     && assertHasInfixes escapeRendered (secureBaselineInfixes ++ commonEscapedInfixes ++ escapeInfixes)
-    && assertHasInfixes plainRendered secureBaselineInfixes
+    && assertHasInfixes plainRendered (secureBaselineInfixes ++ plainInfixes)
     && assertNoInfixes plainRendered (commonPlainMissingInfixes ++ plainMissingInfixes);
   evalNixosWithRoots =
     extraRoots:
@@ -1032,7 +1033,9 @@ in
         "HostName=escape%%system.local"
         "PublishPort=127.0.0.1:18%%080:80"
       ];
+      plainInfixes = [ ];
       plainMissingInfixes = [
+        "ExitType=cgroup"
         "Volume=/system-cache"
         "Volume=/tmp/graft-system-data:/data:rw,bind"
         "Volume=/tmp/graft-system-config:/config:ro,bind"
@@ -1214,6 +1217,7 @@ in
         "HostName=escape%%user.local"
         "PublishPort=127.0.0.1:28%%080:80"
       ];
+      plainInfixes = [ "\n[Service]\nExitType=cgroup" ];
       plainMissingInfixes = [
         "Volume=/user-cache"
         "Volume=/tmp/graft-user-data:/data:rw,bind"
@@ -1756,11 +1760,13 @@ in
       sources = {
         system = {
           nix-check-system = pkgs.writeText "nix-check-system.container" nixosRendered;
+          nix-check-plain-system = pkgs.writeText "nix-check-plain-system.container" nixosPlainRendered;
           nix-check-timer-job-system = pkgs.writeText "nix-check-timer-job-system.container" nixosTimerJobRendered;
           nix-check-setup-system = pkgs.writeText "nix-check-setup-system.container" nixosSetupRendered;
         };
         user = {
           nix-check-user = pkgs.writeText "nix-check-user.container" homeManagerRendered;
+          nix-check-plain-user = pkgs.writeText "nix-check-plain-user.container" homeManagerPlainRendered;
           nix-check-timer-job-user = pkgs.writeText "nix-check-timer-job-user.container" homeManagerTimerJobRendered;
           nix-check-setup-user = pkgs.writeText "nix-check-setup-user.container" homeManagerSetupRendered;
         };
@@ -1776,15 +1782,28 @@ in
         generated="generated-$scope"
 
         grep -Fx "Type=notify" "$generated/nix-check-$scope.service"
+        if [ "$scope" = user ]; then
+          grep -Fx "NotifyAccess=all" "$generated/nix-check-$scope.service"
+          grep -Fx "ExitType=cgroup" "$generated/nix-check-$scope.service"
+        else
+          ! grep -Fx "ExitType=cgroup" "$generated/nix-check-$scope.service"
+        fi
         grep -F -- "--sdnotify=conmon -d" "$generated/nix-check-$scope.service"
+        if [ "$scope" = user ]; then
+          grep -Fx "ExitType=cgroup" "$generated/nix-check-plain-$scope.service"
+        else
+          ! grep -Fx "ExitType=cgroup" "$generated/nix-check-plain-$scope.service"
+        fi
 
         grep -Fx "Type=oneshot" "$generated/nix-check-timer-job-$scope.service"
         grep -Fx "RemainAfterExit=no" "$generated/nix-check-timer-job-$scope.service"
+        ! grep -Fx "ExitType=cgroup" "$generated/nix-check-timer-job-$scope.service"
         ! grep -F -- "--sdnotify=" "$generated/nix-check-timer-job-$scope.service"
         ! grep -E '^ExecStart=.* -d( |$)' "$generated/nix-check-timer-job-$scope.service"
 
         grep -Fx "Type=oneshot" "$generated/nix-check-setup-$scope.service"
         grep -Fx "RemainAfterExit=yes" "$generated/nix-check-setup-$scope.service"
+        ! grep -Fx "ExitType=cgroup" "$generated/nix-check-setup-$scope.service"
         ! grep -F -- "--sdnotify=" "$generated/nix-check-setup-$scope.service"
         ! grep -E '^ExecStart=.* -d( |$)' "$generated/nix-check-setup-$scope.service"
       done

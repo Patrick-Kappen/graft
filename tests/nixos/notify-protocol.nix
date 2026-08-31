@@ -28,6 +28,39 @@ let
 
   lingerUser = userEval.config.xdg.configFile."containers/systemd/linger-user.container".source;
   loginUser = userEval.config.xdg.configFile."containers/systemd/login-user.container".source;
+  protocolParent = pkgs.writeShellScript "graft-exit-type-protocol-parent" ''
+    set -euo pipefail
+    control=$1
+
+    printf '%s\n' "$BASHPID" > "$control/parent.pid"
+    cat /proc/self/cgroup > "$control/parent.cgroup"
+    (
+      printf '%s\n' "$BASHPID" > "$control/child.pid"
+      cat /proc/self/cgroup > "$control/child.cgroup"
+      : > "$control/child-ready"
+      printf '%s\n' ready > "$control/child-started"
+      IFS= read -r action < "$control/release"
+      case "$action" in
+        notify)
+          : > "$control/notified"
+          ${pkgs.systemd}/bin/systemd-notify --pid="$BASHPID" --ready --status="Graft protocol child ready"
+          exec ${pkgs.coreutils}/bin/sleep infinity
+          ;;
+        exit)
+          exit 0
+          ;;
+        *)
+          echo "unexpected protocol action: $action" >&2
+          exit 1
+          ;;
+      esac
+    ) &
+    printf '%s\n' "$!" > "$control/child-shell.pid"
+    IFS= read -r child_started < "$control/child-started"
+    test "$child_started" = ready
+    ${pkgs.diffutils}/bin/cmp "$control/parent.cgroup" "$control/child.cgroup"
+    : > "$control/parent-returning"
+  '';
 
 in
 {
@@ -69,6 +102,27 @@ in
     environment.etc = {
       "containers/systemd/users/1000/linger-user.container".source = lingerUser;
       "containers/systemd/users/1001/login-user.container".source = loginUser;
+      "graft-exit-type-protocol-parent".source = protocolParent;
+      "systemd/user/graft-exit-type-main.service".text = ''
+        [Service]
+        Type=notify
+        NotifyAccess=all
+        ExecStart=/etc/graft-exit-type-protocol-parent /run/user/%U/graft-exit-type-main
+      '';
+      "systemd/user/graft-exit-type-cgroup.service".text = ''
+        [Service]
+        Type=notify
+        NotifyAccess=all
+        ExitType=cgroup
+        ExecStart=/etc/graft-exit-type-protocol-parent /run/user/%U/graft-exit-type-cgroup
+      '';
+      "systemd/user/graft-exit-type-cgroup-no-notify.service".text = ''
+        [Service]
+        Type=notify
+        NotifyAccess=all
+        ExitType=cgroup
+        ExecStart=/etc/graft-exit-type-protocol-parent /run/user/%U/graft-exit-type-cgroup-no-notify
+      '';
     };
 
     systemd = {
@@ -150,16 +204,22 @@ in
         state = unit_property("ActiveState")
         substate = unit_property("SubState")
         result = unit_property("Result")
+        exit_type = unit_property("ExitType")
         main_pid = unit_property("MainPID")
         control_group = unit_property("ControlGroup")
         observed = (
-            f"{label}: state={state}/{substate} result={result} "
+            f"{label}: state={state}/{substate} result={result} exit_type={exit_type} "
             f"main_pid={main_pid} control_group={control_group}"
         )
         print(observed)
 
         problems = []
-        if state != "active" or substate != "running" or result != "success":
+        if (
+            state != "active"
+            or substate != "running"
+            or result != "success"
+            or exit_type != "cgroup"
+        ):
             problems.append(observed)
         if main_pid == "0":
             problems.append(f"{label}: no main PID")
@@ -177,6 +237,14 @@ in
                 )
         if not control_group.endswith("/app.slice/linger-user.service"):
             problems.append(f"{label}: unexpected control group {control_group}")
+        elif main_pid != "0":
+            cgroup_status, cgroup_output = machine.execute(
+                f"grep -Fx {main_pid} /sys/fs/cgroup{control_group}/cgroup.procs"
+            )
+            if cgroup_status != 0:
+                problems.append(
+                    f"{label}: main PID {main_pid} is absent from {control_group}: {cgroup_output}"
+                )
 
         if problems:
             record_diagnostics(label)
@@ -188,10 +256,103 @@ in
             )
         return problems
 
+    def protocol_control(unit):
+        control = f"/run/user/1000/{unit}"
+        machine.succeed(
+            f"install -d -m 0700 -o 1000 -g 1000 {control}; "
+            f"mkfifo -m 0600 {control}/child-started {control}/release"
+        )
+        return control
+
+    def wait_for_protocol_child(control):
+        machine.wait_for_file(f"{control}/child-ready", timeout=30)
+        parent_pid = machine.succeed(f"cat {control}/parent.pid").strip()
+        child_pid = machine.succeed(f"cat {control}/child.pid").strip()
+        machine.wait_until_succeeds(f"test ! -e /proc/{parent_pid}", timeout=30)
+        machine.succeed(f"cmp {control}/parent.cgroup {control}/child.cgroup")
+        machine.fail(f"test -e {control}/notified")
+        return child_pid
+
+    def protocol_state(unit, expected_state):
+        machine.wait_until_succeeds(
+            user_systemctl(
+                f"show {unit}.service -P ActiveState | grep -Fx {expected_state}"
+            ),
+            timeout=30,
+        )
+        return {
+            property_name: machine.succeed(
+                user_systemctl(
+                    f"show {unit}.service -P {property_name}"
+                )
+            ).strip()
+            for property_name in ["ActiveState", "SubState", "Result", "MainPID", "ControlGroup"]
+        }
+
+    def assert_no_service_cgroup(unit, state):
+        assert state["MainPID"] == "0", f"{unit}: retained main PID {state['MainPID']}"
+        control_group = state["ControlGroup"]
+        if control_group:
+            machine.wait_until_succeeds(
+                f"test ! -e /sys/fs/cgroup{control_group}", timeout=30
+            )
+
+    def run_exit_type_protocol_controls():
+        machine.succeed(
+            "test $(systemctl --version | awk 'NR == 1 { print $2 }') -ge 250"
+        )
+
+        main_unit = "graft-exit-type-main"
+        main_control = protocol_control(main_unit)
+        machine.succeed(user_systemctl(f"start --no-block {main_unit}.service"))
+        wait_for_protocol_child(main_control)
+        main_state = protocol_state(main_unit, "failed")
+        assert main_state["Result"] == "protocol", main_state
+        assert_no_service_cgroup(main_unit, main_state)
+
+        cgroup_unit = "graft-exit-type-cgroup"
+        cgroup_control = protocol_control(cgroup_unit)
+        machine.succeed(user_systemctl(f"start --no-block {cgroup_unit}.service"))
+        cgroup_child = wait_for_protocol_child(cgroup_control)
+        machine.succeed(f"test -e /proc/{cgroup_child}")
+        activating = protocol_state(cgroup_unit, "activating")
+        assert activating["Result"] == "success", activating
+        machine.succeed(f"printf '%s\\n' notify > {cgroup_control}/release")
+        active = protocol_state(cgroup_unit, "active")
+        assert active["SubState"] == "running", active
+        assert active["Result"] == "success", active
+        assert active["MainPID"] == cgroup_child, active
+        control_group = active["ControlGroup"]
+        assert control_group.endswith("/app.slice/graft-exit-type-cgroup.service"), active
+        machine.succeed(f"test -e /proc/{active['MainPID']}")
+        machine.succeed(
+            f"grep -Fx '0::{control_group}' /proc/{active['MainPID']}/cgroup"
+        )
+        machine.succeed(
+            f"grep -Fx {active['MainPID']} /sys/fs/cgroup{control_group}/cgroup.procs"
+        )
+        machine.succeed(user_systemctl(f"stop {cgroup_unit}.service"))
+
+        no_notify_unit = "graft-exit-type-cgroup-no-notify"
+        no_notify_control = protocol_control(no_notify_unit)
+        machine.succeed(user_systemctl(f"start --no-block {no_notify_unit}.service"))
+        no_notify_child = wait_for_protocol_child(no_notify_control)
+        machine.succeed(f"test -e /proc/{no_notify_child}")
+        activating = protocol_state(no_notify_unit, "activating")
+        assert activating["Result"] == "success", activating
+        machine.succeed(f"printf '%s\\n' exit > {no_notify_control}/release")
+        no_notify_state = protocol_state(no_notify_unit, "failed")
+        assert no_notify_state["Result"] == "protocol", no_notify_state
+        assert_no_service_cgroup(no_notify_unit, no_notify_state)
+
     machine.start(allow_reboot=True)
     wait_for_linger_result()
 
     failures = assess_active_unit("initial linger startup")
+    machine.succeed(
+        "grep -Fx 'ExitType=cgroup' /etc/containers/systemd/users/1000/linger-user.container"
+    )
+    run_exit_type_protocol_controls()
     machine.execute(user_systemctl("stop linger-user.service"))
 
     for attempt in range(1, 11):

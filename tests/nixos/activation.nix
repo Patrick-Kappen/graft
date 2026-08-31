@@ -173,6 +173,12 @@ in
           machine.succeed(
               "runuser -u graftlinger -- podman info --format '{{.Host.Security.Rootless}}' | grep -Fx true"
           )
+          machine.succeed(
+              "grep -Fx 'ExitType=cgroup' /etc/containers/systemd/users/1000/linger-user.container"
+          )
+          machine.fail(
+              "grep -Fx 'ExitType=cgroup' /etc/containers/systemd/long-running-system.container"
+          )
 
       with subtest("non-linger workload waits for login"):
           machine.fail("systemctl is-active user@1001.service")
@@ -197,6 +203,9 @@ in
           machine.succeed("test -f /etc/containers/systemd/long-running-system.container")
           machine.fail("grep -Fx 'WantedBy=multi-user.target' /etc/containers/systemd/long-running-system.container")
           machine.succeed("test -f /etc/containers/systemd/users/1000/linger-user.container")
+          machine.succeed(
+              "grep -Fx 'ExitType=cgroup' /etc/containers/systemd/users/1000/linger-user.container"
+          )
           machine.fail(
               "grep -Fx 'WantedBy=default.target' /etc/containers/systemd/users/1000/linger-user.container"
           )
@@ -229,6 +238,9 @@ in
           machine.succeed("test -f /etc/containers/systemd/long-running-system.container")
           machine.fail("grep -Fx 'WantedBy=multi-user.target' /etc/containers/systemd/long-running-system.container")
           machine.succeed("test -f /etc/containers/systemd/users/1000/linger-user.container")
+          machine.succeed(
+              "grep -Fx 'ExitType=cgroup' /etc/containers/systemd/users/1000/linger-user.container"
+          )
           machine.fail(
               "grep -Fx 'WantedBy=default.target' /etc/containers/systemd/users/1000/linger-user.container"
           )
@@ -273,6 +285,9 @@ in
           machine.succeed(
               "grep -Fx 'WantedBy=default.target' /etc/containers/systemd/users/1000/linger-user.container"
           )
+          machine.succeed(
+              "grep -Fx 'ExitType=cgroup' /etc/containers/systemd/users/1000/linger-user.container"
+          )
           job_runs_before_readd_reboot = int(
               machine.succeed("wc -l < /var/lib/graft-activation/job-runs").strip()
           )
@@ -284,6 +299,9 @@ in
           machine.wait_for_unit("long-running-system.service")
           machine.wait_for_unit("user@1000.service")
           wait_for_user_unit(1000, "linger-user.service")
+          machine.succeed(
+              "grep -Fx 'ExitType=cgroup' /etc/containers/systemd/users/1000/linger-user.container"
+          )
           job_runs_after_readd_reboot = int(
               machine.succeed("wc -l < /var/lib/graft-activation/job-runs").strip()
           )

@@ -83,10 +83,12 @@ Manager availability still depends on host policy:
 - if no user manager runs, no user workload can be started by its default target.
 
 Linger, user creation, login sessions, and manager availability are host policy.
-Graft TOML does not mutate them. Future `graft doctor` diagnostics in
-[#101](https://github.com/Patrick-Kappen/graft/issues/101) may report that a
-requested non-root rootless startup workload lacks the required host policy,
-but must not enable linger implicitly.
+Graft TOML does not mutate them. Effective user-target long-running workloads
+require systemd >= 250 because Graft renders its fixed `ExitType=cgroup`
+directive; this does not alter activation policy. Future `graft doctor`
+diagnostics in [#101](https://github.com/Patrick-Kappen/graft/issues/101) may
+report that a requested non-root rootless startup workload lacks the required
+host policy, but must not enable linger implicitly.
 
 ## Lifecycle combinations
 
@@ -243,16 +245,19 @@ The corresponding `activation-runtime` CI job is advisory and is deliberately
 excluded from the aggregate required checks while its cost and runner stability
 are evaluated.
 
-With the tested Podman 5.8.2 and systemd 260.2 combination, a linger-started
-rootless Quadlet workload has intermittently entered `Result=protocol` during
-user-manager bootstrap. The generated service follows Quadlet's `Type=notify`,
-`NotifyAccess=all`, and `--sdnotify=conmon` contract, and the test reports the
-terminal result immediately rather than retrying or masking it as a timeout.
+Before #365, the default `ExitType=main` let a linger-started rootless Quadlet
+workload intermittently enter `Result=protocol` during user-manager bootstrap.
+The generated service retains Quadlet's `Type=notify`, `NotifyAccess=all`, and
+`--sdnotify=conmon -d` contract; #365 adds `ExitType=cgroup` only to the
+effective user long-running case. The test reports a terminal result immediately
+rather than retrying or masking it as a timeout.
 The focused reproducer compares ten starts under an already-running user
 manager with the initial linger bootstrap and eight subsequent full bootstraps
-inside one VM. Each successful start requires conmon to be the main PID in the
-workload service cgroup and records systemd's `MAINPID` and `READY=1`
-attribution. Five debug-enabled local derivation executions produced 45
+inside one VM. Each successful start requires `active/running`,
+`Result=success`, a live conmon main PID, and that PID in the workload service
+cgroup. The debug variant records systemd's `MAINPID` and `READY=1` attribution
+for forensics only; those logs are not acceptance evidence. Five debug-enabled
+local derivation executions produced 45
 successful bootstrap starts and 50 successful active-manager starts. An
 uninstrumented focused local run also completed all 19 starts. In the final
 paired advisory CI run, however, the normal activation VM failed during its
