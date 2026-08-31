@@ -260,7 +260,8 @@ in
         control = f"/run/user/1000/{unit}"
         machine.succeed(
             f"install -d -m 0700 -o 1000 -g 1000 {control}; "
-            f"mkfifo -m 0600 {control}/child-started {control}/release"
+            f"mkfifo -m 0600 {control}/child-started {control}/release; "
+            f"chown 1000:1000 {control}/child-started {control}/release"
         )
         return control
 
