@@ -108,6 +108,17 @@
               inherit pkgs graftPackage;
             }
           );
+          rootless-sdnotify-repro-test = pkgs.testers.runNixOSTest (
+            import ./tests/nixos/rootless-sdnotify-repro.nix {
+              inherit pkgs;
+            }
+          );
+          rootless-sdnotify-repro-debug-test = pkgs.testers.runNixOSTest (
+            import ./tests/nixos/rootless-sdnotify-repro.nix {
+              inherit pkgs;
+              debugLogging = true;
+            }
+          );
           closure-runtime-test = pkgs.testers.runNixOSTest (
             import ./tests/nixos/closure.nix {
               inherit pkgs graftPackage;

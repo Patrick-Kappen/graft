@@ -105,25 +105,36 @@ in
       "graft-exit-type-protocol-parent".source = protocolParent;
     };
 
+    # NOTE(issue-368): `user` must be a single attrset here so that the
+    # debug-only extraConfig merge below cannot clobber `user.services`.
+    # A shallow `//` against the whole `systemd` attrset would replace the
+    # entire `user` submodule, silently dropping the protocol-control units
+    # from the debug variant (every debug run then fails with
+    # "Unit graft-exit-type-main.service not found").
     systemd = {
-      user.services = {
-        graft-exit-type-main.serviceConfig = {
-          Type = "notify";
-          NotifyAccess = "all";
-          ExecStart = "/etc/graft-exit-type-protocol-parent /run/user/%U/graft-exit-type-main";
+      user = {
+        services = {
+          graft-exit-type-main.serviceConfig = {
+            Type = "notify";
+            NotifyAccess = "all";
+            ExecStart = "/etc/graft-exit-type-protocol-parent /run/user/%U/graft-exit-type-main";
+          };
+          graft-exit-type-cgroup.serviceConfig = {
+            Type = "notify";
+            NotifyAccess = "all";
+            ExitType = "cgroup";
+            ExecStart = "/etc/graft-exit-type-protocol-parent /run/user/%U/graft-exit-type-cgroup";
+          };
+          graft-exit-type-cgroup-no-notify.serviceConfig = {
+            Type = "notify";
+            NotifyAccess = "all";
+            ExitType = "cgroup";
+            ExecStart = "/etc/graft-exit-type-protocol-parent /run/user/%U/graft-exit-type-cgroup-no-notify";
+          };
         };
-        graft-exit-type-cgroup.serviceConfig = {
-          Type = "notify";
-          NotifyAccess = "all";
-          ExitType = "cgroup";
-          ExecStart = "/etc/graft-exit-type-protocol-parent /run/user/%U/graft-exit-type-cgroup";
-        };
-        graft-exit-type-cgroup-no-notify.serviceConfig = {
-          Type = "notify";
-          NotifyAccess = "all";
-          ExitType = "cgroup";
-          ExecStart = "/etc/graft-exit-type-protocol-parent /run/user/%U/graft-exit-type-cgroup-no-notify";
-        };
+      }
+      // lib.optionalAttrs debugLogging {
+        extraConfig = "LogLevel=debug";
       };
       tmpfiles.rules = [
         "d /var/lib/graft-activation 0755 root root -"
@@ -139,13 +150,12 @@ in
         };
         script = "touch /var/lib/graft-activation/foreign-unit";
       };
-    }
-    // lib.optionalAttrs debugLogging {
-      user.extraConfig = "LogLevel=debug";
     };
   };
 
   testScript = ''
+    import time
+
     def user_command(arguments):
         return (
             "setpriv --reuid=1000 --regid=$(id -g 1000) --clear-groups "
@@ -174,7 +184,8 @@ in
         print_command(
             user_systemctl(
                 "show linger-user.service "
-                "-P ActiveState -P SubState -P Result -P MainPID -P ControlGroup"
+                "-P ActiveState -P SubState -P Result -P MainPID -P ControlGroup "
+                "-P NotifyAccess -P TimeoutStartUSec -P NRestarts"
             )
         )
         print_command(
@@ -182,8 +193,15 @@ in
             "grep -E '(PID|linger-user|conmon|graft-pause|passt)'"
         )
         print_command(
+            "find /sys/fs/cgroup -type d -name '*linger-user*' "
+            "-exec sh -c 'echo {}; cat {}/cgroup.procs' \\;"
+        )
+        print_command(
             "journalctl -b _UID=1000 --no-pager -o short-monotonic | "
-            "grep -Ei '(linger-user|notify|protocol|conmon)' | tail -n 120"
+            "grep -Ei "
+            "'(linger-user|MAINPID|READY=1|notification message|new main PID|belongs to unit|"
+            "not in our cgroup|does not belong|reception only|sent.*READY|sd_notify|conmon|protocol|timeout|restart)' "
+            "| tail -n 200"
         )
 
     def wait_for_linger_result():
@@ -192,12 +210,26 @@ in
         machine.wait_for_unit("user@1000.service")
         machine.wait_until_succeeds("test -d /run/user/1000", timeout=120)
         machine.wait_for_file("/run/user/1000/bus", timeout=120)
-        machine.wait_until_succeeds(
-            user_systemctl(
-                "show linger-user.service -P ActiveState | grep -Ex '(active|failed)'"
-            ),
-            timeout=120,
-        )
+        deadline = time.time() + 120
+        while True:
+            status, output = machine.execute(
+                user_systemctl("show linger-user.service -P ActiveState")
+            )
+            if output.strip() in ("active", "failed"):
+                return
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                record_diagnostics(
+                    "linger-user.service neither active nor failed after 120s"
+                )
+                print_command(
+                    user_systemctl("list-units --all --no-pager | grep -i linger")
+                )
+                raise Exception(
+                    "linger-user.service did not reach active or failed within 120s; "
+                    "evidence above"
+                )
+            time.sleep(2)
 
     def assess_active_unit(label):
         state = unit_property("ActiveState")
