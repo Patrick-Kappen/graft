@@ -113,6 +113,32 @@
               inherit pkgs graftPackage;
             }
           );
+
+          # Issue #368 local stress screening (TEST-ONLY): the control run
+          # preserves the exact baseline rootless sdnotify protocol
+          # (16 reboot cycles); the second entry applies the single declared
+          # stress variable — a 1-vCPU guest configuration.
+          rootless-sdnotify-stress-control-test = pkgs.testers.runNixOSTest (
+            import ./tests/nixos/stress-repro.nix {
+              inherit pkgs;
+            }
+          );
+          rootless-sdnotify-stress-1vcpu-test = pkgs.testers.runNixOSTest (
+            import ./tests/nixos/stress-repro.nix {
+              inherit pkgs;
+              cores = 1;
+            }
+          );
+
+          # Issue #368 debug-attribution trial (TEST-ONLY): the same control
+          # protocol with precisely ONE deviation — the user manager config is
+          # set to LogLevel=debug via /etc/systemd/user.conf.
+          rootless-sdnotify-debug-log-trial = pkgs.testers.runNixOSTest (
+            import ./tests/nixos/stress-repro.nix {
+              inherit pkgs;
+              debugLogging = true;
+            }
+          );
         }
       );
 
