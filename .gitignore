@@ -4,10 +4,5 @@
 /node_modules/
 /.wrangler/
 
-# Project-local Pi extension; keep other local Pi state untracked.
-!.pi/
-.pi/*
-!.pi/extensions/
-.pi/extensions/*
-!.pi/extensions/graft-orchestrator/
-!.pi/extensions/graft-orchestrator/**
+# Local Pi state stays untracked.
+/.pi/
